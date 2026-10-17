@@ -198,6 +198,9 @@ MAX_PASSWORD_LENGTH = 64
 PBKDF2_ITERATIONS = 100_000
 PBKDF2_SALT_BYTES = 16
 
+#: The SQLite file inside ``data_dir``. Ours (DESIGN §2 "Persistence"; one file, no server).
+DATABASE_FILE_NAME = "opencs.db"
+
 #: The first and last single-digit suffix of a duplicate callsign (``JOINGEN2`` .. ``JOINGEN9``;
 #: II §3: the 8th character is replaced by a digit), then two-digit suffixes
 #: (``JOINGE10`` .. ``JOINGE99``) when those run out. The 9th duplicate and beyond are ours, see
