@@ -16,9 +16,15 @@ from dataclasses import dataclass, field
 class LegCount:
     """One client's count of a guppy's legs (I §9.4.1, I §7.3). A client reports every leg it
     completes, once, in order, so its n-th report is about leg n: ``reports`` is how many it has
-    made, and its next is leg number ``reports``."""
+    made, and its next is leg number ``reports``.
+
+    A client that was introduced after the create leg is *joining*: its copy is at home and its
+    reports drive nothing until it is in step with the guppy. ``caught_up`` is the leg last sent to
+    it as a catch-up, or None while only the create has been sent."""
 
     reports: int = 0
+    joining: bool = False
+    caught_up: int | None = None
 
 
 @dataclass(slots=True)

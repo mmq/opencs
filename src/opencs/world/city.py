@@ -25,6 +25,7 @@ from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.logistics import (
     Action,
+    CatchUp,
     Create,
     Deliver,
     Dispatch,
@@ -453,7 +454,7 @@ class City:
         count = player.view.legs.get(arrival.id)
         if count is None:
             return []
-        return self._perform(self._logistics.report(arrival.id, count), now)
+        return self._perform(self._logistics.report(arrival.id, player.id, count), now)
 
     def _module_order(self, player: Player, order: client.ModuleOrder) -> list[Event]:
         """Module orders are M8's; until then the client is answered "no stock" so it is not left
@@ -474,11 +475,18 @@ class City:
                 case Deliver(job):
                     events += self.place_tower(job.team, job.pos, job.mega, now)
                 case Dispatch(guppy, dest):
+                    # Only clients that count legs for it; one still joining is sent no 'K' for
+                    # this guppy until its copy has reported (I §7.3 step 2).
                     events += [
                         Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id))
                         for p in self.players()
-                        if p.view.holds(guppy.entity_id)
+                        if (count := p.view.legs.get(guppy.entity_id)) is not None
+                        and not count.joining
                     ]
+                case CatchUp(guppy, player_id, dest):
+                    events.append(
+                        Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(player_id))
+                    )
         return events
 
     def place_tower(self, team: int, pos: WirePos, mega: bool, now: float) -> list[Event]:

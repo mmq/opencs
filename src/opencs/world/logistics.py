@@ -102,7 +102,17 @@ class Deliver:
     job: Job
 
 
-type Action = Create | Dispatch | Deliver
+@dataclass(frozen=True, slots=True)
+class CatchUp:
+    """A joining client's copy has reported and the guppy has moved on: send that one client the
+    current destination (I §7.3 step 3)."""
+
+    guppy: Guppy
+    player_id: int
+    dest: WireXZ
+
+
+type Action = Create | Dispatch | Deliver | CatchUp
 
 
 class Guppy:
@@ -130,9 +140,9 @@ class Guppy:
         return (server.MobileCreate(self.entity_id, home_point(self.team)),)
 
     def client_introduced(self, view: ClientView) -> None:
-        """A client was sent the create. While the guppy is still on its create leg the client
-        counts from leg 0 like everyone (I §7.3 step 1)."""
-        view.legs[self.entity_id] = LegCount()
+        """A client was sent the create (I §7.3 step 1). While the guppy is still on its create
+        leg the client counts from leg 0 like everyone; otherwise it is *joining*."""
+        view.legs[self.entity_id] = LegCount(joining=self.phase is not Phase.CREATING)
 
     def enqueue(self, job: Job) -> None:
         """Queue behind the waiting jobs, or, for a priority job, behind the earlier priority ones
@@ -178,7 +188,7 @@ class Logistics:
             guppy.enqueue(job)
         return actions
 
-    def report(self, guppy_id: int, count: LegCount) -> list[Action]:
+    def report(self, guppy_id: int, player_id: int, count: LegCount) -> list[Action]:
         """A client reported that its copy of guppy ``guppy_id`` completed a leg (I §9.4.1).
 
         Matched to a leg by that client's own count, with no timing: its n-th report is leg n.
@@ -188,6 +198,15 @@ class Logistics:
         guppy = next((g for g in self._guppies.values() if g.entity_id == guppy_id), None)
         if guppy is None or guppy.phase is Phase.ABSENT:
             return []
+        if count.joining:
+            # Step 4: while joining, a report drives nothing. The one that brings the client in
+            # step is, when the guppy is in flight, the arrival of the current leg: it carries
+            # on below as an ordinary report; at home it is just the client's create report.
+            catch_up = self._join_step(guppy, player_id, count)
+            if catch_up is not None:
+                return [catch_up]
+            if guppy.phase not in (Phase.OUTBOUND, Phase.RETURNING):
+                return []
         leg = count.reports
         count.reports += 1
         if leg <= guppy.acted:
@@ -197,6 +216,22 @@ class Logistics:
             return []
         guppy.acted = leg
         return self._leg_done(guppy)
+
+    def _join_step(self, guppy: Guppy, player_id: int, count: LegCount) -> CatchUp | None:
+        """A joining client's copy reported (I §7.3 step 3). If the guppy has moved on since the
+        leg last given to this client (it is in flight, or a catch-up was sent and the guppy has
+        changed leg since), return the catch-up that sends the current destination; the client's
+        next report is about that leg. Otherwise the client is in step: count it in and return
+        None. At home its copy is at home too, so its next report is the next leg; in flight,
+        this report is the arrival of the current leg."""
+        in_flight = guppy.phase in (Phase.OUTBOUND, Phase.RETURNING)
+        current = guppy.legs - 1
+        if count.caught_up != current and (in_flight or count.caught_up is not None):
+            count.caught_up = current
+            return CatchUp(guppy, player_id, guppy.dest)
+        count.joining = False
+        count.reports = current if in_flight else guppy.legs
+        return None
 
     def _leg_done(self, guppy: Guppy) -> list[Action]:
         """The guppy's current leg is reported. A job's leg delivers it. Then the guppy takes the
