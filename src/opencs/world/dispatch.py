@@ -106,8 +106,9 @@ def score_handlers(
     def bays(player: Player, msg: ClientMessage, now: float) -> list[Event]:
         """The client's ``'D'``-``'B'``: its bays and battle marker, mirrored (II §11.1)."""
         report = _as(client.Bays, msg)
+        before = player.score.marker  # the marker as it stood before this report
         if player.score.on_bays(report):
-            player.progress.on_bays(report.levels, report.marker)
+            player.progress.on_bays(report.levels, report.marker, before)
         else:
             log.warning("player %d reported a bay level the client cannot hold", player.id)
         return []

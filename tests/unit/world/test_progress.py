@@ -55,21 +55,21 @@ def test_a_status_report_saves_score_and_bay_points_but_has_no_multiplier_to_sav
 
 def test_a_bay_report_saves_the_bays_and_the_marker() -> None:
     p = restored()
-    p.on_bays((3, 2, 1, 1, 5, 4, 0, 1, 3), 4)
+    p.on_bays((3, 2, 1, 1, 5, 4, 0, 1, 3), 4, p.record.marker)
     assert (p.record.bays, p.record.marker) == ((3, 2, 1, 1, 5, 4, 0, 1, 3), 4)
 
 
 def test_a_bay_report_the_client_cannot_hold_is_ignored() -> None:
     p = restored()
     p.take_unsaved()
-    p.on_bays((6, 2, 1, 1, 5, 4, 0, 1, 2), 0)
-    p.on_bays((1, 1, 1), 0)
+    p.on_bays((6, 2, 1, 1, 5, 4, 0, 1, 2), 0, p.record.marker)
+    p.on_bays((1, 1, 1), 0, p.record.marker)
     assert p.record.bays == BAYS and p.take_unsaved() is None
 
 
 def test_a_reported_marker_is_stored_within_the_b88_field() -> None:
     p = restored()
-    p.on_bays(BAYS, BIAS88_MAX + 50)
+    p.on_bays(BAYS, BIAS88_MAX + 50, p.record.marker)
     assert p.record.marker == BIAS88_MAX
     p.on_own_death(BIAS88_MIN - 50)
     assert p.record.marker == BIAS88_MIN
@@ -162,7 +162,7 @@ def test_a_bay_bought_with_points_spends_its_threshold_taken_before_the_upgrade(
     threshold = policy.BAY_UPGRADE_POINTS[level]
     bays = (*([level] + [1] * 8),)
     p = restored(SavedProgress(bays, 0, threshold * 3 + 5, 0, 0))
-    p.on_bays((level + 1, *bays[1:]), 0)
+    p.on_bays((level + 1, *bays[1:]), 0, p.record.marker)
     assert p.record.bay_points == threshold * 2 + 5
     assert p.record.bays[0] == level + 1
 
@@ -173,33 +173,35 @@ def test_the_thresholds_are_the_manuals_six_powers_of_ten() -> None:
 
 def test_the_common_case_floors_at_zero() -> None:
     p = restored(SavedProgress((1, 1, 1, 1, 0, 0, 0, 0, 0), 0, 957, 0, 0))
-    p.on_bays((1, 1, 1, 1, 1, 0, 0, 0, 0), 0)  # the empty bay 5 filled: threshold 1000 > 957
+    p.on_bays(
+        (1, 1, 1, 1, 1, 0, 0, 0, 0), 0, p.record.marker
+    )  # the empty bay 5 filled: threshold 1000 > 957
     assert p.record.bay_points == 0
 
 
 def test_an_upgrade_by_battle_marker_does_not_touch_the_points() -> None:
     p = restored(SavedProgress((1, 1, 1, 1, 0, 0, 0, 0, 0), 1, 957, 0, 0))
-    p.on_bays((1, 1, 1, 1, 1, 0, 0, 0, 0), 0)  # the marker went 1 -> 0 with it
+    p.on_bays((1, 1, 1, 1, 1, 0, 0, 0, 0), 0, p.record.marker)  # the marker went 1 -> 0 with it
     assert p.record.bay_points == 957
 
 
 def test_two_bays_or_two_levels_at_once_is_not_a_points_purchase() -> None:
     bays = (1, 1, 1, 1, 0, 0, 0, 0, 0)
     two_bays = restored(SavedProgress(bays, 0, 5_000, 0, 0))
-    two_bays.on_bays((2, 2, 1, 1, 0, 0, 0, 0, 0), 0)
+    two_bays.on_bays((2, 2, 1, 1, 0, 0, 0, 0, 0), 0, two_bays.record.marker)
     two_levels = restored(SavedProgress(bays, 0, 5_000, 0, 0))
-    two_levels.on_bays((3, 1, 1, 1, 0, 0, 0, 0, 0), 0)
+    two_levels.on_bays((3, 1, 1, 1, 0, 0, 0, 0, 0), 0, two_levels.record.marker)
     assert two_bays.record.bay_points == 5_000 and two_levels.record.bay_points == 5_000
 
 
 def test_a_downgrade_is_not_a_points_purchase() -> None:
     p = restored(SavedProgress((2, 1, 1, 1, 0, 0, 0, 0, 0), 0, 500, 0, 0))
-    p.on_bays((1, 1, 1, 1, 0, 0, 0, 0, 0), 0)
+    p.on_bays((1, 1, 1, 1, 0, 0, 0, 0, 0), 0, p.record.marker)
     assert p.record.bay_points == 500
 
 
 def test_a_purchase_while_the_restore_guard_is_up_does_not_hold_the_next_report() -> None:
     p = restored(SavedProgress((1, 1, 1, 1, 0, 0, 0, 0, 0), 0, 990, 0, 0))
-    p.on_bays((1, 1, 1, 1, 1, 0, 0, 0, 0), 0)  # saved points now 0
+    p.on_bays((1, 1, 1, 1, 1, 0, 0, 0, 0), 0, p.record.marker)  # saved points now 0
     p.on_status(0, 40, 101.0)  # the client's real points, 40 < the 990 it was restored with
     assert p.record.bay_points == 40

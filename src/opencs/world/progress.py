@@ -109,16 +109,21 @@ class Progress:
         """True if ``score`` is under the last SCORE saved this game (the SCORE floor)."""
         return score < self._record.score
 
-    def on_bays(self, levels: tuple[int, ...], marker: int) -> None:
+    def on_bays(self, levels: tuple[int, ...], marker: int, mirrored_marker: int) -> None:
         """The client's ``'D'``-``'B'``: saved as reported, except that a points-driven upgrade
         also spends the points (II §11.3).
 
-        When exactly one bay is one level up and the marker is as saved, the bay was bought with
-        bay points; the client sends no ``'D'``-``'S'`` for it, so until its next one the record
-        would hold the new bay *and* the unspent points, and a drop would re-award the bay on
-        restore. The saved points become ``max(0, saved - threshold)``, the threshold taken at the
-        bay's level before the upgrade. The floor is the common case (the last report is nearly
-        always just under the threshold) and 0 is the only value that cannot re-award the bay."""
+        When exactly one bay is one level up and the marker is as it was before this report, the bay
+        was bought with bay points. "As it was" is the mirror's marker (``mirrored_marker``, which
+        holds an earned kill's +1 that is never saved), not the saved one: a kill-driven upgrade
+        reports marker 0 against a mirrored 1 and is not a purchase, and a purchase after an
+        unsaved kill reports 1 against 1 and is (II §11.3).
+
+        A purchase sends no ``'D'``-``'S'``, so until the next one the record would hold the new
+        bay *and* the unspent points, and a drop would re-award the bay on restore. The saved
+        points become ``max(0, saved - threshold)``, the threshold taken at the bay's level before
+        the upgrade. The floor is the common case (the last report is nearly always just under the
+        threshold) and 0 is the only value that cannot re-award the bay."""
         if len(levels) != limits.BAY_COUNT or any(
             not 0 <= level <= policy.MAX_MODULE_LEVEL for level in levels
         ):
@@ -127,7 +132,11 @@ class Progress:
         old = self._record
         points = old.bay_points
         changed = [(b, a) for b, a in zip(old.bays, levels, strict=True) if a != b]
-        if marker == old.marker and len(changed) == 1 and changed[0][1] - changed[0][0] == 1:
+        if (
+            marker == clamp_marker(mirrored_marker)
+            and len(changed) == 1
+            and changed[0][1] - changed[0][0] == 1
+        ):
             points = max(0, points - policy.BAY_UPGRADE_POINTS[changed[0][0]])
             if self._guard is not None:
                 # The client has spent them: do not hold its next report for points it lacks.

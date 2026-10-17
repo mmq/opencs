@@ -128,3 +128,35 @@ def test_all_progress_lists_every_kept_player_whether_or_not_it_changed() -> Non
     assert c.all_progress() == [
         ProgressChanged(KEY, SavedProgress(BAYS, -2, 957, score=0, career=2170))
     ]
+
+
+def _earn_a_kill(c: City, pid: int) -> None:
+    """What ``death.settle`` does to the payee: the mirror's marker goes up, the record's does not
+    (II §11.3)."""
+    player = c.player(pid)
+    assert player is not None
+    player.score.marker += 1
+
+
+def test_an_upgrade_driven_by_an_earned_kill_is_not_a_points_purchase() -> None:
+    saved = SavedProgress((1,) * 9, 0, 5_000, 0, 0)
+    c, pid = join(saved)
+    c.client_message(pid, report(4), 5.0)
+    c.take_progress()
+    _earn_a_kill(c, pid)  # the mirror's marker is 1, the record's 0
+    # The client spends the kill on its lowest bay and resets the marker: bay 6 was empty.
+    c.client_message(pid, client.Bays((1, 1, 1, 1, 1, 1, 1, 1, 2), 0), 20.0)
+    (note,) = c.take_progress()
+    assert note.record.bay_points == 5_000
+
+
+def test_a_purchase_after_an_unsaved_kill_is_still_a_purchase() -> None:
+    saved = SavedProgress((2,) * 9, 0, 150_000, 0, 0)
+    c, pid = join(saved)
+    c.client_message(pid, report(4), 5.0)
+    c.take_progress()
+    _earn_a_kill(c, pid)  # marker 1 in the mirror, no upgrade (every bay is level 2)
+    # Bay 0 bought with points (2 -> 3), the marker still 1 as the client holds it.
+    c.client_message(pid, client.Bays((3, 2, 2, 2, 2, 2, 2, 2, 2), 1), 20.0)
+    (note,) = c.take_progress()
+    assert note.record.bay_points == 50_000  # less the 100 000 threshold of a level-2 bay
