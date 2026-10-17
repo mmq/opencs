@@ -50,7 +50,7 @@ def creates(msgs: list[server.MobileCreate | object]) -> list[server.MobileCreat
     return [m for m in msgs if isinstance(m, server.MobileCreate)]
 
 
-def test_a_joiner_during_the_first_leg_counts_like_everyone_and_is_latched_with_them() -> None:
+def test_a_joiner_even_in_the_first_leg_is_joining_because_its_copy_started_late() -> None:
     t = trip()
     c, a, one = t.c, t.a, t.one
     late, got = join_late(c, 12.0)
@@ -58,9 +58,17 @@ def test_a_joiner_during_the_first_leg_counts_like_everyone_and_is_latched_with_
         server.MobileCreate(FIRST, xz(*HOME)),
         server.MobileCreate(FIRST, xz(*T1)),
     ]
-    out = arrive(c, a, FIRST, 16.0)
-    assert latches(out, late) == [server.SendMuncher(FIRST, one)]
-    assert arrive(c, late, FIRST, 16.6) == []  # its own report of the same leg: a duplicate
+    # The others' arrival latches them; the late copy is still flying and is not told.
+    assert latches(arrive(c, a, FIRST, 16.0), late) == []
+    # Its own report is then the arrival: it is latched, once.
+    assert latches(arrive(c, late, FIRST, 20.0), late) == [server.SendMuncher(FIRST, one)]
+
+
+def test_a_client_present_when_it_was_called_flies_it_from_the_start_like_everyone() -> None:
+    t = trip()
+    c, a, b, one = t.c, t.a, t.b, t.one
+    assert not c.player(b).view.munchers[FIRST].joining  # type: ignore[union-attr]
+    assert latches(arrive(c, a, FIRST, 16.0), b) == [server.SendMuncher(FIRST, one)]
 
 
 def test_a_joiner_is_created_where_the_current_leg_began_and_dispatched_at_once() -> None:

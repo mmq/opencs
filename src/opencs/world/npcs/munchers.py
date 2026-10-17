@@ -83,6 +83,8 @@ class Muncher:
     from_x: int
     from_z: int
     free: bool = False
+    #: True while the city is spawning it: the clients introduced then all start it together.
+    spawning: bool = False
     phase: Phase = Phase.TRAVEL
     target: int | None = None
     eat_until: float = 0.0
@@ -104,10 +106,12 @@ class Muncher:
         )
 
     def client_introduced(self, view: ClientView) -> None:
-        """A client was sent the create and the dispatch. While the first leg is still the one in
-        force it counts like everyone; otherwise it is *joining* (I §7.3)."""
+        """A client was sent the create and the dispatch. Those present when the Muncher was made
+        fly it together and count like everyone; any later one, even in the first leg, has a copy
+        that started late, which a latch can overtake (so it never reports that leg): it is
+        *joining* until that copy has reported (I §7.3)."""
         view.munchers[self.entity_id] = MuncherSync(
-            joining=not (self.legs == 1 and self.acted == 0), sent_leg=self.legs, owed=1
+            joining=not self.spawning, sent_leg=self.legs, owed=1
         )
 
 
@@ -166,6 +170,7 @@ class Munchers:
         else:
             self._aim_at(m, target)
         self.alive[entity_id] = m
+        m.spawning = True
         log.info(
             "%s Muncher %d created at (%d, %d), %s",
             "free" if free else "called",
@@ -174,7 +179,9 @@ class Munchers:
             z,
             "leaving" if m.target is None else f"for tower {m.target}",
         )
-        return self._host.spawn(m, now)
+        events = self._host.spawn(m, now)
+        m.spawning = False
+        return events
 
     # --- choosing a leg ----------------------------------------------------------------------
 
