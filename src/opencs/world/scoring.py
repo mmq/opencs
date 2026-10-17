@@ -85,6 +85,10 @@ class PlayerScore:
     bay_points: int = 0
     bays: tuple[int, ...] = policy.NEW_PLAYER_BAYS
     marker: int = policy.NEW_PLAYER_MARKER
+    #: What the server computed it paid this player for kills: informational. The client credits
+    #: itself, and its own figure, readable from its next ``'D'``-``'S'``, is the truth (I §9.2.9
+    #: step 2).
+    server_credit: int = 0
     #: When the pod last died and the multiplier floor has not yet been applied (II §12).
     floor_pending_since: float | None = field(default=None, repr=False)
 

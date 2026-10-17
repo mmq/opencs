@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from opencs import policy
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, ServerMessage, client, server
-from opencs.world import chat, relay
+from opencs.world import chat, relay, scoring
 from opencs.world.combat import HitSet, ShotLog, damage_to_victim
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
@@ -422,15 +422,49 @@ class City:
         return entity_id in self._live and entity_id not in self._players
 
     def _died(self, player: Player, now: float) -> list[Event]:
-        """The client's bare ``'J'``: its pod died. ``'J'`` goes to every client first, and only
-        then is the bounty zeroed and pushed, because nothing on the client clears the field and
-        the payees' clients credit themselves from their copy when the ``'J'`` lands (I §9.2.8, II
-        §11.2, I §9.2.9 step 2, I §9.2.9 step 3). A second ``'J'`` before the respawn changes
-        nothing."""
-        events = player.pod.on_death(now)
-        if events:
-            events += player.bounty.zero()
-        return events
+        """The client's bare ``'J'``: its pod died (I §9.2.9). In this order:
+
+        1. Every non-teammate in the victim's 20 s hit set is paid the victim's entire bounty times
+           its own multiplier. The client credits itself, so this is the server's record only.
+        2. Each payee is sent ``'E'``-``'K'``, earned or not. The wire order is the spec's listing:
+           these before the ``'J'``.
+        3. The victim's mirror takes the client's silent reset (multiplier 1, marker down one).
+        4. ``'J'`` goes to every client, the victim's too.
+        5. Only then the bounty is zeroed and pushed (the payees' clients read their copy of it
+           when the ``'J'`` lands), and the hit set is cleared.
+
+        A second ``'J'`` before the respawn changes nothing.
+        """
+        died = player.pod.on_death(now)
+        if not died:
+            return []
+        bounty = player.bounty.value(now)
+        events: list[Event] = []
+        for payee in self._payees(player, now):
+            paid = scoring.payout(payee.id, bounty, payee.score.multiplier)
+            earned = scoring.is_earned_kill(player.score, payee.score)
+            payee.score.server_credit += paid.points
+            if earned:
+                payee.score.marker += 1  # the client does this itself on the notice
+            log.info(
+                "player %d paid %d (bounty %d x %d) for the death of %d; %s kill",
+                payee.id,
+                paid.points,
+                paid.bounty,
+                paid.multiplier,
+                player.id,
+                "earned" if earned else "not earned",
+            )
+            events.append(Event(server.KillNotice(earned), ToPlayer(payee.id)))
+        player.score.on_own_death(now)
+        player.hits.clear()
+        return events + died + player.bounty.zero()
+
+    def _payees(self, victim: Player, now: float) -> list[Player]:
+        """The players to pay for a death: those in the victim's hit set within the window, still
+        in the city, and not on the victim's team (I §9.2.8, II §11.2)."""
+        found = (self._players.get(pid) for pid in victim.hits.payees(now))
+        return [p for p in found if p is not None and p.team != victim.team]
 
 
 def _as[M: ClientMessage](kind: type[M], msg: ClientMessage) -> M:
