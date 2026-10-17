@@ -22,8 +22,8 @@ whole sessions' worth of chunks are reassembled with the production `FrameReader
 `t` is seconds since the log's first game or Chamber line, three decimals. Older runs (July 2026)
 logged only the client's bytes, so their files have no `S` lines.
 
-Regenerate a file with `uv run python tools/make_fixture.py <log> -o <file>`; add `--chamber` to keep
-the ASCII phase for M3's session tests.
+Regenerate a file with `uv run python tools/make_fixture.py <log> -o <file>`; add `--info-frames` for a log without `game tx` lines (the server frames are then lifted from the INFO lines); add `--chamber`
+to keep the ASCII phase for M3's session tests.
 
 ### What the curated set covers
 
@@ -55,6 +55,15 @@ contested attribution run: 15 own shots, 46 Sentinel shots), `2026-09-03-104918_
 `2026-09-02-000110_001` (8 deaths), `2026-07-29-*`, `2026-07-30-*` and `2026-08-30-152217_*` (two-player
 deaths). The runs `2026-07-30-213906_001/002` are left out: they hold the short client `'b'` frames that do
 not decode (I §4.1).
+
+### Fixtures added for M8 (the loadout ledger replay)
+
+| file | what it is for |
+|---|---|
+| `2026-07-29-015155_001-module-rack` | three `'Q'` sub 5 installs the client never took; made with `--info-frames`, because the log has no `game tx` lines and carries the server frames as hex on INFO lines |
+| `2026-10-13-141108_007-resume-p1` | module installs and server traffic in a `/RESUME` run |
+| `2026-10-15-141418_005-resume-p1`, `2026-10-15-141418_007-resume-p1` | the same, two more resume runs |
+| `2026-10-15-175552_002-new-city-p1` | module installs in a new-city run |
 
 ### Runs that are not in the corpus
 

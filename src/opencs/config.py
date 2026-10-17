@@ -12,6 +12,7 @@ from typing import Any
 
 from opencs import policy
 from opencs.messages import limits
+from opencs.messages.catalog import is_module_index
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -199,7 +200,6 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
                 "balance_teams", tuple(range(policy.TEAM_COUNT)), low=0, high=policy.TEAM_COUNT - 1
             ),
         ),
-        # The modules milestone will check each entry against the real catalog (I §9.3.1).
         banned_modules=table.int_list(
             "banned_modules",
             (),
@@ -210,6 +210,9 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
         blocks=table.block_rows("blocks"),
     )
     table.done()
+    for index in config.banned_modules:
+        if not is_module_index(index):  # 10, 19, 20... are inside 1-47 but name no module
+            raise table.fail("banned_modules", f"{index} is not a module index (I §9.3.1)")
     if config.blocks is not None:
         # I §9.2.6: the client's 16-bit income product must not overflow.
         total = sum(limits.BLOCK_VALUES[c] for row in config.blocks for c in row)

@@ -12,23 +12,33 @@ nobody left it is reset, so the next game starts fresh (``leave``); M10 keeps it
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, client, server
+from opencs.messages import ClientMessage, client, limits, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
+from opencs.world.dispatch import (
+    Handler,
+    check_loadout,
+    module_handlers,
+    score_handlers,
+    start_status,
+)
+from opencs.world.effects import Effects
 from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
+from opencs.world.modules import Drops, ModuleRules
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
+from opencs.world.weather import WEATHER_KEY, Weather
 
 log = logging.getLogger("opencs.world")
 
@@ -62,8 +72,14 @@ class City:
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
+        #: The city's weather condition, sent on a client's first report and on every change.
+        self.weather = Weather()
         #: Tower orders, the team guppies and the standing towers (I §9.4).
-        self.orders = Orders(self, self._territory)
+        rules = ModuleRules(config.max_module_level, frozenset(config.banned_modules))
+        self.drops = Drops(self, rules)
+        self.orders = Orders(self, self._territory, rules, self.drops)
+        #: The effect modules (I §9.3.5, II §16.1).
+        self.effects = Effects(self, self.orders, self.weather, rules)
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -73,27 +89,16 @@ class City:
         #: report naming the reporter's own pod (I §9.1.4 corollary).
         self.unrelayable_damage = 0
         self.own_pod_hit_reports = 0
-        self._handlers: dict[
-            type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
-        ] = {
+        self._handlers: dict[type[ClientMessage], Handler] = {
+            **module_handlers(self.orders, self.drops, self.effects),
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
-            client.Status: lambda p, m, now: self._status(p, _as(client.Status, m), now),
-            client.Bays: lambda p, m, now: self._bays(p, _as(client.Bays, m)),
+            **score_handlers(self.config.max_module_level, self.config.max_multiplier),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.Grenade: lambda p, m, now: [
                 Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
             ],
             client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
             client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
-            client.TowerOrder: lambda p, m, now: self.orders.tower_order(
-                p, _as(client.TowerOrder, m), now
-            ),
-            client.ModuleOrder: lambda p, m, now: self.orders.module_order(
-                p, _as(client.ModuleOrder, m)
-            ),
-            client.LegArrived: lambda p, m, now: self.orders.leg_arrived(
-                p, _as(client.LegArrived, m), now
-            ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -140,6 +145,9 @@ class City:
             raise
         player = Player(player_id, callsign, team, index, ClientView(player_id, now))
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
+        # A fresh client already shows its own default palette (I §8.20), which is a client fact,
+        # not the city's starting condition: it is sent one only once the weather differs from it.
+        player.view.tell(WEATHER_KEY, limits.CLIENT_DEFAULT_PALETTE)
         self._players[player_id] = player
         return JoinResult(player_id, team, player.index, hello)
 
@@ -168,6 +176,9 @@ class City:
         self._ids = IdSpace()
         self._live.clear()
         self.orders.reset()
+        self.drops.reset()
+        self.weather.reset()
+        self.effects.reset()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -210,6 +221,7 @@ class City:
         then the relay to the clients that hold it (I §8.24)."""
         first = not player.pod.has_reported
         phase = player.pod.phase
+        check_loadout(player, report)
         events = player.pod.on_report(report, now)
         if first:
             player.grace.arm(now)  # a spawn (I §9.1.5)
@@ -228,7 +240,7 @@ class City:
                 for e in events
             ]
             events += self._go_live(player, now)
-            events += self._start_status(player)
+            events += start_status(player, self.multiplier_floor)
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
             events.append(
                 Event(
@@ -242,32 +254,6 @@ class City:
     def multiplier_floor(self) -> int:
         """The multiplier a spawn is raised to in this city (II §12)."""
         return multiplier_floor(self.config.max_module_level, self.config.max_multiplier)
-
-    def _start_status(self, player: Player) -> list[Event]:
-        """A session's status: ``'D'``-``'B'`` first, then ``'D'``-``'S'``, to the player alone
-        (I §9.2.11, II §11.3, I §7.8). Without ``'D'``-``'B'`` the client's multiplier and SCORE
-        never run (I §9.2.3). It goes with the first ``'b'``, not with the ``'B'``: the client is
-        then past its load (a still-loading client's ring is nearly full of ``'B'`` repeats, I §7.1,
-        II §7), and it is when test servers sent it (I §7.1). ``player.score`` is where M10 puts a
-        saved player's bays, marker and bay points."""
-        return [
-            Event(message, ToPlayer(player.id))
-            for message in player.score.start_message(self.multiplier_floor)
-        ]
-
-    def _status(self, player: Player, report: client.Status, now: float) -> list[Event]:
-        """The client's ``'D'``-``'S'``: mirrored, and answered with the multiplier floor when one
-        is due after a death (II §12)."""
-        pushes = player.score.on_status(
-            report, now, self.multiplier_floor, self.config.max_multiplier
-        )
-        return [Event(m, ToPlayer(player.id)) for m in pushes]
-
-    def _bays(self, player: Player, report: client.Bays) -> list[Event]:
-        """The client's ``'D'``-``'B'``: its bays and battle marker, mirrored (II §11.1)."""
-        if not player.score.on_bays(report):
-            log.warning("player %d reported a bay level the client cannot hold", player.id)
-        return []
 
     def spawn(self, entity: Entity, now: float) -> list[Event]:
         """A new entity (a pod, tower, drop, mine, Sentinel, guppy or Muncher): every client that
@@ -287,11 +273,11 @@ class City:
     def release_structure_id(self, entity_id: int, now: float) -> None:
         self._ids.release(IdRange.STRUCTURE, entity_id, now)
 
-    def refuse_order(self, player_id: int) -> list[Event]:
-        """A tower order the session did not pass on (over the order budget): see
+    def refuse_order(self, player_id: int, message: ClientMessage) -> list[Event]:
+        """A tower or module order the session did not pass on (over the order budget): see
         ``Orders.refuse_order``."""
         player = self._players.get(player_id)
-        return [] if player is None else self.orders.refuse_order(player)
+        return [] if player is None else self.orders.refuse_order(player, message)
 
     def despawn(self, entity_id: int) -> None:
         """The entity is gone: later joiners are not given it. Clients are told by the caller."""
@@ -320,6 +306,7 @@ class City:
         I §7.3). Players that have not reported yet are introduced when they do."""
         events: list[Event] = []
         events += inform(self._territory, player.view, now)
+        events += inform(self.weather, player.view, now)
         for entity in self._live.values():
             events += introduce(entity, player.view, now)
         self._live[player.id] = player
@@ -408,11 +395,14 @@ class City:
     def _hit_entity(
         self, reporter: Player, hit: client.HitReport, credited: bool, now: float
     ) -> list[Event]:
-        """A hit on something that is not a player's pod. A tower loses hit points (II §10); a
-        Sentinel, Muncher or mine is M9's, and until then the report is ignored."""
+        """A hit on something that is not a player's pod. A tower loses hit points (II §10); a mine
+        is ignored; a Sentinel or Muncher is M9's, and until then it is ignored too."""
         tower = self.orders.towers.get(hit.target)
         if tower is not None:
             return self.orders.hit_tower(reporter, tower, hit, now)
+        if hit.target in self.effects.mines:
+            log.debug("player %d hit mine %d; mines have no durability", reporter.id, hit.target)
+            return []  # mines have no durability (ours)
         log.debug(
             "player %d hit entity %d (credited=%s); not ruled yet",
             reporter.id,
@@ -431,6 +421,7 @@ class City:
         died = player.pod.on_death(now)
         if not died:
             return []
+        player.loadout.clear()  # the client empties every bay on its death (I §9.3.4, II §13)
         return death.settle(player, self._payees(player, now), died, now)
 
     def _payees(self, victim: Player, now: float) -> list[Player]:

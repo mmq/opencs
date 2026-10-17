@@ -23,6 +23,10 @@ CHAT_STYLE_TEAM = 1
 AMBIENT_PALETTE_MAX = 4
 AMBIENT_RAIN_MAX = 3
 
+#: The palette a client shows when it launches: 0, "bright daylight", "the default". A new client is
+#: already in it, whatever condition the city starts in. I §8.20, I §8.22, I §5.5.
+CLIENT_DEFAULT_PALETTE = 0
+
 #: Block classes the client's value table holds: 0-3. I §8.20.
 BLOCK_CLASS_MAX = 3
 

@@ -185,7 +185,7 @@ def test_the_first_order_creates_the_guppy_for_every_playing_client_once() -> No
     assert not [m for _, m in again if isinstance(m, server.MobileCreate)]
 
 
-def test_a_module_order_is_answered_with_no_stock_to_the_sender_only() -> None:
+def test_a_module_above_the_city_level_is_answered_no_stock_to_the_sender_only() -> None:
     c, (a, _b) = playing([0, 1])
     out = deliveries(c, c.client_message(a, client.ModuleOrder(21, 1, 0), 5.0))
     assert out == [(a, server.ModuleReply(21, 0))]

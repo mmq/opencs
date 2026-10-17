@@ -4,6 +4,10 @@ A.2, I §7.8)."""
 
 from __future__ import annotations
 
+import logging
+
+import pytest
+
 from fixtures.pods import report
 from fixtures.sessions import Harness, World, enter_lobby, make_world, play
 from opencs import policy
@@ -11,6 +15,7 @@ from opencs.messages import (
     ClientMessage,
     ServerMessage,
     WirePos,
+    WireXZ,
     client,
     client_payload,
     decode_client,
@@ -470,3 +475,56 @@ def test_a_tower_order_over_the_order_budget_is_answered_queue_full_so_the_point
         == [server.OrderReply(policy.ORDER_BAD_DROP_POINT)] * burst
         + [server.OrderReply(policy.ORDER_QUEUE_FULL)] * 2
     )
+
+
+# --- hostile module and effect inputs never raise out of the session (DESIGN §5) -----------------
+
+
+def reported_game() -> Harness:
+    h = play(make_world())
+    h.feed(frame(report(4)))
+    sent(h)
+    return h
+
+
+def test_orders_for_no_catalog_module_beyond_their_burst_keep_the_connection_open(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # The over-budget refusal answers a module order; for index 10 there is no reply to build.
+    h = reported_game()
+    burst, _ = policy.RELAY_LIMIT_ORDER
+    order = frame(client.ModuleOrder(10, 1, 0))
+    h.feed(order * (burst + 1))
+    assert not h.io.closed
+    assert h.session.phase._bad.total == 1  # type: ignore[attr-defined]
+    assert sent(h) == []
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        client.ModuleOrder(0, 1, 0),
+        client.ModuleOrder(48, 1, 0),
+        client.EjectRequest(10),
+        client.EjectRequest(0),
+        client.ModuleUsedUp(10),
+        client.ModuleUsedUp(47),
+        client.PickupRequest(0),
+        client.PickupRequest(9999),
+        client.ModuleRested(8192, WirePos(1, 1, 1, 1, 1)),
+        client.EffectRequest("C"),
+        client.EffectRequest("S"),
+        client.AirSupport(0, WireXZ(0, 0, 0, 0)),
+        client.LegArrived(0),
+        client.LegArrived(8192),
+    ],
+)
+def test_module_and_effect_messages_that_name_nothing_never_raise_out_of_the_session(
+    message: ClientMessage, caplog: pytest.LogCaptureFixture
+) -> None:
+    h = reported_game()
+    h.feed(frame(message))
+    h.feed(frame(report(1, y=229)))  # still alive and playing afterward
+    assert not h.io.closed
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]

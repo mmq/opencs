@@ -75,3 +75,20 @@ def test_a_bad_checksum_frame_is_not_emitted(tmp_path: Path) -> None:
     log = tmp_path / "bad.log"
     log.write_text("\n".join(f"2026-10-16 10:00:00.000 DEBUG game rx  1: {b:02x}" for b in frame))
     assert list(load_tool().fixture_lines(log)) == []
+
+
+def test_server_frames_on_info_lines_are_lifted_only_when_asked_and_only_without_game_tx(
+    tmp_path: Path,
+) -> None:
+    frame = build_frame(b"Q\x10\x15")
+    info = f"01:52:36.721 INFO [t=8.9s] MODULE 1/3: install 11  {spaced(frame)}"
+    plain = tmp_path / "plain.log"
+    plain.write_text("01:52:36.000 INFO start\n" + info + "\n")
+    tool = load_tool()
+    assert list(tool.fixture_lines(plain)) == []
+    assert list(tool.fixture_lines(plain, info_frames=True)) == [f"0.721 S {frame.hex()}"]
+
+    # A log that has game tx lines already holds every server frame: the dumps would repeat them.
+    has_tx = tmp_path / "tx.log"
+    has_tx.write_text(f"01:52:36.000 DEBUG game tx {len(frame)}: {spaced(frame)}\n{info}\n")
+    assert list(tool.fixture_lines(has_tx, info_frames=True)) == [f"0.000 S {frame.hex()}"]

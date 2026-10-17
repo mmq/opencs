@@ -19,7 +19,7 @@ from enum import Enum, auto
 
 from opencs import policy
 from opencs.messages import ServerMessage, WirePos, WireXZ, server
-from opencs.wire.codec import CELL_SIZE
+from opencs.wire.codec import CELL_SIZE, CITY_CELLS
 from opencs.world.view import ClientView, LegCount
 
 #: A tile of the 3x3 around an enemy corner is within this many tiles of it. I §9.4.
@@ -44,6 +44,17 @@ def in_enemy_no_drop_zone(team: int, pos: WirePos) -> bool:
     )
 
 
+def in_home_zone(team: int, pos: WirePos) -> bool:
+    """Whether ``pos`` is in the team's own corner tile or the three off-map tiles beside it, where
+    a module arrives at once with no guppy (I §9.4.3)."""
+    cx, cz = policy.TEAM_CORNER_CELLS[team]
+    tx, tz = tile_of(pos.world_x, pos.world_z)
+    last = CITY_CELLS - 1
+    off_x = -1 if cx == 0 else last + 1  # the off-map tile beside the corner, on each axis
+    off_z = -1 if cz == 0 else last + 1
+    return tx in (cx, off_x) and tz in (cz, off_z)
+
+
 def home_point(team: int) -> WireXZ:
     """The center of the team's corner tile: where its guppy is created and waits (I §9.4.3)."""
     cx, cz = policy.TEAM_CORNER_CELLS[team]
@@ -66,8 +77,38 @@ class TowerJob:
         return WireXZ(self.pos.cell_x, self.pos.cell_z, self.pos.x_off, self.pos.z_off)
 
 
-#: What a guppy can be asked to carry. M8 adds module deliveries and Air Support.
-type Job = TowerJob
+@dataclass(frozen=True, slots=True)
+class ModuleJob:
+    """Deliver ``module`` to ``pos``, the drop point fixed when it was ordered (I §9.4)."""
+
+    team: int
+    module: int
+    pos: WirePos
+    priority: bool
+    orderer: int
+
+    @property
+    def destination(self) -> WireXZ:
+        return WireXZ(self.pos.cell_x, self.pos.cell_z, self.pos.x_off, self.pos.z_off)
+
+
+@dataclass(frozen=True, slots=True)
+class AirSupportJob:
+    """Fly to ``pos`` and drop a grenade there (I §9.3.6): the point is the request's, at the
+    requester's last reported altitude."""
+
+    team: int
+    pos: WirePos
+    priority: bool
+    requester: int
+
+    @property
+    def destination(self) -> WireXZ:
+        return WireXZ(self.pos.cell_x, self.pos.cell_z, self.pos.x_off, self.pos.z_off)
+
+
+#: What a guppy can be asked to carry or do.
+type Job = TowerJob | ModuleJob | AirSupportJob
 
 
 class Phase(Enum):
@@ -170,6 +211,11 @@ class Logistics:
         (II §14)."""
         guppy = self._guppies.get(team)
         return guppy is not None and len(guppy.queue) >= policy.MAX_WAITING_TOWER_ORDERS
+
+    def queue_saturated(self, team: int) -> bool:
+        """Whether the team's queue is at the safety bound ``MAX_WAITING_JOBS`` (DESIGN §5)."""
+        guppy = self._guppies.get(team)
+        return guppy is not None and len(guppy.queue) >= policy.MAX_WAITING_JOBS
 
     def order(self, job: Job) -> list[Action]:
         """Accept a job. The guppy is created the first time it is needed; a job is started

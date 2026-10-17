@@ -12,6 +12,12 @@ from dataclasses import dataclass
 LEVEL_STRIDE = 10
 
 
+#: Modules whose activation sets the pod's flag byte bit 0, which adds ``ACTIVE_MODULE_WEIGHT`` to
+#: the weight in every ``'b'``: High Jump and Performance (I §9.3.4, II §13).
+WEIGHT_FLAG_MODULES = frozenset({2, 35})
+ACTIVE_MODULE_WEIGHT = 100
+
+
 @dataclass(frozen=True, slots=True)
 class Module:
     """One catalog row (I §9.3.1)."""
@@ -67,6 +73,22 @@ CATALOG: dict[int, Module] = {
     45: Module(45, "Drone", 5, 1, 2),
     46: Module(46, "Deflector", 5, 5, 0),
     47: Module(47, "Turret", 5, 4, 0),
+}
+
+
+#: The module each effect request letter comes from: ``'E'`` sub letter to catalog index (I §9.3.5,
+#: II §16.1, I §9.3.1). ``'A'`` is Air Support.
+EFFECT_MODULES = {
+    "R": 6,
+    "W": 15,
+    "H": 18,
+    "L": 31,
+    "M": 16,
+    "D": 29,
+    "I": 11,
+    "A": 32,
+    "C": 17,
+    "S": 36,
 }
 
 

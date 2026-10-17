@@ -28,6 +28,19 @@ def damage_of(damage_byte: int) -> int | None:
     return limits.DAMAGE_BASE[weapon]
 
 
+@dataclass(slots=True)
+class Mine:
+    """An IFF mine: who laid it and where (I §9.3.5). Its model is its team's."""
+
+    entity_id: int
+    team: int
+    pos: WirePos
+
+    def creating_messages(self, now: float) -> Sequence[ServerMessage]:
+        """``'F'``: a late joiner gets the same message as first sent (I §7.3)."""
+        return (server.SpawnMine(self.entity_id, self.team, self.pos),)
+
+
 class TowerHit(Enum):
     """What one hit report did to a tower."""
 
@@ -46,8 +59,11 @@ class Tower:
     mega: bool
     hp: int
     max_hp: int
-    #: When Muncher immunity ends (M8's Immunize); a tower starts without it. I §9.5.2, II §16.2.
+    #: When Muncher immunity ends (Immunize); a tower starts without it. I §9.3.5, I §9.5.2, II
+    #: §16.2.
     immune_until: float = 0.0
+    #: Whether Harden has doubled it: it does not stack. I §9.3.5, II §16.1.
+    hardened: bool = False
 
     @classmethod
     def new(cls, entity_id: int, team: int, pos: WirePos, mega: bool) -> Tower:
@@ -63,6 +79,28 @@ class Tower:
         """The ``'M'`` that spawns it, no carrier, falling from the ordered point (I §9.4).
         A late joiner gets the same message as first sent (I §7.3)."""
         return (server.SpawnTower(0, self.entity_id, self.team, self.pos, 1 if self.mega else 0),)
+
+    def repair(self) -> None:
+        """Repair: back to full, to its maximum as it now is (I §9.3.5, II §16.1)."""
+        self.hp = self.max_hp
+
+    def harden(self) -> bool:
+        """Harden: double current and maximum hit points, once (I §9.3.5, II §16.1). False if it
+        already was."""
+        if self.hardened:
+            return False
+        self.hardened = True
+        self.hp *= 2
+        self.max_hp *= 2
+        return True
+
+    def immunize(self, now: float) -> None:
+        """Muncher-immune for ``IMMUNIZE_SECONDS`` from ``now`` (I §9.3.5, II §16.1). Re-applying
+        restarts the 30 minutes."""
+        self.immune_until = now + policy.IMMUNIZE_SECONDS
+
+    def immune(self, now: float) -> bool:
+        return now < self.immune_until
 
     def take_damage(self, damage_byte: int) -> TowerHit:
         """Apply one hit report's damage byte."""

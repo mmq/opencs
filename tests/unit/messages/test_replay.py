@@ -70,9 +70,13 @@ def test_every_captured_client_file_decodes(name: str) -> None:
     assert frames
 
 
-#: Server frames our validation refuses, with why (none in the current fixtures: the test
-#: server only sent values the client survives). Keyed by (fixture, seconds, hex of the payload).
-KNOWN_SERVER_EXCEPTIONS: dict[tuple[str, float, str], str] = {}
+#: Server frames our validation refuses, with why. Keyed by (fixture, seconds, hex of the payload).
+_RACK = "2026-07-29-015155_001-module-rack.txt"
+_EMPTY_CALLSIGN = "a July-build test run's 'B' with an empty callsign, which we never send"
+KNOWN_SERVER_EXCEPTIONS: dict[tuple[str, float, str], str] = {
+    (_RACK, 0.0, "42101010101010191110101b"): _EMPTY_CALLSIGN,
+    (_RACK, 10.549, "42101010101010191110101b"): _EMPTY_CALLSIGN,
+}
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -94,6 +98,8 @@ def decoded(direction: str) -> list[tuple[str, object]]:
         for frame in load_capture(name):
             if frame.direction == direction:
                 payload = payload_of(frame)
+                if (name, frame.t, payload.hex()) in KNOWN_SERVER_EXCEPTIONS:
+                    continue
                 msg = decode_client(payload) if direction == "C" else decode_server(payload)[0]
                 out.append((name, msg))
     return out
