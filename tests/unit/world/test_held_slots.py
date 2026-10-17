@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from fixtures.cities import Npc
 from fixtures.drops import Held, game
 from fixtures.lobbies import city
 from opencs import policy
@@ -55,12 +56,13 @@ def test_the_world_is_reset_on_the_first_tick_after_the_last_hold_goes() -> None
 
 def test_a_death_at_the_drop_does_not_keep_the_city_even_with_hold_asked() -> None:
     held = Held()
-    c, (a, b) = game([0, 1], reservations=held)
+    c, (a,) = game([0], reservations=held)
     c.orders.place_tower(0, TOWER, False, 2.0)
-    c.client_message(b, client.HitReport(a, 10), 5.0)
-    c.line_drop(a, 6.0, hold=True)
-    c.line_drop(b, 7.0)
-    assert c.orders.towers == {}
+    c.spawn(Npc(4100), 0.0)
+    c.client_message(a, client.Shot(4100, WirePos.from_world(2000, 20, 3000), 0, 0, 1), 5.0)
+    dropped = c.line_drop(a, 6.0, hold=True)  # an NPC shot at the pod: a fight, so a death
+    assert dropped.record is not None and not dropped.record.eligible
+    assert c.orders.towers == {}  # reset at once: no later drop, no tick
 
 
 def test_the_same_player_rejoins_the_same_world_not_a_new_game() -> None:
