@@ -347,6 +347,16 @@ FLOOR_SETTLE = 2.0
 NEW_PLAYER_BAYS = (1, 1, 1, 1, 0, 0, 0, 0, 0)
 NEW_PLAYER_MARKER = 0
 
+#: After a restore, a client ``'D'``-``'S'`` is not saved until one shows at least the restored
+#: SCORE and bay points, or this many seconds have passed. A report built before the restore
+#: landed arrives within a frame or two, so 10 s is generous. II §11.3
+#: (a guess).
+RESTORE_SETTLE = 10.0
+
+#: Bay points a bay's upgrade spends, indexed by the bay's level BEFORE the upgrade (0 = an empty
+#: bay). I §9.2.7 and II §11.3: 1 000 / 10^4 / 10^5 / 10^6 / 10^7 / 10^8.
+BAY_UPGRADE_POINTS = (1_000, 10**4, 10**5, 10**6, 10**7, 10**8)
+
 #: A spawn's grace period ends after this many seconds even if the pod never leaves its home box.
 #: I §9.1.5 ("the two-minute deadline").
 GRACE_TIMEOUT = 120.0
