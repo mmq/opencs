@@ -39,18 +39,35 @@ def test_the_fixtures_exist() -> None:
     assert sum(f.direction == "S" for f in frames) > 5000
 
 
+#: Client messages whose real frames carry a trailing NUL inside LEN (July to September 2026
+#: builds; I §4.1). Re-encoding gives the payload
+#: without it.
+CLIENT_TRAILING_NUL = (client.PodState,)
+
+
+def test_every_captured_client_frame_decodes_and_reencodes() -> None:
+    trailing = 0
+    for name in NAMES:
+        for frame in load_capture(name):
+            if frame.direction != "C":
+                continue
+            payload = payload_of(frame)
+            msg = decode_client(payload)
+            again = client_payload(msg)
+            if isinstance(msg, CLIENT_TRAILING_NUL) and payload == again + b"\x00":
+                trailing += 1
+            else:
+                assert payload == again, (name, frame.t)
+    # Fails if the fixture holding such frames is dropped.
+    assert trailing > 0
+
+
 @pytest.mark.parametrize("name", NAMES)
-def test_every_captured_client_frame_decodes_and_reencodes(name: str) -> None:
-    count = 0
-    for frame in load_capture(name):
-        if frame.direction != "C":
-            continue
-        payload = payload_of(frame)
-        msg = decode_client(payload)
-        # No captured client frame carried trailing bytes, so the re-encode is the whole payload.
-        assert client_payload(msg) == payload, (name, frame.t)
-        count += 1
-    assert count > 0
+def test_every_captured_client_file_decodes(name: str) -> None:
+    frames = [f for f in load_capture(name) if f.direction == "C"]
+    for frame in frames:
+        decode_client(payload_of(frame))
+    assert frames
 
 
 #: Server frames our validation refuses, with why (none in the current fixtures: the test

@@ -44,3 +44,4 @@ server-side relay of a shot is in none of the chosen runs). No capture holds a M
 | `2026-10-16-155148_002/004-high-ids-p1` | ids of 4096 and above |
 | `2026-10-15-144318_008-new-city-p1`, `2026-10-09-003444_002-tower-mine-p1` | quit request, tower orders |
 | `2026-07-29-025542_001-module-order`, `2026-07-28-203429_001-bay-upgrade` | module orders and `'Q'` subs; bay upgrades, `'D'`-`'B'` |
+| `2026-07-29-030741_002-city-name` | July build: client `'b'` frames with a trailing NUL inside LEN (I §4.1) |
