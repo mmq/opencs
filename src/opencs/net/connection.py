@@ -87,6 +87,7 @@ class Connection:
         context: ConnectionContext,
         *,
         outbox_limit: int = policy.OUTBOX_LIMIT,
+        flush_timeout: float = policy.CLOSE_FLUSH_TIMEOUT,
     ) -> None:
         self.context = context
         self._reader = reader
@@ -94,6 +95,7 @@ class Connection:
         self._factory = factory
         self._clock = clock
         self._limit = outbox_limit
+        self._flush_timeout = flush_timeout
         self._log = ConnectionLog(logging.getLogger("opencs.net"), context)
         self._outbox: deque[Outbound] = deque()
         self._wake = asyncio.Event()
@@ -125,7 +127,7 @@ class Connection:
         self._outbox.append(_CLOSE)
         self._wake.set()
         self._flush_timer = asyncio.get_running_loop().call_later(
-            policy.CLOSE_FLUSH_TIMEOUT, self.abort, "close did not flush in time"
+            self._flush_timeout, self.abort, "close did not flush in time"
         )
 
     def abort(self, reason: str) -> None:

@@ -37,7 +37,11 @@ class Handler:
 
 
 def build(
-    script: Any = None, *, limit: int = policy.OUTBOX_LIMIT, conn_id: int = 1
+    script: Any = None,
+    *,
+    limit: int = policy.OUTBOX_LIMIT,
+    conn_id: int = 1,
+    flush_timeout: float = policy.CLOSE_FLUSH_TIMEOUT,
 ) -> tuple[Connection, FakeReader, FakeWriter, list[Handler]]:
     reader, writer = FakeReader(), FakeWriter()
     handlers: list[Handler] = []
@@ -47,7 +51,13 @@ def build(
         return handlers[-1]
 
     connection = Connection(
-        reader, writer, factory, ClockHolder.clock, ConnectionContext(conn_id), outbox_limit=limit
+        reader,
+        writer,
+        factory,
+        ClockHolder.clock,
+        ConnectionContext(conn_id),
+        outbox_limit=limit,
+        flush_timeout=flush_timeout,
     )
     return connection, reader, writer, handlers
 
@@ -212,24 +222,18 @@ def test_close_flushes_what_was_queued_first_and_ignores_later_sends() -> None:
 
 
 def test_a_close_that_cannot_flush_is_cut_after_the_timeout() -> None:
-    # The flush timer uses the loop's clock; shorten it rather than wait for the real five seconds.
     def script(io: ConnectionIO, data: bytes) -> None:
         io.send_raw(b"x")
 
     async def scenario() -> FakeWriter:
-        old = policy.CLOSE_FLUSH_TIMEOUT
-        policy.CLOSE_FLUSH_TIMEOUT = 0.01
-        try:
-            connection, reader, writer, _ = build(script)
-            writer.gate.clear()  # the client has stopped reading
-            reader.push(b"go")
-            task = asyncio.create_task(connection.run())
-            await wait(writer.drain_blocked.wait())
-            connection.close("shutdown")
-            await wait(task)
-            return writer
-        finally:
-            policy.CLOSE_FLUSH_TIMEOUT = old
+        connection, reader, writer, _ = build(script, flush_timeout=0)
+        writer.gate.clear()  # the client has stopped reading
+        reader.push(b"go")
+        task = asyncio.create_task(connection.run())
+        await wait(writer.drain_blocked.wait())
+        connection.close("shutdown")
+        await wait(task)
+        return writer
 
     writer = asyncio.run(scenario())
     assert writer.transport.aborted
