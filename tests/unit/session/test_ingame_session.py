@@ -103,6 +103,14 @@ def test_b_repeats_stop_before_the_3500_byte_cap_would_be_passed() -> None:
     assert total + size > policy.B_REPEAT_CAP_BYTES  # it went right up to the cap
 
 
+#: What a first report is answered with after the drop's ``'A'``: the session-start status, bays
+#: first (I §9.2.11, II §11.3). The test city's floor is its max module level, 2.
+START = [
+    server.SetBays(policy.NEW_PLAYER_BAYS, policy.NEW_PLAYER_MARKER),
+    server.SetStatus(0, 2, 0),
+]
+
+
 # --- the ping, the first drop, A.3 -------------------------------------------------------------
 
 
@@ -110,7 +118,7 @@ def test_a_ping_is_answered_at_once_and_ahead_of_queued_traffic() -> None:
     h = play(make_world())
     sent(h)
     h.feed(frame(report(4)) + raw_frame(A3_PING))
-    assert sent(h) == [server.PingReply(), server.ReleaseDrop(0)]
+    assert sent(h) == [server.PingReply(), server.ReleaseDrop(0), *START]
 
 
 def test_the_first_frames_of_the_worked_session_are_answered_as_in_the_spec() -> None:
@@ -122,7 +130,7 @@ def test_the_first_frames_of_the_worked_session_are_answered_as_in_the_spec() ->
     h.feed(raw_frame(A3_S))  # 'S' announce: not relayed, not answered
     assert sent(h) == []
     h.feed(raw_frame(A3_B_STATE_4))
-    assert sent(h) == [server.ReleaseDrop(0)]
+    assert sent(h) == [server.ReleaseDrop(0), *START]
     tick_city(world, h)
     assert sent(h) == [server.ReleaseDrop(0)]  # the tick repeats it while the pod reports 4
     h.feed(raw_frame(A3_PING))
@@ -167,7 +175,7 @@ def test_an_exception_in_the_city_drops_the_request_and_keeps_the_connection() -
     city.client_message = real  # type: ignore[method-assign]
     sent(h)
     h.feed(frame(report(4)))
-    assert sent(h) == [server.ReleaseDrop(0)]
+    assert sent(h) == [server.ReleaseDrop(0), *START]
 
 
 # --- the quit handshake ------------------------------------------------------------------------

@@ -24,6 +24,7 @@ from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.pods import Pod, PodPhase
+from opencs.world.scoring import Bounty, PlayerScore, multiplier_floor
 from opencs.world.view import ClientView
 
 log = logging.getLogger("opencs.world")
@@ -43,11 +44,17 @@ class Player:
     shots: ShotLog = field(init=False)
     #: Who hit this player's pod lately, for the bounty payout at its death (I §9.2).
     hits: HitSet = field(init=False)
+    #: The server's mirror of this client's SCORE, multiplier, bays and marker (II §11.1, I §10).
+    score: PlayerScore = field(init=False)
+    #: This pod's bounty (I §9.2).
+    bounty: Bounty = field(init=False)
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
         self.shots = ShotLog(self.id)
         self.hits = HitSet()
+        self.score = PlayerScore()
+        self.bounty = Bounty(self.id)
 
     @property
     def entity_id(self) -> int:
@@ -115,6 +122,8 @@ class City:
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
+            client.Status: lambda p, m, now: self._status(p, _as(client.Status, m), now),
+            client.Bays: lambda p, m, now: self._bays(p, _as(client.Bays, m)),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.Grenade: lambda p, m, now: [
                 Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
@@ -236,6 +245,7 @@ class City:
                 for e in events
             ]
             events += self._go_live(player)
+            events += self._start_status(player)
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
             events.append(
                 Event(
@@ -244,6 +254,37 @@ class City:
                 )
             )
         return events
+
+    @property
+    def multiplier_floor(self) -> int:
+        """The multiplier a spawn is raised to in this city (II §12)."""
+        return multiplier_floor(self.config.max_module_level, self.config.max_multiplier)
+
+    def _start_status(self, player: Player) -> list[Event]:
+        """A session's status: ``'D'``-``'B'`` first, then ``'D'``-``'S'``, to the player alone
+        (I §9.2.11, II §11.3, I §7.8). Without ``'D'``-``'B'`` the client's multiplier and SCORE
+        never run (I §9.2.3). It goes with the first ``'b'``, not with the ``'B'``: the client is
+        then past its load (a still-loading client's ring is nearly full of ``'B'`` repeats, I §7.1,
+        II §7), and it is when test servers sent it (I §7.1). ``player.score`` is where M10 puts a
+        saved player's bays, marker and bay points."""
+        return [
+            Event(message, ToPlayer(player.id))
+            for message in player.score.start_message(self.multiplier_floor)
+        ]
+
+    def _status(self, player: Player, report: client.Status, now: float) -> list[Event]:
+        """The client's ``'D'``-``'S'``: mirrored, and answered with the multiplier floor when one
+        is due after a death (II §12)."""
+        pushes = player.score.on_status(
+            report, now, self.multiplier_floor, self.config.max_multiplier
+        )
+        return [Event(m, ToPlayer(player.id)) for m in pushes]
+
+    def _bays(self, player: Player, report: client.Bays) -> list[Event]:
+        """The client's ``'D'``-``'B'``: its bays and battle marker, mirrored (II §11.1)."""
+        if not player.score.on_bays(report):
+            log.warning("player %d reported a bay level the client cannot hold", player.id)
+        return []
 
     def spawn(self, entity: Entity) -> list[Event]:
         """A new entity (a pod, tower, drop, mine, Sentinel, guppy or Muncher): every client that

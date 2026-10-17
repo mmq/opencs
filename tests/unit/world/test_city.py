@@ -88,7 +88,10 @@ def test_the_drop_handshake_through_the_city() -> None:
     pid = joined(c).player_id
     release = Event(server.ReleaseDrop(pid), ToHolders(pid))
     # The first report: nobody else holds the pod yet, so the release is its owner's alone.
-    assert handshake(c, pid, report(4), 1.0) == [Event(server.ReleaseDrop(pid), ToPlayer(pid))]
+    first = handshake(c, pid, report(4), 1.0)
+    assert first[0] == Event(server.ReleaseDrop(pid), ToPlayer(pid))
+    # I §9.2.11, II §11.3
+    assert [type(e.message) for e in first[1:]] == [server.SetBays, server.SetStatus]
     assert c.tick(1.2) == [release]
     assert handshake(c, pid, report(1), 1.5) == []
     assert c.tick(1.6) == []

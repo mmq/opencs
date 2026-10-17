@@ -26,7 +26,11 @@ def first_b(c: City, pid: int, now: float = 1.0, **kw: int) -> list[tuple[int, S
     """The player's report (state 4, the first of a session) and what it delivers, less the relay
     of the 'b' itself (``test_relay`` has that)."""
     out = deliveries(c, c.client_message(pid, report(4, **kw), now))
-    return [(p, m) for p, m in out if not isinstance(m, server.PodState)]
+    return [
+        (p, m)
+        for p, m in out
+        if not isinstance(m, server.PodState | server.SetBays | server.SetStatus)
+    ]
 
 
 def kinds(msgs: list[ServerMessage]) -> list[tuple[str, int]]:
