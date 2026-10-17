@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import asyncio
 
-from fixtures.loopback import TIMEOUT, Client, LogWatch, connect, local_config, start
+from fixtures.loopback import TIMEOUT, Client, LogWatch, TickGate, connect, local_config, start
 from fixtures.pods import report
+from opencs.app import build_services
+from opencs.clock import ManualClock
 from opencs.messages import ServerMessage, WirePos, client, client_payload, server
 from opencs.wire.frame import build_frame
 
@@ -32,7 +34,13 @@ async def enter(port: int, team: str) -> tuple[Client, server.Session]:
 
 def test_two_players_see_each_other_chat_throw_and_leave() -> None:
     async def scenario() -> None:
-        stop, task, port = await start(local_config())
+        # No ticker runs unless pulsed, so no repeated 'A' or 'B' mixes into what is expected.
+        clock, gate = ManualClock(1000.0), TickGate()
+        config = local_config()
+        services = build_services(config, clock=clock)
+        stop, task, port = await start(
+            config, clock=clock, services=services, tick_sleep=gate.sleep
+        )
         p1, h1 = await enter(port, "RED")
         assert await _drop(p1) == server.ReleaseDrop(h1.self_id)
         p2, h2 = await enter(port, "RED")
@@ -77,7 +85,7 @@ def test_two_players_see_each_other_chat_throw_and_leave() -> None:
         stop.set()
         await asyncio.wait_for(task, TIMEOUT)
 
-    asyncio.run(scenario())
+    asyncio.run(asyncio.wait_for(scenario(), 4 * TIMEOUT))
 
 
 async def _drop(c: Client) -> ServerMessage:
