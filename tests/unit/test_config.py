@@ -61,11 +61,18 @@ def test_defaults_apply(tmp_path: Path) -> None:
     [
         ('letter = "a"', "letter"),
         ('letter = "AB"', "letter"),
-        ('name = "SEVENTEEN CHARS XX"', "name"),
+        ('name = "SEVENTEEN CHARS X"', "name"),
         ('name = ""', "name"),
         ('name = "X\\u0001Y"', "name"),
         ('name = "CAF\\u00c9"', "name"),
         ("map = 0", "map"),
+        ("max_multiplier = 0", "max_multiplier"),
+        ("max_module_level = -1", "max_module_level"),
+        ("tower_output = -1", "tower_output"),
+        ("balance_teams = [-1]", "balance_teams"),
+        ("balance_teams = 3", "balance_teams"),
+        ("balance_teams = [true]", "balance_teams"),
+        ("banned_modules = [-1]", "banned_modules"),
         ("max_multiplier = 52", "max_multiplier"),
         ("max_module_level = 6", "max_module_level"),
         ("tower_output = 3", "tower_output"),
@@ -148,3 +155,26 @@ def test_capacity_ceiling_is_sixteen(tmp_path: Path) -> None:
 def test_empty_duplicate_and_out_of_catalog_lists(tmp_path: Path, line: str) -> None:
     with pytest.raises(ConfigError, match=f": {line.split(maxsplit=1)[0]}:"):
         load_config(write_config(tmp_path, {"A": with_line(line)}))
+
+
+@pytest.mark.parametrize(
+    ("line", "attr", "expected"),
+    [
+        ('name = "SIXTEEN CHARS XX"', "name", "SIXTEEN CHARS XX"),
+        ('name = "X"', "name", "X"),
+        ("max_multiplier = 1", "max_multiplier", 1),
+        ("max_multiplier = 51", "max_multiplier", 51),
+        ("max_module_level = 0", "max_module_level", 0),
+        ("max_module_level = 5", "max_module_level", 5),
+        ("tower_output = 0", "tower_output", 0),
+        ("tower_output = 2", "tower_output", 2),
+        ("capacity = 1", "capacity", 1),
+        ("balance_teams = [0, 3]", "balance_teams", (0, 3)),
+        ("banned_modules = [1, 47]", "banned_modules", (1, 47)),
+    ],
+)
+def test_values_on_a_bound_are_accepted(
+    tmp_path: Path, line: str, attr: str, expected: object
+) -> None:
+    city = load_config(write_config(tmp_path, {"A": with_line(line)})).cities[0]
+    assert getattr(city, attr) == expected
