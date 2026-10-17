@@ -204,6 +204,18 @@ def test_orders_beyond_their_burst_are_dropped_and_counted_not_queued() -> None:
     assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
 
 
+def test_pickups_and_ejects_beyond_their_burst_are_dropped_and_counted() -> None:
+    # Each one is broadcast to every other client (a 'Q' destroy, a 'P'), so they are budgeted.
+    h, seen = relayed_in_game()
+    burst, _ = policy.RELAY_LIMIT_MODULE_OPS
+    pickup = frame(client_payload(client.PickupRequest(8192)))
+    eject = frame(client_payload(client.EjectRequest(6)))
+    h.feed(pickup * (burst + 2))
+    h.feed(eject * (burst + 2))
+    assert len(seen) == 2 * burst
+    assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
+
+
 def test_leg_reports_are_not_rate_limited_so_no_honest_count_can_be_cut_short() -> None:
     # A report is counted by its position (I §9.4.1): dropping one would put the client a leg
     # behind for good. Logistics bounds them by the legs sent instead.
