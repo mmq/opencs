@@ -35,18 +35,20 @@ class Bounty:
         self.pod_id = pod_id
         self._since: float | None = None
         self._next_push = 0.0
-        #: The value last pushed to the clients (0 when none has been): what a ``'G'`` carries.
-        self.shown = 0
 
     @property
     def running(self) -> bool:
         return self._since is not None
 
-    def start(self, now: float) -> None:
-        """The pod is alive and out of drop state: accrue from here. Idempotent."""
-        if self._since is None:
-            self._since = now
-            self._next_push = now + policy.BOUNTY_PUSH_INTERVAL
+    def start(self, now: float) -> list[Event]:
+        """The pod is alive and out of drop state: accrue from here, and push 0 so the holders
+        drop what their own accrual added while it was dead or dropping (I §9.2.9). Idempotent: a
+        second call pushes nothing."""
+        if self._since is not None:
+            return []
+        self._since = now
+        self._next_push = now + policy.BOUNTY_PUSH_INTERVAL
+        return [self._push(0)]
 
     def value(self, now: float) -> int:
         """The bounty in wire units (seconds of accrual) at ``now``; 0 when not running."""
@@ -68,7 +70,6 @@ class Bounty:
         return [self._push(0)]
 
     def _push(self, value: int) -> Event:
-        self.shown = value
         return Event(server.SetBounty(self.pod_id, value), ToHolders(self.pod_id))
 
 

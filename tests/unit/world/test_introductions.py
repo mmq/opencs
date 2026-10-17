@@ -199,7 +199,7 @@ class Tower:
 
     entity_id = 8192
 
-    def creating_messages(self) -> list[ServerMessage]:
+    def creating_messages(self, now: float) -> list[ServerMessage]:
         return [server.Destroy(8192)]  # any message will do
 
 
@@ -207,9 +207,9 @@ def test_a_spawn_and_a_late_joiners_sync_use_the_same_path_once_per_client() -> 
     c = City(city("A"))
     a, b = join(c, "AAA"), join(c, "BBB", 1)
     first_b(c, a)
-    out = deliveries(c, c.spawn(Tower()))
+    out = deliveries(c, c.spawn(Tower(), 0.0))
     assert out == [(a, server.Destroy(8192))]  # b has not reported: not yet
-    assert deliveries(c, c.spawn(Tower())) == []  # never a second create
+    assert deliveries(c, c.spawn(Tower(), 0.0)) == []  # never a second create
     synced = first_b(c, b)
     assert [m for m in to(synced, b) if isinstance(m, server.Destroy)] == [server.Destroy(8192)]
     assert c.player(b).view.holds(8192)  # type: ignore[union-attr]

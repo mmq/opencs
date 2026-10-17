@@ -93,7 +93,8 @@ def test_the_drop_handshake_through_the_city() -> None:
     # I §9.2.11, II §11.3
     assert [type(e.message) for e in first[1:]] == [server.SetBays, server.SetStatus]
     assert c.tick(1.2) == [release]
-    assert handshake(c, pid, report(1), 1.5) == []
+    # Leaving drop state starts the bounty: the holders are told 0 (I §9.2.9).
+    assert handshake(c, pid, report(1), 1.5) == [Event(server.SetBounty(pid, 0), ToHolders(pid))]
     assert c.tick(1.6) == []
     assert handshake(c, pid, client.Died(), 30.0) == [
         Event(server.Destroy(pid), ToAll()),

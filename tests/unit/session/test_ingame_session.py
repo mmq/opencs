@@ -138,7 +138,7 @@ def test_the_first_frames_of_the_worked_session_are_answered_as_in_the_spec() ->
     h.feed(frame(report(1, y=229)))  # falling: no more 'A'
     tick_city(world, h)
     tick_city(world, h)
-    assert sent(h) == []
+    assert sent(h) == [server.SetBounty(0, 0)]  # leaving drop state starts the bounty at 0
     h.feed(raw_frame(b"d" + bytes([0x11, 0x12, 0x13, 0x14, 0x15])))  # acknowledgments
     assert sent(h) == []
     assert not h.io.closed

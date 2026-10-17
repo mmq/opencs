@@ -33,5 +33,5 @@ class Npc:
     def __init__(self, entity_id: int) -> None:
         self.entity_id = entity_id
 
-    def creating_messages(self) -> Sequence[ServerMessage]:
+    def creating_messages(self, now: float) -> Sequence[ServerMessage]:
         return ()

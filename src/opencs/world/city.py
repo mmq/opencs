@@ -192,7 +192,7 @@ class City:
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is the camera, not the pod
             player.grace.observe(report.pos, now)
         if phase is not PodPhase.IN_PLAY and player.pod.phase is PodPhase.IN_PLAY:
-            player.bounty.start(now)  # it left drop state: alive and accruing (I §9.2.12, II §11.2)
+            events += player.bounty.start(now)  # left drop state: accruing (I §9.2.12, II §11.2)
         if first:
             # Nobody else holds this pod yet, so its drop 'A' is for its owner alone; the others
             # are given theirs by the introduction, after their 'G'. ``ToHolders`` resolves after
@@ -203,7 +203,7 @@ class City:
                 else e
                 for e in events
             ]
-            events += self._go_live(player)
+            events += self._go_live(player, now)
             events += self._start_status(player)
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
             events.append(
@@ -245,7 +245,7 @@ class City:
             log.warning("player %d reported a bay level the client cannot hold", player.id)
         return []
 
-    def spawn(self, entity: Entity) -> list[Event]:
+    def spawn(self, entity: Entity, now: float) -> list[Event]:
         """A new entity (a pod, tower, drop, mine, Sentinel, guppy or Muncher): every client that
         is playing gets its creating packets through ``introduce``, the function a later joiner's
         sync uses, and the city remembers it for them (I §7.3)."""
@@ -253,7 +253,7 @@ class City:
         events: list[Event] = []
         for player in self.players():
             if player.pod.has_reported:  # its client is past the 'B'
-                events += introduce(entity, player.view)
+                events += introduce(entity, player.view, now)
         return events
 
     def despawn(self, entity_id: int) -> None:
@@ -277,17 +277,17 @@ class City:
             )
         )
 
-    def _go_live(self, player: Player) -> list[Event]:
+    def _go_live(self, player: Player, now: float) -> list[Event]:
         """The player's first ``'b'`` is in: it is told about every pod already live, and they are
         told about it, once per pair (I §7.2). Players that have not reported yet are
         introduced when they do."""
         events: list[Event] = []
         for entity in self._live.values():
-            events += introduce(entity, player.view)
+            events += introduce(entity, player.view, now)
         self._live[player.id] = player
         for other in self.players():
             if other.pod.has_reported:
-                events += introduce(player, other.view)
+                events += introduce(player, other.view, now)
         return events
 
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:

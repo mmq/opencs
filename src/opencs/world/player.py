@@ -46,7 +46,7 @@ class Player:
     def entity_id(self) -> int:
         return self.id
 
-    def creating_messages(self) -> Sequence[ServerMessage]:
+    def creating_messages(self, now: float) -> Sequence[ServerMessage]:
         """``'G'`` at the pod's last position, then ``'A'``: ``'G'`` leaves the new pod in drop
         state and a pod in drop state discards every ``'b'`` (I §7.2 steps 2 and 3). A pod that
         is dead and awaiting its drop is introduced where it last stood without the ``'A'``: every
@@ -62,7 +62,7 @@ class Player:
             team=self.team,
             pos=placed.pos,
             orient=placed.orient,
-            bounty_div10=self.bounty.shown,
+            bounty_div10=self.bounty.value(now),
         )
         if self.pod.phase is PodPhase.DEAD:
             return (introduce,)

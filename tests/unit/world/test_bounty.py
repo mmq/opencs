@@ -49,7 +49,7 @@ def test_a_pod_that_has_not_left_drop_is_not_pushed_while_another_is() -> None:
     assert b not in {m.id for _, m in pushes}
 
 
-def test_a_late_joiners_g_carries_the_bounty_last_pushed() -> None:
+def test_a_late_joiners_g_carries_the_bounty_as_it_is_now() -> None:
     c, (a, _) = seat([0, 1])
     c.client_message(a, report(0), 10.0)
     bounty_pushes(c, 10.0 + STEP)
@@ -57,7 +57,7 @@ def test_a_late_joiners_g_carries_the_bounty_last_pushed() -> None:
     assert isinstance(late, JoinResult)
     out = to(deliveries(c, c.client_message(late.player_id, report(4), 31.0)), late.player_id)
     g = [m for m in out if isinstance(m, server.Introduce) and m.id == a]
-    assert [m.bounty_div10 for m in g] == [int(STEP)]
+    assert [m.bounty_div10 for m in g] == [21]  # a started at 10.0; the 'b' is at 31.0
 
 
 def test_a_g_for_a_pod_with_no_bounty_yet_carries_zero() -> None:
@@ -75,7 +75,6 @@ def test_a_death_sends_j_then_zeroes_the_bounty_and_stops_it() -> None:
     assert [m for p, m in out if p == b] == [server.Destroy(a), server.SetBounty(a, 0)]
     assert {p for p, m in out if isinstance(m, server.SetBounty)} == {a, b}
     assert bounty_pushes(c, 100.0) == []  # a dead pod accrues nothing
-    assert c.player(a).bounty.shown == 0  # type: ignore[union-attr]
 
 
 def test_a_second_j_before_the_respawn_does_not_push_again() -> None:
@@ -94,3 +93,18 @@ def test_the_next_life_accrues_from_leaving_drop_state_again() -> None:
     assert bounty_pushes(c, 34.1 + 60.0) == []  # still dropping: nothing accrues
     c.client_message(a, report(1), 40.0)
     assert [m.bounty_div10 for _, m in bounty_pushes(c, 40.0 + STEP)] == [int(STEP)] * 2
+
+
+def test_a_new_life_re_syncs_the_bounty_to_zero_when_the_pod_leaves_drop_state() -> None:
+    """The clients accrue on dead pods too, so the zero sent at the death is stale by the time the
+    pod is back: leaving drop state pushes 0 again, to the owner and every holder."""
+    c, (a, b) = seat([0, 1])
+    c.client_message(a, report(0), 10.0)
+    c.client_message(a, client.Died(), 25.0)
+    c.client_message(a, client.DropMe(), 34.0)
+    dropping = deliveries(c, c.client_message(a, report(4), 34.1))
+    assert not [m for _, m in dropping if isinstance(m, server.SetBounty)]
+    out = deliveries(c, c.client_message(a, report(1), 40.0))
+    assert {p for p, m in out if m == server.SetBounty(a, 0)} == {a, b}
+    again = deliveries(c, c.client_message(a, report(1), 40.5))
+    assert not [m for _, m in again if isinstance(m, server.SetBounty)]  # once per life

@@ -51,7 +51,6 @@ def test_pushes_come_every_interval_with_the_value_at_that_moment() -> None:
     step = policy.BOUNTY_PUSH_INTERVAL
     assert b.tick(100.0 + step - 0.01) == []
     assert b.tick(100.0 + step) == [push(int(step))]
-    assert b.shown == int(step)
     assert b.tick(100.0 + step + 1.0) == []  # not again until another interval
     assert b.tick(100.0 + 2 * step) == [push(int(2 * step))]
 
@@ -63,13 +62,12 @@ def test_a_late_tick_pushes_once_not_once_per_missed_interval() -> None:
     assert b.tick(95.5) == []
 
 
-def test_zero_stops_the_clock_pushes_zero_and_resets_what_a_g_carries() -> None:
+def test_zero_stops_the_clock_and_pushes_zero() -> None:
     b = Bounty(POD)
     b.start(0.0)
     b.tick(12.0)
-    assert b.shown == 12
     assert b.zero() == [push(0)]
-    assert b.shown == 0 and b.value(50.0) == 0 and b.tick(50.0) == []
+    assert b.value(50.0) == 0 and b.tick(50.0) == []
     b.start(60.0)  # the next life accrues from scratch
     assert b.value(65.0) == 5
 

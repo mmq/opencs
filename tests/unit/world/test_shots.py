@@ -34,7 +34,7 @@ def test_an_unsafe_shot_is_not_relayed_but_is_still_logged() -> None:
 
 def test_a_known_npcs_shot_is_logged_and_relayed_without_complaint() -> None:
     c, (a, b, d) = seat([0, 1, 1])
-    c.spawn(Npc(4100))
+    c.spawn(Npc(4100), 0.0)
     out = deliveries(c, c.client_message(a, shot(4100, kind=2), 1.0))
     assert [pid for pid, _ in out] == [b, d]
     assert c.shooter_mismatches == 0

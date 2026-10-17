@@ -45,7 +45,7 @@ def test_damage_is_relayed_whatever_the_team() -> None:
 def test_damage_is_relayed_even_when_no_shot_credits_the_hit() -> None:
     # A Sentinel's shot hurts the player it hits though it credits nobody (II §9.1).
     c, (a, b) = playing([0, 1])
-    c.spawn(Npc(4100))
+    c.spawn(Npc(4100), 0.0)
     fire(c, a, 4.0, shooter=4100, kind=2)
     out = deliveries(c, c.client_message(a, hit(b, 20), 5.0))
     assert out == [(b, server.Damage(a, 20))]
@@ -117,7 +117,7 @@ def test_the_shot_log_is_per_connection_so_a_rivals_shot_credits_nobody_else() -
 def test_a_hit_on_an_entity_uses_up_a_shot_and_credits_and_relays_nothing() -> None:
     # II §9.3 ground truth: p2's 9 reports on a mine, caused by the Sentinel, credit nobody.
     c, (a, b) = playing([0, 1])
-    c.spawn(Npc(38))
+    c.spawn(Npc(38), 0.0)
     fire(c, a, 4.0)
     assert c.client_message(a, hit(38), 5.0) == []
     c.client_message(a, hit(b), 5.1)  # the own shot is gone, so this hit has nothing to credit
