@@ -201,6 +201,10 @@ PBKDF2_SALT_BYTES = 16
 #: The SQLite file inside ``data_dir``. Ours (DESIGN §2 "Persistence"; one file, no server).
 DATABASE_FILE_NAME = "opencs.db"
 
+#: Prefix of a real account's progress key: ``acct:NAME``. A guest's key is its bare callsign,
+#: which is upper case, so the two can never collide. II §3.
+ACCOUNT_KEY_PREFIX = "acct:"
+
 #: The first and last single-digit suffix of a duplicate callsign (``JOINGEN2`` .. ``JOINGEN9``;
 #: II §3: the 8th character is replaced by a digit), then two-digit suffixes
 #: (``JOINGE10`` .. ``JOINGE99``) when those run out. The 9th duplicate and beyond are ours, see
