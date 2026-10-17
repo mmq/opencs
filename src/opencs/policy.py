@@ -83,6 +83,41 @@ DEFAULT_CITY_LETTER = "B"
 MAP_NUMBER_LOW = 1
 MAP_NUMBER_HIGH = 9
 
+# --- Login and Chamber timing (I §5.1, II §4.1; DESIGN §5) -------------------------------------
+
+#: Delay after the account line before the ``\r\n*`` prompt is sent if ``<Not Telling!>`` has not
+#: arrived first, in seconds. I §5.1, II §2: 0.3 s.
+LOGIN_PROMPT_DELAY = 0.3
+
+#: Seconds from connecting to a completed account line; later, seconds of silence tolerated at
+#: the GEnie ``*`` prompt (a player may sit at its menus). Ours (DESIGN §5 "time allowed to log
+#: in"): the spec gives neither.
+LOGIN_TIMEOUT = 60.0
+GENIE_IDLE_TIMEOUT = 900.0
+
+#: Most lines accepted from a connection between connecting and entering the Chamber (empty lines
+#: and ``<Not Telling!>`` included), and most bytes accepted before ``HHH``. Ours (DESIGN §5
+#: "login attempts"): a real client sends 4 lines and about 20 bytes of modem noise.
+LOGIN_MAX_LINES = 50
+LOGIN_PREAMBLE_LIMIT = 4096
+
+#: How long to wait for the reply to ``PRESS RETURN`` before entering anyway, and for ``/GO`` after
+#: ``E <map> <map>``, in seconds. II §4.1 (5 s), I §5.4, II §4.5 (15 s, a server choice).
+VERSION_WAIT = 5.0
+GO_WAIT = 15.0
+
+#: Bad inbound frames and undecodable messages tolerated per window before a connection is closed
+#: (DESIGN §5 ``MAX_BAD_FRAMES``). A window rather than a lifetime total, because real clients send
+#: some: 24 consecutive undecodable ``'b'`` frames, one a second, were captured (I §4.1), i.e. at
+#: most 10 per 10 s. Ours.
+MAX_BAD_INPUT = 50
+BAD_INPUT_WINDOW = 10.0
+
+#: Seconds a partial frame may wait before the reader gives up on its header and re-scans (a stray
+#: valid-looking header can hold back real frames, I §4.1). A real frame is at
+#: most 250 bytes, so it completes within a fraction of a second even at modem speed. Ours.
+FRAME_STALL_SECONDS = 3.0
+
 # --- Lobby text (II §4.4, "Relay hygiene") ------------------------------------------
 
 #: Client text colors (``0x05 D<n>``): server text D2, headings D6, chat D4, errors D3, each block
