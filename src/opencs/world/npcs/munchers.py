@@ -9,7 +9,9 @@ report. The client never damages anything. Everything else is ours.
 What the server does. A Muncher flies to the nearest tower that is not Immunized within 600 ft of
 itself (any team's), is latched on it for ``MUNCHER_EAT_SECONDS``, then the tower is destroyed and
 it goes on from there; with nothing left it flies to the nearest city edge and is removed with
-``'J'`` (``'H'`` cannot carry its id). Call Muncher makes one at the caller.
+``'J'`` (``'H'`` cannot carry its id). Call Muncher makes one at the caller. A *free* Muncher is
+sent every ``muncher_every`` seconds from the nearest edge at a random tower in a block the leading
+team controls, and then behaves the same.
 
 Per client. A Muncher's ``'K'`` and ``'E'``-``'C'`` go only to the clients whose copy is in step
 with it: to any other client a ``'K'`` is a new id and makes a stray Muncher (I App. B). A client
@@ -25,6 +27,8 @@ from __future__ import annotations
 
 import logging
 import math
+import random
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -38,6 +42,7 @@ from opencs.world.ids import IdRange
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.structures import Tower, damage_of
+from opencs.world.territory import Territory
 from opencs.world.view import ClientView, MuncherSync
 
 log = logging.getLogger("opencs.world")
@@ -113,17 +118,30 @@ class Munchers:
         self,
         host: WorldHost,
         orders: Orders,
+        territory: Territory,
+        every: float,
+        rng: random.Random,
     ) -> None:
         self._host = host
         self._orders = orders
+        self._territory = territory
+        self._every = every
+        self._rng = rng
         #: Every Muncher flying, by id.
         self.alive: dict[int, Muncher] = {}
+        self._next_free: float | None = None
         #: Leg reports from a client with no leg owed (I §9.4.1): out of protocol, counted.
         self.ignored_reports = 0
 
     def reset(self) -> None:
         """The city emptied: nothing carries over (II §17)."""
         self.alive.clear()
+        self._next_free = None
+
+    def start(self, now: float) -> None:
+        """The city's game began: the first free Muncher is ``muncher_every`` seconds away."""
+        if self._every > 0:
+            self._next_free = now + self._every
 
     # --- making them -------------------------------------------------------------------------
 
@@ -268,11 +286,14 @@ class Munchers:
     # --- time --------------------------------------------------------------------------------
 
     def tick(self, now: float) -> list[Event]:
-        """Finish any meal that is due."""
+        """Finish any meal that is due, and send a free Muncher when it is time."""
         events: list[Event] = []
         for m in list(self.alive.values()):
             if m.phase is Phase.EATING and now >= m.eat_until:
                 events += self._finish_meal(m, now)
+        while self._next_free is not None and now >= self._next_free:
+            self._next_free += self._every
+            events += self._send_free(now)
         return events
 
     def _finish_meal(self, m: Muncher, now: float) -> list[Event]:
@@ -284,6 +305,28 @@ class Munchers:
             log.info("Muncher %d ate tower %d", m.entity_id, tower.entity_id)
             events += self._orders.destroy_tower(tower, now)
         return events + self._advance(m, now)
+
+    def _send_free(self, now: float) -> list[Event]:
+        """A free Muncher from the nearest edge at a random tower in a block the leading team
+        controls (II §16.2); none if one is already out or there is no such tower."""
+        if any(m.free for m in self.alive.values()):
+            return []
+        towers = list(self._orders.towers.values())
+        controlled = self._territory.controllers((t.block, t.team) for t in towers)
+        counts = Counter(controlled.values())
+        if not counts:
+            return []
+        most = max(counts.values())
+        team = self._rng.choice(sorted(t for t, n in counts.items() if n == most))
+        prey = sorted(
+            (t for t in towers if controlled.get(t.block) == team and not t.immune(now)),
+            key=lambda t: t.entity_id,
+        )
+        if not prey:
+            return []
+        tower = self._rng.choice(prey)
+        x, z = nearest_edge(tower.pos.world_x, tower.pos.world_z)
+        return self._create(x, z, free=True, target=tower, now=now)
 
     # --- durability --------------------------------------------------------------------------
 

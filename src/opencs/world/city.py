@@ -87,7 +87,9 @@ class City:
         #: Resident and called Sentinels (II §16.3).
         self.sentinels = Sentinels(self, config.sentinels, config.sentinel_respawn, self._rng)
         #: Munchers, called and free (I §9.5.2, II §16.2, II §16.2).
-        self.munchers = Munchers(self, self.orders)
+        self.munchers = Munchers(
+            self, self.orders, self._territory, config.muncher_every, self._rng
+        )
         #: The effect modules (I §9.3.5, II §16.1).
         self.effects = Effects(
             self, self.orders, self.weather, rules, self.sentinels, self.munchers
@@ -205,6 +207,7 @@ class City:
         it (II §17, II §5)."""
         self.weather.start(now)
         self.sentinels.start(now)  # nobody has reported yet, so nobody is sent anything
+        self.munchers.start(now)
 
     def _reset(self) -> None:
         """Nobody is here: the next game starts fresh (S13)."""
