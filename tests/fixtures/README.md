@@ -46,6 +46,16 @@ server-side relay of a shot is in none of the chosen runs). No capture holds a M
 | `2026-07-29-025542_001-module-order`, `2026-07-28-203429_001-bay-upgrade` | module orders and `'Q'` subs; bay upgrades, `'D'`-`'B'` |
 | `2026-07-29-030741_002-city-name` | July build: client `'b'` frames with a trailing NUL inside LEN (I §4.1) |
 
+### Fixtures added for M6 (deaths and attribution)
+
+Every capture with a server-annotated `DEATH of` and a size under about 100 KB of fixture, plus the
+contested attribution run, so the death and attribution replays run on real streams:
+`2026-09-15-101546_001/002` and `2026-09-15-105814_001` (bounty payouts), `2026-09-15-102453_001` (the
+contested attribution run: 15 own shots, 46 Sentinel shots), `2026-09-03-104918_001/002` (phalanx),
+`2026-09-02-000110_001` (8 deaths), `2026-07-29-*`, `2026-07-30-*` and `2026-08-30-152217_*` (two-player
+deaths). The runs `2026-07-30-213906_001/002` are left out: they hold the short client `'b'` frames that do
+not decode (I §4.1).
+
 ### Runs that are not in the corpus
 
 The kill and payout runs `2026-10-01-170222` and `2026-10-01-172859` are not in the capture corpus, and no other run of 2026-10-01 stands in. Kills (server `'J'`) are carried by
