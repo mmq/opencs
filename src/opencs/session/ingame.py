@@ -267,4 +267,4 @@ class InGamePhase(Phase):
         second_over = self._quits >= 2 or now >= self._first_quit_at + policy.QUIT_SECOND_WAIT
         if second_over and now >= self._last_quit_at + policy.RETURN_SETTLE:
             self.stage = Stage.GONE
-            self.host.return_to_chamber()
+            self.host.return_to_chamber(late_quits=2 - self._quits)

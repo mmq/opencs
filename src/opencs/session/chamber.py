@@ -46,9 +46,11 @@ class State(Enum):
 class ChamberPhase(TextPhase):
     """Version check, lobby commands, chat relay and the launch."""
 
-    def __init__(self, host: Session, *, returning: bool = False) -> None:
+    def __init__(self, host: Session, *, returning: bool = False, late_quits: int = 0) -> None:
         super().__init__(host)
         self._returning = returning
+        self._late_quits = late_quits
+        self._late_quit_until = 0.0
         self._state = State.VERSION
         self._deadline = 0.0
         self._member: Member | None = None
@@ -73,6 +75,7 @@ class ChamberPhase(TextPhase):
             # silent, I §5.5); the buttons come back and a stray version reply is swallowed.
             self._member = self.host.member
             self._late_reply_possible = True
+            self._late_quit_until = self.host.now() + policy.LATE_QUIT_WINDOW
             self._open_lobby()
             return
         self._member = self.host.join_lobby()
@@ -105,7 +108,9 @@ class ChamberPhase(TextPhase):
             self._open_lobby()
             return
         if self._state is State.LOBBY and (
-            self._swallow_late_reply(line) or not self._within_rate()
+            self._swallow_late_quit(line)
+            or self._swallow_late_reply(line)
+            or not self._within_rate()
         ):
             return
         command = commands.parse(line)
@@ -113,6 +118,14 @@ class ChamberPhase(TextPhase):
             self._launch_line(command)
         else:
             self._lobby_line(command)
+
+    def _swallow_late_quit(self, line: str) -> bool:
+        """A ``QUIT`` the client sent as part of its exit, arriving after we returned, is not chat
+        (I §5.5 step 4): drop up to the number still owed, for a short while."""
+        if self._late_quits and line.strip() == "QUIT" and self.host.now() < self._late_quit_until:
+            self._late_quits -= 1
+            return True
+        return False
 
     def _swallow_late_reply(self, line: str) -> bool:
         """A version reply that arrives after the timeout is not chat: drop the first line after

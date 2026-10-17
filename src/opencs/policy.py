@@ -273,6 +273,9 @@ DROP_REQUEST_TIMEOUT = 20.0
 QUIT_WAIT = 10.0
 QUIT_SECOND_WAIT = 1.0
 RETURN_SETTLE = 3.0
+#: After the return, a missing ``QUIT\r`` (of the two the client sends) that still arrives within
+#: this long is swallowed, not relayed as chat (I §5.5 step 4, II §4.3 relay hygiene; our choice).
+LATE_QUIT_WINDOW = 10.0
 
 #: The pod state byte of a pod in drop state (I §7.1, I §7.4): it discards positions.
 POD_STATE_DROPPING = 4

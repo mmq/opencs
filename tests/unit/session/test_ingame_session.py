@@ -383,3 +383,47 @@ def test_a_leave_that_raises_is_logged_and_the_quit_goes_on() -> None:
     assert sent(h) == [server.QuitAck()]
     assert not h.io.closed
     h.session.closed()  # and the line drop afterward does not try again
+
+
+def test_a_quit_line_that_arrives_after_the_return_is_not_chat() -> None:
+    """Only one QUIT came before the return; the second is late (I §5.5 step 4, II §4.3)."""
+    world = make_world()
+    h = play(world)
+    bystander = enter_lobby(world)
+    bystander.take()
+    quit_game(h)
+    h.feed(QUIT)
+    h.advance(policy.QUIT_SECOND_WAIT + policy.RETURN_SETTLE)
+    assert isinstance(h.session.phase, ChamberPhase)
+    h.take()
+    h.feed(QUIT)
+    assert bystander.take() == b""  # swallowed, not relayed
+    h.feed(QUIT)
+    assert b"JOINGENI: QUIT" in bystander.take()  # only the one that was owed
+
+
+def test_a_late_quit_line_after_two_were_seen_is_chat_like_any_other() -> None:
+    world = make_world()
+    h = play(world)
+    bystander = enter_lobby(world)
+    bystander.take()
+    quit_game(h)
+    h.feed(QUIT + QUIT)
+    h.advance(policy.RETURN_SETTLE)
+    h.take()
+    h.feed(QUIT)
+    assert b"JOINGENI: QUIT" in bystander.take()
+
+
+def test_a_quit_line_long_after_the_return_is_chat() -> None:
+    world = make_world()
+    h = play(world)
+    bystander = enter_lobby(world)
+    bystander.take()
+    quit_game(h)
+    h.feed(QUIT)
+    h.advance(policy.QUIT_SECOND_WAIT + policy.RETURN_SETTLE)
+    h.take()
+    h.advance(policy.LATE_QUIT_WINDOW)
+    h.feed(QUIT)
+    assert b"JOINGENI: QUIT" in bystander.take()
