@@ -71,21 +71,25 @@ class NoReservations:
         return ()
 
 
-def battle_reason(player: Player, strikes: Iterable[Strike], since: float) -> str:
+def battle_reason(player: Player, strikes: Iterable[Strike], fight_at: float) -> str:
     """Why a drop is "in the middle of a fight you are about to lose", or an empty string: the pod
-    was under attack at or after ``since`` (II §13 item 3, D4). A pod that never reported has
-    no place to be attacked at, and one already dead has had its death."""
+    was under attack within ``BATTLE_WINDOW`` before ``fight_at``, the last moment the player was
+    there (II §13 item 3, D4). What happened after it, to a pod frozen on other screens, is
+    not the player's fight, and nor is what came before the pod's last death. A pod that never
+    reported has no place to be attacked at, and one already dead has had its death."""
     if not player.pod.has_reported or player.pod.phase is PodPhase.DEAD:
         return ""
-    why = player.attacks.since(since)
+    since = fight_at - policy.BATTLE_WINDOW
+    why = player.attacks.between(since, fight_at)
     if why:
         return why
     placed = player.pod.placed
     if placed is None:
         return ""
+    since = max(since, player.attacks.life_started or since)
     for strike in strikes:
         if (
-            strike.at >= since
+            since <= strike.at <= fight_at
             and strike.team != player.team
             and in_fight_range(placed.pos, strike.pos)
         ):
@@ -104,7 +108,7 @@ def drop_player(city: City, player: Player, now: float, *, fight_at: float, hold
     """The player's line dropped. ``fight_at`` is when it did (``now``, or the last byte for a
     silent line); a fight is an attack within ``BATTLE_WINDOW`` before it. ``hold`` says the
     player will be held for a ``/RESUME``, which keeps the city alive when it empties."""
-    reason = battle_reason(player, city.orders.strikes, fight_at - policy.BATTLE_WINDOW)
+    reason = battle_reason(player, city.orders.strikes, fight_at)
     events: list[Event] = []
     if reason:
         events = _name_holders(city, death.player_died(city, player, now), player.id)

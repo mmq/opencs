@@ -48,6 +48,23 @@ def test_attacks_remember_the_last_time_and_why() -> None:
     assert a.since(6.0) == "Y"
 
 
+def test_attacks_keep_a_history_to_be_asked_about_as_of_an_earlier_time() -> None:
+    a = Attacks()
+    a.mark(5.0, "X")
+    a.mark(30.0, "Y")
+    assert a.between(0.0, 10.0) == "X"  # the later mark is ignored
+    assert a.between(6.0, 10.0) == ""
+    assert a.between(0.0, 4.9) == ""
+    assert a.between(25.0, 30.0) == "Y"
+
+
+def test_the_history_forgets_what_no_drop_can_ask_for() -> None:
+    a = Attacks()
+    a.mark(1.0, "old")
+    a.mark(1.0 + policy.ATTACK_HISTORY + 0.1, "new")
+    assert a.between(0.0, 2.0) == ""
+
+
 @pytest.mark.parametrize(("feet", "near"), [(0, True), (600, True), (601, False)])
 def test_fight_range_is_600_feet_inclusive(feet: int, near: bool) -> None:
     assert policy.FIGHT_RANGE == 600

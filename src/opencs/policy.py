@@ -578,6 +578,10 @@ SILENCE_SECONDS = 15.0
 #: the drop (D4). The manual's payout window, reused (I §9.2.8, II §11.2).
 BATTLE_WINDOW = 20.0
 
+#: How long the attacks on a pod are remembered: the fight window before the last byte of a line
+#: that went quiet, plus the silence limit before it was noticed, plus a tick of slack (D4, D8).
+ATTACK_HISTORY = BATTLE_WINDOW + SILENCE_SECONDS + 5.0
+
 #: An enemy shot, grenade or air strike fired within this many feet of a pod is an attack on it
 #: (D4): the client's own NPC targeting range, so not a number of ours.
 FIGHT_RANGE = 600.0

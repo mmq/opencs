@@ -141,6 +141,32 @@ def test_the_window_runs_from_when_the_line_went_quiet_not_when_it_was_noticed()
     assert quiet is not None and not quiet.eligible
 
 
+@pytest.mark.parametrize("signal", ["hit", "shot", "grenade", "strike"])
+def test_what_happens_to_the_frozen_pod_after_the_last_byte_is_not_the_players_fight(
+    signal: str,
+) -> None:
+    c, (a, b) = game([0, 1])
+    if signal == "hit":
+        c.client_message(b, client.HitReport(a, 10), 30.0)
+    elif signal == "shot":
+        enemy_shot(c, b, 30.0)
+    elif signal == "grenade":
+        c.client_message(b, client.Grenade(SPOT, 0, 0), 30.0)
+    else:
+        c.orders.strikes.append(Strike(30.0, 1, SPOT))
+    _, record = drop(c, a, 40.0, fight_at=25.0)  # quiet since 25, noticed at 40
+    assert record is not None and record.eligible
+
+
+def test_an_attack_before_the_last_byte_still_counts_when_more_came_after_it() -> None:
+    c, (a, b) = game([0, 1])
+    enemy_shot(c, b, 25.0)  # exactly at the last byte
+    enemy_shot(c, b, 30.0)
+    enemy_shot(c, b, 36.0)
+    _, record = drop(c, a, 40.0, fight_at=25.0)
+    assert record is not None and not record.eligible
+
+
 def test_a_pod_already_dead_is_not_killed_twice() -> None:
     c, (a, b) = game([0, 1])
     c.client_message(b, client.Shot(b, at(2000).pos, 0, 0, 1), 19.0)

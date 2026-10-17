@@ -11,7 +11,7 @@ attacked at all within ``BATTLE_WINDOW`` of a drop was in a fight.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from opencs import policy
 from opencs.messages import WirePos
@@ -19,18 +19,41 @@ from opencs.messages import WirePos
 
 @dataclass(slots=True)
 class Attacks:
-    """The last time one pod was attacked, and how."""
+    """When one pod was attacked, and how: a short history, so a drop can be judged as of the
+    moment the line went quiet and not of the moment it was noticed (II §13 item 3, D8)."""
 
-    at: float | None = None
-    why: str = ""
+    _marks: list[tuple[float, str]] = field(default_factory=list)
+    #: When the pod's current life began (its last death); earlier attacks belong to a life whose
+    #: death has been paid and are not a fight it is running from.
+    life_started: float | None = None
 
     def mark(self, now: float, why: str) -> None:
         """The pod was attacked at ``now``."""
-        self.at, self.why = now, why
+        self._marks.append((now, why))
+        # Keep what a silent line can still ask for: the fight window before the last byte, which
+        # is up to the silence limit before the time it is noticed.
+        keep = now - policy.ATTACK_HISTORY
+        if self._marks[0][0] < keep:
+            self._marks = [m for m in self._marks if m[0] >= keep]
+
+    def new_life(self, now: float) -> None:
+        """The pod died at ``now``: what came before it no longer counts."""
+        self._marks.clear()
+        self.life_started = now
+
+    def between(self, lo: float, hi: float) -> str:
+        """How the pod was last attacked within ``[lo, hi]`` (and in its current life), else an
+        empty string."""
+        if self.life_started is not None:
+            lo = max(lo, self.life_started)
+        for at, why in reversed(self._marks):
+            if at <= hi:
+                return why if at >= lo else ""
+        return ""
 
     def since(self, t: float) -> str:
         """How the pod was last attacked if that was at or after ``t``, else an empty string."""
-        return self.why if self.at is not None and self.at >= t else ""
+        return self.between(t, math.inf)
 
 
 def in_fight_range(a: WirePos, b: WirePos) -> bool:
