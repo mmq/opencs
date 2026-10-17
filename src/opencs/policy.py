@@ -392,3 +392,10 @@ MODULE_ORDER_UNAVAILABLE = 0
 #: per second, II §14); each accepted order queues work, so an unlimited sender is bounded here
 #: as well as by the queue. Ours.
 RELAY_LIMIT_ORDER = (4, 1.0)
+
+# --- Modules and effects (I §9.4, I §9.3.1, I §9.3.5, II §16.1, II §13, II §15, II §5; DESIGN §3.1)
+# -----------
+
+#: A city starts in the client's default palette 0, "bright daylight". I §8.20, I §9.3.5, II §16.1
+#: (test servers take the starting condition as 0).
+DEFAULT_PALETTE = 0

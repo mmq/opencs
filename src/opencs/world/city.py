@@ -29,6 +29,7 @@ from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
+from opencs.world.weather import WEATHER_KEY, Weather
 
 log = logging.getLogger("opencs.world")
 
@@ -62,6 +63,8 @@ class City:
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
+        #: The city's weather condition, sent on a client's first report and on every change.
+        self.weather = Weather()
         #: Tower orders, the team guppies and the standing towers (I §9.4).
         self.orders = Orders(self, self._territory)
         #: Shots dropped because their KIND would crash a client (I §8.25).
@@ -140,6 +143,9 @@ class City:
             raise
         player = Player(player_id, callsign, team, index, ClientView(player_id, now))
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
+        # A fresh client already shows the default palette (I §8.20), so it is sent one only
+        # once the weather differs from it.
+        player.view.tell(WEATHER_KEY, policy.DEFAULT_PALETTE)
         self._players[player_id] = player
         return JoinResult(player_id, team, player.index, hello)
 
@@ -168,6 +174,7 @@ class City:
         self._ids = IdSpace()
         self._live.clear()
         self.orders.reset()
+        self.weather = Weather()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -320,6 +327,7 @@ class City:
         I §7.3). Players that have not reported yet are introduced when they do."""
         events: list[Event] = []
         events += inform(self._territory, player.view, now)
+        events += inform(self.weather, player.view, now)
         for entity in self._live.values():
             events += introduce(entity, player.view, now)
         self._live[player.id] = player
