@@ -34,7 +34,8 @@ _PRINTABLE_HIGH = 0x7E
 class LineReader:
     """Splits an inbound byte stream into CR-terminated lines (I §5.3).
 
-    LF is ignored, as are ESC, Ctrl-X and every other control byte. A line longer than
+    LF is ignored, as are ESC, Ctrl-X and every other control byte, and bytes 0x80..0xff (the
+    terminal is 7-bit, I §5.2), so a line is printable ASCII by construction. A line longer than
     ``policy.MAX_LINE_BYTES`` is discarded whole and counted, so memory stays bounded.
     Empty lines are returned; the login flow skips them (I §5.1).
     """
@@ -54,7 +55,7 @@ class LineReader:
                 else:
                     out.append(bytes(self._line))
                 self._line.clear()
-            elif b < _PRINTABLE_LOW or b == 0x7F:
+            elif not _PRINTABLE_LOW <= b <= _PRINTABLE_HIGH:
                 continue
             elif not self._overflow:
                 if len(self._line) >= policy.MAX_LINE_BYTES:
@@ -97,22 +98,26 @@ class HHHScanner:
 
 
 class QuitScanner:
-    """Counts raw ``QUIT\\r`` occurrences in a stream that may carry binary frame tails
-    (I §5.5 step 4), across chunk boundaries. Occurrences do not overlap."""
+    """Finds raw ``QUIT\\r`` in a stream that may carry binary frame tails (I §5.5 step 4),
+    across chunk boundaries. Occurrences do not overlap."""
 
     def __init__(self) -> None:
         self._tail = b""
 
-    def feed(self, data: bytes) -> int:
-        """Return how many ``QUIT\\r`` this chunk completed."""
+    def feed(self, data: bytes) -> list[int]:
+        """Return, for each ``QUIT\\r`` this chunk completed, the offset in ``data`` just after it.
+
+        The session passes ``data[offset:]`` to the Chamber once the second one arrives.
+        """
         buf = self._tail + data
-        count = 0
+        shift = len(self._tail)
+        ends: list[int] = []
         pos = 0
         while (i := buf.find(QUIT, pos)) >= 0:
-            count += 1
             pos = i + len(QUIT)
+            ends.append(pos - shift)
         self._tail = buf[max(pos, len(buf) - (len(QUIT) - 1)) :]
-        return count
+        return ends
 
 
 def sanitize_relay(text: bytes) -> bytes:
@@ -145,7 +150,10 @@ def arm_line(text: str) -> bytes:
     Raises ``WireError`` if ``text`` holds a non-printable byte or the line (text and CR) would
     not be shorter than 512 bytes: that is a bug in our code (DESIGN §5), not input.
     """
-    raw = text.encode("latin-1", "replace")
+    try:
+        raw = text.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise WireError("armed line holds a non-ASCII character") from exc
     if sanitize_relay(raw) != raw:
         raise WireError("armed line holds a non-printable byte")
     if len(raw) + 1 >= ARMED_LINE_LIMIT:

@@ -38,6 +38,11 @@ def test_control_bytes_dropped() -> None:
     assert r.feed(b"AB\x1bC\x18D\x00E\x7f\r") == [b"ABCDE"]
 
 
+def test_high_bytes_dropped_terminal_is_7_bit() -> None:
+    r = LineReader()
+    assert r.feed(b"AB\x80C\xe9D\xff\r") == [b"ABCD"]
+
+
 def test_overlong_line_discarded_and_counted_then_recovers() -> None:
     r = LineReader()
     assert r.feed(b"x" * (policy.MAX_LINE_BYTES * 3)) == []
@@ -62,14 +67,22 @@ def test_hhh_after_dial_noise_and_in_split_feed() -> None:
 
 def test_quit_amid_binary_and_split() -> None:
     q = QuitScanner()
-    assert q.feed(b"CS\x10\x10\x16AQUIT\rCS") == 1
-    assert q.feed(b"QU") == 0
-    assert q.feed(b"IT") == 0
-    assert q.feed(b"\r") == 1
-    assert q.feed(b"QUIT\rQUIT\r") == 2
+    assert q.feed(b"CS\x10\x10\x16AQUIT\rCS") == [11]
+    assert q.feed(b"QU") == []
+    assert q.feed(b"IT") == []
+    assert q.feed(b"\r") == [1]
+    assert q.feed(b"QUIT\rQUIT\r") == [5, 10]
     r = QuitScanner()
-    assert r.feed(b"QUIT\r") == 1
-    assert r.feed(b"\r") == 0  # the first match's bytes are not reused
+    assert r.feed(b"QUIT\r") == [5]
+    assert r.feed(b"\r") == []  # the first match's bytes are not reused
+
+
+def test_quit_offset_lets_the_caller_resume_chamber_text() -> None:
+    q = QuitScanner()
+    assert q.feed(b"QUIT\rQU") == [5]
+    chunk = b"IT\rA\r"  # the second QUIT\r completes here, with Chamber input behind it
+    (end,) = q.feed(chunk)
+    assert chunk[end:] == b"A\r"
 
 
 def test_arm_helpers() -> None:
@@ -87,6 +100,9 @@ def test_arm_line_guards() -> None:
         arm_line("A\x05B")
     with pytest.raises(WireError):
         arm_line("A\r")
+    for text in ("\u20ac", "\u00e9"):  # beyond Latin-1, and inside it: neither is ASCII
+        with pytest.raises(WireError):
+            arm_line(text)
 
 
 def test_plain_line_and_sanitize() -> None:
