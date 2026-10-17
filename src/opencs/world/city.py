@@ -154,8 +154,14 @@ class City:
             return []
         self._ids.release(IdRange.PLAYER, player_id, now)
         self._live.pop(player_id, None)
-        # The leaver is out of the roster, so ``ToHolders`` cannot reach its own client.
-        events = [Event(server.Delete(player_id), ToHolders(player_id))]
+        # Name the holders now: forgetting the pod below would leave ``ToHolders`` nobody to reach
+        # by the time the router resolves it. The leaver is out of the roster, so its own client is
+        # not among them.
+        events = []
+        for other in self.players():
+            if other.view.holds(player_id):
+                other.view.forget(player_id)
+                events.append(Event(server.Delete(player_id), ToPlayer(other.id)))
         if not self._players:
             self._reset()
         return events

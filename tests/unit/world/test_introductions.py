@@ -144,3 +144,24 @@ def test_a_dead_pod_is_introduced_where_it_last_stood_not_at_the_fly_over() -> N
     assert isinstance(g, server.Introduce) and g.id == a
     assert (g.pos.x_off, g.pos.y) == (111, 212)
     assert to(out, b)[2] == server.ReleaseDrop(a)  # the normal 'A' flow applies
+
+
+def test_leaving_sends_h_to_every_other_holder_and_to_no_one_else() -> None:
+    c = City(city("A"))
+    a, b, d = join(c, "AAA"), join(c, "BBB", 1), join(c, "DDD", 2)
+    for pid in (a, b, d):
+        first_b(c, pid)
+    e = join(c, "EEE", 3)  # seated, never reported: holds nobody and nobody holds it
+    out = deliveries(c, c.leave(b, 9.0))
+    assert out == [(a, server.Delete(b)), (d, server.Delete(b))]  # not b, not e
+    assert not c.player(a).view.holds(b) and not c.player(d).view.holds(b)  # type: ignore[union-attr]
+    assert c.player(e).view.held == {e}  # type: ignore[union-attr]
+
+
+def test_a_leaver_is_never_sent_j_which_would_respawn_it() -> None:
+    c = City(city("A"))
+    a, b = join(c, "AAA"), join(c, "BBB", 1)
+    first_b(c, a)
+    first_b(c, b)
+    messages = [m for _, m in deliveries(c, c.leave(a, 9.0))]
+    assert not any(isinstance(m, server.Destroy) for m in messages)

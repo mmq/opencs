@@ -110,9 +110,9 @@ def test_messages_from_unknown_players_and_unruled_messages_are_ignored() -> Non
 def test_leaving_deletes_the_pod_on_the_other_clients_that_hold_it() -> None:
     c = cyber_city_one()
     a, b = joined(c, "A", 0).player_id, joined(c, "B", 0).player_id
-    c.player(b).view.hold(a)  # type: ignore[union-attr]  (M5 introduces; here by hand)
+    c.player(b).view.hold(a)  # type: ignore[union-attr]  (introductions are in test_introductions)
     events = c.leave(a, 5.0)
-    assert events == [Event(server.Delete(a), ToHolders(a))]
+    assert events == [Event(server.Delete(a), ToPlayer(b))]
     assert c.player(a) is None
     assert [p.id for p in c.players()] == [b]  # the leaver is no holder any more
     assert c.leave(a, 6.0) == []  # twice is harmless
