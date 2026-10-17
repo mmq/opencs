@@ -296,3 +296,66 @@ RELAY_LIMIT_POD_STATE = (12, 8.0)
 RELAY_LIMIT_SHOT = (40, 16.0)
 RELAY_LIMIT_CHAT = (8, 2.0)
 RELAY_LIMIT_GRENADE = (8, 4.0)
+
+# --- Combat and scoring (I §9.1, I §9.2, I §9.2, II §9; DESIGN §3.1 ``combat``/``scoring``) ------
+
+#: Seconds from a client's ``'c'`` to the ``'I'`` its simulation reports for that shot. II §9.3:
+#: "~1.0 s earlier" (observed: own-shot delays span 0.75 to 1.14 s). Derived, not a choice.
+SHOT_FLIGHT_TIME = 1.0
+
+#: How far from ``SHOT_FLIGHT_TIME`` a logged shot may be and still be a candidate for a hit
+#: report, in seconds (candidates lie 0.0 to 2.0 s back). II §9.3: the +-1.0 s window is
+#: a server choice.
+SHOT_MATCH_TOLERANCE = 1.0
+
+#: Most shots one connection's log keeps. Ours (DESIGN §5): shots are also aged out past the match
+#: window, so this only bounds a client that fires faster than any real one (the relay limit
+#: ``RELAY_LIMIT_SHOT`` allows 16 a second, so this is about two windows' worth).
+SHOT_LOG_MAX = 64
+
+#: A hit counts toward a bounty payout for this many seconds. I §9.2.8, II §11.2 (the manual: "every
+#: non-teammate who hit that pod in the preceding 20 seconds"), II §11.2.
+PAYOUT_WINDOW = 20.0
+
+#: Bounty wire units a living pod accrues per second: ``'E'``-``'B'`` carries seconds of accrual
+#: (the client shows it times 10). I §9.2, I §9.2.2.
+BOUNTY_UNITS_PER_SECOND = 1
+
+#: The client displays and credits ten points per wire unit. I §8.7 ("The client stores
+#: ``bounty x 10``").
+BOUNTY_DISPLAY_FACTOR = 10
+
+#: Seconds between a pod's bounty pushes to the clients. I §9.2.12, II §11.2 gives the channel but
+#: not the cadence (a guess). The client counts +10 a tick of its own between pushes once
+#: ``'D'``-``'B'`` is sent, so a slow cadence only corrects drift. Ours.
+BOUNTY_PUSH_INTERVAL = 10.0
+
+#: The first ``'D'``-``'S'`` the client sends at least this long after a death gets the multiplier
+#: floor. II §12 ("the first ``'D'``-``'S'`` the client sends >= 2 s after a death"): an
+#: earlier report may have been built before our ``'J'`` reset the client (a server choice).
+FLOOR_SETTLE = 2.0
+
+#: A new player's bay levels and battle marker: ``1 1 1 1 0 0 0 0 0``, marker 0 (level 0 = no bay,
+#: ``X``). I §8.6, II §11.3 (persistence, which replaces this, is M10's).
+NEW_PLAYER_BAYS = (1, 1, 1, 1, 0, 0, 0, 0, 0)
+NEW_PLAYER_MARKER = 0
+
+#: A spawn's grace period ends after this many seconds even if the pod never leaves its home box.
+#: I §9.1.5 ("the two-minute deadline").
+GRACE_TIMEOUT = 120.0
+
+#: Each team's home corner tile ``(cell x, cell z)``, indexed by team 0-3 (red, blue, green,
+#: black): the client's spawn tables. I §9.4.3, I §9.1.5.
+TEAM_CORNER_CELLS = ((0, 0), (7, 0), (0, 7), (7, 7))
+
+#: The grace box is the 3x3 tiles centered on the corner tile: it starts one tile before the
+#: corner tile and is three tiles long. I §9.1.5 (``corner x 600 - 600`` to that ``+ 1800``).
+GRACE_BOX_START_TILES = -1
+GRACE_BOX_TILES = 3
+
+#: Per-session limit on the ``'I'`` hit reports a client may send, a token bucket ``(burst, per
+#: second)``. Each one that credits a pod's damage lands in the victim's outbox (I §9.1.4), so
+#: an unlimited reporter could overflow it. Real peaks are a few a second (a hit per shot, shots
+#: at most 3 a second); four times that with a burst of several seconds' worth, as the other
+#: relayed kinds (``RELAY_LIMIT_*``). Ours.
+RELAY_LIMIT_HIT = (40, 16.0)
