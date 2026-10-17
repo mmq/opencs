@@ -19,6 +19,7 @@ from opencs import policy
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, ServerMessage, client, server
 from opencs.world import chat, relay
+from opencs.world.combat import HitSet, ShotLog
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
@@ -38,9 +39,15 @@ class Player:
     index: int  # 0-3 within the team; unique per (team, index), I §6.3
     view: ClientView
     pod: Pod = field(init=False)
+    #: The shots this player's connection reported, for attributing its hit reports (II §9.3).
+    shots: ShotLog = field(init=False)
+    #: Who hit this player's pod lately, for the bounty payout at its death (I §9.2).
+    hits: HitSet = field(init=False)
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
+        self.shots = ShotLog(self.id)
+        self.hits = HitSet()
 
     @property
     def entity_id(self) -> int:
@@ -97,6 +104,9 @@ class City:
         self._live: dict[int, Entity] = {}
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
+        #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
+        #: (I §11.4, II §9.2), counted and logged; the shot is still relayed.
+        self.shooter_mismatches = 0
         self._handlers: dict[
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
@@ -105,7 +115,7 @@ class City:
             client.Grenade: lambda p, m, now: [
                 Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
             ],
-            client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m)),
+            client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -288,15 +298,34 @@ class City:
             return []
         return [event]
 
-    def _shot(self, player: Player, fired: client.Shot) -> list[Event]:
-        """A shot, relayed verbatim to every other client (I §8.25, I App. B). An unsafe KIND is
-        dropped and counted: a modified client must not crash the others."""
+    def _shot(self, player: Player, fired: client.Shot, now: float) -> list[Event]:
+        """A shot (I §8.25, II §9.3, I §11, I App. B).
+
+        It is logged on the sender's connection first, whatever the shooter and whether or not it
+        is relayed: an NPC's shot the client simulated is what keeps its hit from being credited
+        to the player (II §9.3). The shooter must be the sender's own pod or a known NPC;
+        a mismatch is logged and the shot still relayed. A shot is relayed verbatim to every other
+        client that has reported, except one whose KIND would crash a client, which is dropped and
+        counted.
+        """
+        player.shots.record(now, fired.shooter)
+        if fired.shooter != player.id and not self._is_known_npc(fired.shooter):
+            self.shooter_mismatches += 1
+            log.warning(
+                "player %d reported a shot by %d, which is neither its pod nor a known NPC",
+                player.id,
+                fired.shooter,
+            )
         shot = relay.shot(fired)
         if shot is None:
             self.unsafe_shots += 1
             log.warning("dropping a shot of KIND %d from player %d", fired.kind, player.id)
             return []
         return [Event(shot, self._playing(but=player.id))]
+
+    def _is_known_npc(self, entity_id: int) -> bool:
+        """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""
+        return entity_id in self._live and entity_id not in self._players
 
     def _died(self, player: Player, now: float) -> list[Event]:
         """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""
