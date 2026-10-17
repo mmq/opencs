@@ -12,6 +12,12 @@ from dataclasses import dataclass
 LEVEL_STRIDE = 10
 
 
+#: Modules whose activation sets the pod's flag byte bit 0, which adds ``ACTIVE_MODULE_WEIGHT`` to
+#: the weight in every ``'b'``: High Jump and Performance (I §9.3.4, II §13).
+WEIGHT_FLAG_MODULES = frozenset({2, 35})
+ACTIVE_MODULE_WEIGHT = 100
+
+
 @dataclass(frozen=True, slots=True)
 class Module:
     """One catalog row (I §9.3.1)."""

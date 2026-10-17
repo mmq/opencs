@@ -430,3 +430,9 @@ EJECT_KICKS = ((1, 0), (0, 1), (-1, 0), (0, -1))
 #: The client enforces a 50 ft pickup radius itself; a request from further away is logged, not
 #: refused. I §9.4.1, I §9.3.3.
 PICKUP_RANGE_FEET = 50
+
+#: Weight reports that may disagree with the installed-module ledger after a change before it counts
+#: as a mismatch, and reports that must match without a pending install before it is dropped as
+#: "never landed". The client's next ``'b'`` can have been built before the change landed. I §9.3.4,
+#: II §13; a guess that the ledger replay passes at.
+LOADOUT_GRACE_REPORTS = 2
