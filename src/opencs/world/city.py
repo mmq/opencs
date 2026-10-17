@@ -22,6 +22,7 @@ from opencs.world import chat, relay, scoring
 from opencs.world.combat import HitSet, ShotLog, damage_to_victim
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
+from opencs.world.grace import Grace
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.pods import Pod, PodPhase
 from opencs.world.scoring import Bounty, PlayerScore, multiplier_floor
@@ -48,6 +49,8 @@ class Player:
     score: PlayerScore = field(init=False)
     #: This pod's bounty (I §9.2).
     bounty: Bounty = field(init=False)
+    #: The spawn grace period as the client keeps it (I §9.1.5); mirrored, rules unchanged.
+    grace: Grace = field(init=False)
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
@@ -55,6 +58,7 @@ class Player:
         self.hits = HitSet()
         self.score = PlayerScore()
         self.bounty = Bounty(self.id)
+        self.grace = Grace(self.id, self.team)
 
     @property
     def entity_id(self) -> int:
@@ -230,6 +234,7 @@ class City:
         for player in self.players():
             events += player.pod.tick(now)
             events += player.bounty.tick(now)
+            player.grace.tick(now)
         return events
 
     def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
@@ -238,6 +243,10 @@ class City:
         first = not player.pod.has_reported
         phase = player.pod.phase
         events = player.pod.on_report(report, now)
+        if first:
+            player.grace.arm(now)  # a spawn (I §9.1.5)
+        if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is the camera, not the pod
+            player.grace.observe(report.pos, now)
         if phase is not PodPhase.IN_PLAY and player.pod.phase is PodPhase.IN_PLAY:
             player.bounty.start(now)  # it left drop state: alive and accruing (I §9.2.12, II §11.2)
         if first:
@@ -457,6 +466,7 @@ class City:
             )
             events.append(Event(server.KillNotice(earned), ToPlayer(payee.id)))
         player.score.on_own_death(now)
+        player.grace.arm(now)  # the client's new-life reset re-arms it (I §9.1.5)
         player.hits.clear()
         return events + died + player.bounty.zero()
 
