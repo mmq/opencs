@@ -111,7 +111,8 @@ def drop_player(city: City, player: Player, now: float, *, fight_at: float, hold
     reason = battle_reason(player, city.orders.strikes, fight_at)
     events: list[Event] = []
     if reason:
-        events = _name_holders(city, death.player_died(city, player, now), player.id)
+        died = death.player_died(city, player, now, as_of=fight_at)
+        events = _name_holders(city, died, player.id)
     record = None
     if player.identity is not None:
         record = ResumeRecord(

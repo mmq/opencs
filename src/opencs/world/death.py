@@ -27,10 +27,18 @@ from opencs.world.player import Player
 log = logging.getLogger("opencs.world")
 
 
-def settle(victim: Player, payees: list[Player], destroy: list[Event], now: float) -> list[Event]:
+def settle(
+    victim: Player,
+    payees: list[Player],
+    destroy: list[Event],
+    now: float,
+    *,
+    as_of: float | None = None,
+) -> list[Event]:
     """The events of a death. ``payees`` are the players to pay (the hit set within the window,
-    not teammates); ``destroy`` is the ``'J'`` event(s) the victim's pod produced."""
-    bounty = victim.bounty.value(now)
+    not teammates); ``destroy`` is the ``'J'`` event(s) the victim's pod produced. ``as_of`` is
+    when the death is valued, ``now`` unless the pod went quiet earlier (a silent line)."""
+    bounty = victim.bounty.value(now if as_of is None else as_of)
     events: list[Event] = []
     for payee in payees:
         paid = scoring.payout(payee.id, bounty, payee.score.multiplier)
@@ -57,14 +65,20 @@ def settle(victim: Player, payees: list[Player], destroy: list[Event], now: floa
     return events + destroy + victim.bounty.zero()
 
 
-def player_died(host: WorldHost, victim: Player, now: float) -> list[Event]:
+def player_died(
+    host: WorldHost, victim: Player, now: float, *, as_of: float | None = None
+) -> list[Event]:
     """The victim's pod died (its bare ``'J'``, or a line drop in a fight, II §13 item 3): the
-    pod's own steps, then ``settle``. A second death before the respawn changes nothing."""
+    pod's own steps, then ``settle``. A second death before the respawn changes nothing. A line
+    that went quiet at ``as_of`` is paid and valued as of then: who hit it up to that moment, and
+    the bounty it had (II §13 item 3, II §11.2), though it is noticed at ``now``."""
     destroy = victim.pod.on_death(now)
     if not destroy:
         return []
     victim.loadout.clear()  # the client empties every bay on its death (I §9.3.4, II §13)
-    events = settle(victim, payees(host, victim, now), destroy, now)
+    events = settle(
+        victim, payees(host, victim, now if as_of is None else as_of), destroy, now, as_of=as_of
+    )
     # The client lowered its marker silently, so the record takes the mirror's (II §11.3).
     victim.progress.on_own_death(victim.score.marker)
     return events

@@ -83,19 +83,30 @@ class ShotLog:
 
 
 class HitSet:
-    """Who hit one victim pod, and when: ``payee -> time of the last attributed hit`` (I §9.2.8, II
-    §11.2, II §9.3). A set, so a second hit by the same player only refreshes its time."""
+    """Who hit one victim pod, and when: ``payee -> times of its attributed hits`` (I §9.2.8, II
+    §11.2, II §9.3). A payee is in the set once however many times it hit. The times are kept for a
+    short while, not only the last, so a death can be settled as of an earlier moment (a line that
+    went quiet, II §13 item 3) with hits made after it left out."""
 
     def __init__(self) -> None:
-        self._hits: dict[int, float] = {}
+        self._hits: dict[int, list[float]] = {}
 
     def record(self, payee: int, now: float) -> None:
-        self._hits[payee] = now
+        times = self._hits.setdefault(payee, [])
+        times.append(now)
+        keep = now - policy.ATTACK_HISTORY
+        if times[0] < keep:
+            self._hits[payee] = [t for t in times if t >= keep]
 
     def payees(self, now: float) -> list[int]:
-        """The players that hit the pod within ``PAYOUT_WINDOW`` seconds, in id order. A hit
-        exactly that old still counts (the manual: "older than" 20 s does not)."""
-        return sorted(p for p, t in self._hits.items() if now - t <= policy.PAYOUT_WINDOW)
+        """The players that hit the pod within ``PAYOUT_WINDOW`` seconds up to ``now``, in id
+        order. A hit exactly that old still counts (the manual: "older than" 20 s does not); one
+        after ``now`` does not exist yet."""
+        return sorted(
+            p
+            for p, times in self._hits.items()
+            if any(0 <= now - t <= policy.PAYOUT_WINDOW for t in times)
+        )
 
     def clear(self) -> None:
         self._hits.clear()

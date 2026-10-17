@@ -251,6 +251,19 @@ def test_a_death_at_the_drop_pays_notifies_kills_zeroes_then_deletes_in_that_ord
     assert a not in [pid for pid, _ in out]  # nothing is sent to the dropped pod
 
 
+def test_a_silent_lines_death_is_settled_as_of_the_last_byte() -> None:
+    c, (a, hitter, late) = game([0, 1, 2])
+    hit(c, hitter, a, 10.0)  # inside 20 s of 25 s, outside it of 40 s
+    hit(c, late, a, 30.0)  # after the last byte: the pod was already gone
+    out, record = drop(c, a, 40.0, fight_at=25.0)  # quiet since 25, noticed at 40
+    assert record is not None and not record.eligible
+    assert isinstance(to(out, hitter)[0], server.KillNotice)
+    assert not any(isinstance(m, server.KillNotice) for m in to(out, late))
+    assert player(c, late).score.server_credit == 0
+    # Valued at 25 s: alive since t=1, a bounty of 240, not the 390 of the noticing at 40.
+    assert player(c, hitter).score.server_credit == 240 * player(c, hitter).score.multiplier
+
+
 def test_the_death_is_the_clients_own_reset_in_the_mirror_and_the_record() -> None:
     c, (a, hitter) = game([0, 1])
     c.client_message(a, client.Bays((1, 1, 1, 1, 0, 0, 0, 0, 0), 2), 5.0)
