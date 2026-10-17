@@ -97,6 +97,13 @@ class Session:
     def to_chamber(self) -> None:
         self._switch(ChamberPhase(self))
 
+    def return_to_chamber(self) -> None:
+        """Back from a game on the same connection: the member is in the Chamber again and the
+        buttons come back (I §5.5 step 5)."""
+        assert self.member is not None
+        self.services.lobby.return_to_chamber(self.member)
+        self._switch(ChamberPhase(self, returning=True))
+
     def to_login_prompt(self) -> None:
         self._switch(LoginPhase(self, at_prompt=True))
 

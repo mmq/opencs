@@ -9,13 +9,16 @@ to the next one unchanged: the client starts sending binary frames right after t
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from opencs.clock import Clock
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
+from opencs.routing import Router
 from opencs.wire.text import LineReader
+from opencs.world.city import City
 
 if TYPE_CHECKING:
     from opencs.session.session import Session
@@ -30,6 +33,8 @@ class Services:
     identity: Identity
     lobby: Lobby
     clock: Clock
+    cities: Mapping[str, City]  # the world, by city letter
+    router: Router
 
 
 class Phase(ABC):

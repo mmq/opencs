@@ -46,8 +46,9 @@ class State(Enum):
 class ChamberPhase(TextPhase):
     """Version check, lobby commands, chat relay and the launch."""
 
-    def __init__(self, host: Session) -> None:
+    def __init__(self, host: Session, *, returning: bool = False) -> None:
         super().__init__(host)
+        self._returning = returning
         self._state = State.VERSION
         self._deadline = 0.0
         self._member: Member | None = None
@@ -67,6 +68,13 @@ class ChamberPhase(TextPhase):
         return self._member
 
     def enter(self) -> None:
+        if self._returning:
+            # Back from a game: the version check is not repeated (the Chamber program starts
+            # silent, I §5.5); the buttons come back and a stray version reply is swallowed.
+            self._member = self.host.member
+            self._late_reply_possible = True
+            self._open_lobby()
+            return
         self._member = self.host.join_lobby()
         self._deadline = self.host.now() + policy.VERSION_WAIT
         self.host.io.send_raw(arm_line("PRESS RETURN"))

@@ -178,6 +178,11 @@ class Lobby:
         member.team = placement.team
         return True
 
+    def return_to_chamber(self, member: Member) -> None:
+        """``member`` is back from a game: in the Chamber, in no city or team."""
+        member.city = None
+        member.team = None
+
     # --- chat ------------------------------------------------------------------------------
 
     def relay_chat(self, sender: Member, text: str) -> int:

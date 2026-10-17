@@ -20,36 +20,52 @@ from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.net.connection import ConnectionIO, SessionFactory
 from opencs.net.listener import Listener
+from opencs.routing import Router
 from opencs.session.phases import Services
 from opencs.session.session import Session
 from opencs.store.base import AccountStore
 from opencs.store.memory import MemoryAccountStore
+from opencs.world.city import City
 
 log = logging.getLogger("opencs.app")
 
 DEFAULT_CONFIG_PATH = Path("config") / "server.toml"
 
 
-def build_session_factory(
+def build_services(
     config: AppConfig,
     *,
     store: AccountStore | None = None,
     clock: Clock | None = None,
     rng: random.Random | None = None,
-) -> SessionFactory:
-    """Build the services every session shares and return the factory the listener calls.
-
-    Accounts are kept in memory until the persistence milestone (M10).
-    """
+) -> Services:
+    """Build what every session shares: identity, the lobby, one ``City`` per enabled city and the
+    router. Accounts are kept in memory until the persistence milestone (M10)."""
     clock = clock or MonotonicClock()
     identity = Identity(store or MemoryAccountStore())
     lobby = Lobby(config.cities, config.server.default_city, rng or random.Random())
-    services = Services(identity, lobby, clock)
+    cities = {c.letter: City(c) for c in config.cities if c.enabled}
+    return Services(identity, lobby, clock, cities, Router())
+
+
+def build_session_factory(services: Services) -> SessionFactory:
+    """The factory the listener calls for each accepted connection."""
 
     def factory(io: ConnectionIO, context: ConnectionContext) -> Session:
         return Session(io, services, ConnectionLog(logging.getLogger("opencs.session"), context))
 
     return factory
+
+
+async def run_city(city: City, router: Router, clock: Clock) -> None:
+    """Tick one city ``TICK_HZ`` times a second and deliver what it says (DESIGN §3.3). A bug in
+    the city's rules is logged and the next tick runs (DESIGN §5)."""
+    while True:
+        await asyncio.sleep(1 / policy.TICK_HZ)
+        try:
+            router.deliver(city, city.tick(clock.now()))
+        except Exception:
+            log.exception("city %s failed on a tick", city.config.letter)
 
 
 async def serve(
@@ -68,9 +84,13 @@ async def serve(
     ``clock`` and ``rng`` are for tests.
     """
     clock = clock or MonotonicClock()
-    factory = build_session_factory(config, store=store, clock=clock, rng=rng)
-    listener = Listener(factory, clock)
+    services = build_services(config, store=store, clock=clock, rng=rng)
+    listener = Listener(build_session_factory(services), clock)
     server = await listener.start(config.server.host, config.server.port)
+    tickers = [
+        asyncio.create_task(run_city(city, services.router, clock))
+        for city in services.cities.values()
+    ]
     bound = [sock.getsockname()[:2] for sock in server.sockets]
     for address, bound_port in bound:
         log.info("listening on %s:%d", address, bound_port)
@@ -80,6 +100,9 @@ async def serve(
     try:
         await stop.wait()
     finally:
+        for ticker in tickers:
+            ticker.cancel()
+        await asyncio.gather(*tickers, return_exceptions=True)
         await listener.stop()
     log.info("stopped")
 
