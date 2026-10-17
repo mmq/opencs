@@ -4,6 +4,7 @@
 and wrong types raise ``ConfigError`` naming the file and the key, so a typo fails at startup.
 """
 
+import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -105,6 +106,14 @@ class _Table:
                 raise self.fail(key, f"{item} is outside {low}..{high}")
         return tuple(value)
 
+    def unique_nonempty(self, key: str, values: tuple[int, ...]) -> tuple[int, ...]:
+        """Reject an empty tuple or one with repeats (a typo that should fail at startup)."""
+        if not values:
+            raise self.fail(key, "must not be empty")
+        if len(set(values)) != len(values):
+            raise self.fail(key, "must not repeat a value")
+        return values
+
     def done(self) -> None:
         """Reject any key that was never asked for."""
         unknown = sorted(set(self._data) - self._seen)
@@ -155,7 +164,8 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
     config = CityConfig(
         letter=letter,
         name=name,
-        map=table.integer("map", low=1, high=2**31 - 1),
+        # Any map number: only 1-3 ship with the client (II §5).
+        map=table.integer("map", low=1, high=sys.maxsize),
         max_multiplier=table.integer("max_multiplier", low=1, high=policy.MAX_MULTIPLIER_CEILING),
         tower_output=table.integer("tower_output", low=0, high=policy.MAX_TOWER_OUTPUT),
         max_module_level=table.integer("max_module_level", low=0, high=policy.MAX_MODULE_LEVEL),
@@ -163,10 +173,19 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
             "capacity", policy.DEFAULT_CITY_CAPACITY, low=1, high=policy.MAX_CITY_CAPACITY
         ),
         team_policy=team_policy,
-        balance_teams=table.int_list(
-            "balance_teams", tuple(range(policy.TEAM_COUNT)), low=0, high=policy.TEAM_COUNT - 1
+        balance_teams=table.unique_nonempty(
+            "balance_teams",
+            table.int_list(
+                "balance_teams", tuple(range(policy.TEAM_COUNT)), low=0, high=policy.TEAM_COUNT - 1
+            ),
         ),
-        banned_modules=table.int_list("banned_modules", (), low=0, high=2**31 - 1),
+        # The modules milestone will check each entry against the real catalog (I §9.3.1).
+        banned_modules=table.int_list(
+            "banned_modules",
+            (),
+            low=policy.MODULE_INDEX_LOW,
+            high=policy.MODULE_INDEX_HIGH,
+        ),
         enabled=table.boolean("enabled", True),
     )
     table.done()

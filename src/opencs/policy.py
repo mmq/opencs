@@ -33,6 +33,11 @@ MAX_TOWER_OUTPUT = 2
 #: Highest module level. II §5 (n3).
 MAX_MODULE_LEVEL = 5
 
+#: Lowest and highest module catalog index; the real indices are 1-9, 11-18, 21-30, 31-37 and
+#: 41-47. I §9.3.1.
+MODULE_INDEX_LOW = 1
+MODULE_INDEX_HIGH = 47
+
 #: Players per city. II §6 (S9: "Capacity 16").
 DEFAULT_CITY_CAPACITY = 16
 

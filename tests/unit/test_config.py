@@ -133,3 +133,18 @@ def test_capacity_ceiling_is_sixteen(tmp_path: Path) -> None:
     assert city.capacity == 16
     with pytest.raises(ConfigError, match=": capacity:"):
         load_config(write_config(tmp_path, {"A": with_line("capacity = 17")}))
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "balance_teams = []",
+        "balance_teams = [1, 1, 1]",
+        "banned_modules = [0]",
+        "banned_modules = [48]",
+        "banned_modules = [99]",
+    ],
+)
+def test_empty_duplicate_and_out_of_catalog_lists(tmp_path: Path, line: str) -> None:
+    with pytest.raises(ConfigError, match=f": {line.split(maxsplit=1)[0]}:"):
+        load_config(write_config(tmp_path, {"A": with_line(line)}))
