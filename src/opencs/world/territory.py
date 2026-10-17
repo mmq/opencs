@@ -4,7 +4,7 @@ The client computes control and income itself, from the towers it has been sent 
 ``'T'`` gave it (I §9.2.6); the server sends no score for territory. This module is
 what the server needs of it: the ``'T'``-``'I'`` message (it is ``CityState``, so
 ``entities.inform`` hands it to every client once, I §7.3) and a pure control computation for
-the server's own use (logging; M9's Muncher goes for the team owning most blocks).
+the server's own use (logging, and the free Muncher goes for the team owning most blocks).
 """
 
 from __future__ import annotations

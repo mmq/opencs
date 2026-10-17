@@ -66,7 +66,7 @@ class ClientView:
     #: Muncher id -> this client's copy of it, for each Muncher it holds (I §7.3).
     munchers: dict[int, MuncherSync] = field(default_factory=dict)
     #: City-wide state (not entities) -> the value this client was last sent: the territory grid
-    #: now, the weather in M9 (I §7.3: "once, plus again on every change").
+    #: now, the weather (I §7.3: "once, plus again on every change").
     told: dict[str, Hashable] = field(default_factory=dict)
 
     def hold(self, entity_id: int) -> None:

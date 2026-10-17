@@ -247,8 +247,9 @@ class City:
             player.shots.record(now, fired.shooter)
 
     def tick(self, now: float) -> list[Event]:
-        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7), the bounty pushes (I §9.2.12,
-        II §11.2) and the weather program (I §8.20)."""
+        """Timed rules: the weather program (I §8.20), Sentinel replacements, Muncher meals
+        and free Munchers (II §16.2), and each pod's drop ``'A'`` repeat (I §7.1, II §7) and
+        bounty pushes (I §9.2.9)."""
         events: list[Event] = []
         events += self._tick_weather(now)
         events += self.sentinels.tick(now)

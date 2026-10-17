@@ -43,8 +43,8 @@ log = logging.getLogger("opencs.world")
 
 @dataclass(frozen=True, slots=True)
 class Strike:
-    """An Air Support grenade dropped: when, by whose team's guppy, where (I §9.3.6). M10's resume
-    reads these as enemy strikes near a dropped pod (II §13 item 3)."""
+    """An Air Support grenade dropped: when, by whose team's guppy, where (I §9.3.6). a resumed
+    pod's check reads these as enemy strikes near a dropped pod (II §13 item 3)."""
 
     at: float
     team: int
@@ -155,7 +155,7 @@ class Orders:
 
     def leg_arrived(self, player: Player, arrival: client.LegArrived, now: float) -> list[Event]:
         """A client's copy of a guppy completed a leg (I §9.4.1). Only guppies this client holds
-        are counted: a Muncher's report (M9) or a made-up id is ignored."""
+        are counted: a made-up id is ignored (a Muncher's report is routed before it gets here)."""
         count = player.view.legs.get(arrival.id)
         if count is None:
             return []
@@ -258,7 +258,7 @@ class Orders:
     def territory_income(self) -> dict[int, int]:
         """Team -> the points per second (before multipliers) its controlled blocks are worth, from
         the towers the server knows. The clients compute their own income; this is for the
-        server's log and, in M9, for the free Muncher's target (I §9.2.6)."""
+        server's log and for the free Muncher's target (I §9.2.6)."""
         territory = self._territory
         controlled = territory.controllers((t.block, t.team) for t in self.towers.values())
         return territory.income(controlled)

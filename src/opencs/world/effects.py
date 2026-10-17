@@ -80,8 +80,8 @@ class Effects:
     def request(self, player: Player, effect: str, now: float) -> list[Event]:
         """An ``'E'`` effect request from ``player`` (I §9.3.5, II §16.1). Ignored before the pod's
         first report and while it is dead, and when the city does not stock the module (an honest
-        pod holds only modules this server delivered, so it is a forged request: logged, I §11);
-        Call Muncher, Call Sentinel and anything not built are logged and ignored."""
+        pod holds only modules this server delivered, so it is a forged request: logged, I §11); a
+        request no handler serves is logged and ignored."""
         placed = player.pod.placed
         if placed is None or player.pod.phase is PodPhase.DEAD:
             return []

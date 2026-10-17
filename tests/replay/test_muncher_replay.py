@@ -2,8 +2,8 @@
 I §9.5.2).
 
 A Muncher is driven entirely by the server and by the arrival reports, so there is no captured
-client input to replay (no capture holds a Muncher trip). What is
-replayed is the client's behavior, modeled on what was observed with real clients:
+client input to replay (no capture holds a Muncher trip). What is replayed is the client's behavior,
+modeled on what was observed with real clients:
 
 * a ``'K'`` for a new id creates the Muncher at the point with its destination zeroed;
 * a ``'K'`` for a known id sets the destination and abandons the old leg, which is then never
