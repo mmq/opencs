@@ -198,6 +198,8 @@ def test_afterward_it_latches_eats_and_leaves_like_any_other() -> None:
     t = tower(c, 1000, 1000, team=1)
     tick(c, EVERY)
     out = arrive(c, a, FIRST, EVERY + 12)
+    assert latches(out, b) == []  # b's copy has not reported yet: held back, not overtaken
+    out = arrive(c, b, FIRST, EVERY + 12.5)
     assert latches(out, b) == [server.SendMuncher(FIRST, t)]
     assert tick(c, EVERY + 26.9) == []
     out = tick(c, EVERY + 27.0)

@@ -68,6 +68,8 @@ class SimClient:
     sent: list[ServerMessage] = field(default_factory=list)
     removed: set[int] = field(default_factory=set)
     expect_dispatch: int | None = None
+    #: How fast this client's simulation runs relative to the others' (frame rate, emulator load).
+    speed: float = 1.0
 
     def receive(self, t: float, message: ServerMessage) -> None:
         self.sent.append(message)
@@ -83,12 +85,13 @@ class SimClient:
             if m.done:
                 continue
             distance = math.hypot(m.dx - m.x, m.dz - m.z)
-            if distance <= SPEED * STEP:
+            reach = SPEED * self.speed * STEP
+            if distance <= reach:
                 m.x, m.z, m.done = m.dx, m.dz, True
                 reports.append(mid)
             else:
-                m.x += (m.dx - m.x) * SPEED * STEP / distance
-                m.z += (m.dz - m.z) * SPEED * STEP / distance
+                m.x += (m.dx - m.x) * reach / distance
+                m.z += (m.dz - m.z) * reach / distance
         return reports
 
     def _apply(self, message: ServerMessage) -> None:
@@ -131,7 +134,11 @@ def muncher_traffic(messages: list[ServerMessage]) -> list[ServerMessage]:
 class Harness:
     """The city, its modeled clients and the wires between them."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        latencies: tuple[float, ...] = LATENCIES,
+        speeds: tuple[float, ...] = (1.0, 1.0),
+    ) -> None:
         self.c = City(config_for("A", max_module_level=5), random.Random(1))
         ids = []
         for team in (0, 1):
@@ -145,7 +152,9 @@ class Harness:
             self.c.client_message(pid, report(0, **at), 0.5)
         for x, z in TOWERS:
             self.c.orders.place_tower(3, WirePos.from_world(x, 20, z), False, 1.0)
-        self.present = [SimClient(pid, lat) for pid, lat in zip(ids, LATENCIES, strict=True)]
+        self.present = [
+            SimClient(pid, lat, speed=f) for pid, lat, f in zip(ids, latencies, speeds, strict=True)
+        ]
         self.everyone = list(self.present)
         self.to_server: list[tuple[float, int, ServerMessage]] = []
         self.tower_ids = set(self.c.orders.towers)
@@ -171,6 +180,10 @@ class Harness:
         for sim in self.present[: len(LATENCIES)]:
             self.c.leave(sim.pid, t)
         self.present = self.present[len(LATENCIES) :]
+
+    def leave(self, sim: SimClient, t: float) -> None:
+        self.c.leave(sim.pid, t)
+        self.present.remove(sim)
 
     def step(self, t: float) -> None:
         for sim in self.present:
@@ -241,3 +254,41 @@ JOIN_TIMES = [None, *[float(j) for j in range(2, 100, 3)]]
 )
 def test_the_muncher_trip_completes_for_every_join_time(join_at: float | None) -> None:
     assert run(join_at) == []
+
+
+# --- clients that fly at different speeds -----------------------------------------------------
+#
+# Two clients whose simulations differ by a few percent (two emulators on one machine) and whose
+# round trips are far shorter than the difference in their arrival times. Whichever copy arrives
+# first is acted on at once, so the other copy has not reported yet when the latch or the next
+# dispatch would reach it: the server must hold that client back until its own report, or the leg
+# it was flying is replaced and never reported, and once the faster client leaves nothing can move
+# the Muncher (I §9.4.1, I §7.3).
+
+SPEED_FACTORS = [(1.0, 0.8), (0.8, 1.0), (1.0, 0.97), (1.03, 0.97), (0.99, 1.0), (1.2, 1.0)]
+NEAR_ZERO = [(0.0, 0.0), (0.05, 0.05), (0.01, 0.1), (0.4, 0.9), (0.9, 0.4)]
+FIRST_LATCH_BY = 25.0  # the faster client leaves once the first latch has gone out
+
+
+def run_at_speeds(
+    latencies: tuple[float, float], speeds: tuple[float, float], leave_faster_at: float | None
+) -> list[str]:
+    h = Harness(latencies, speeds)
+    t = 1.0
+    h.send(t, h.c.client_message(h.present[0].pid, client.EffectRequest("C"), t))
+    faster = max(h.present, key=lambda s: s.speed)
+    while h.running(t):
+        if leave_faster_at is not None and t >= leave_faster_at and faster in h.present:
+            h.leave(faster, t)
+        h.step(t)
+        t += STEP
+    return h.failures()
+
+
+@pytest.mark.parametrize("leaves", [None, FIRST_LATCH_BY], ids=["stay", "faster leaves"])
+@pytest.mark.parametrize("latencies", NEAR_ZERO, ids=lambda x: f"lat={x[0]:g}/{x[1]:g}")
+@pytest.mark.parametrize("speeds", SPEED_FACTORS, ids=lambda x: f"speed={x[0]:g}/{x[1]:g}")
+def test_the_muncher_trip_completes_when_the_clients_fly_at_different_speeds(
+    speeds: tuple[float, float], latencies: tuple[float, float], leaves: float | None
+) -> None:
+    assert run_at_speeds(latencies, speeds, leaves) == []

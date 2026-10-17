@@ -115,9 +115,11 @@ def test_the_first_report_latches_it_once_and_the_create_is_never_a_report() -> 
     t = tower(c, 1500, 1800)
     call(c, a)
     out = arrive(c, a, FIRST, 16.0)  # the first dispatch's arrival (leg 1)
-    for pid in (a, b):
-        assert latches(out, pid) == [server.SendMuncher(FIRST, t)]
-    assert arrive(c, b, FIRST, 16.5) == []  # the other client's report of the same leg
+    assert latches(out, a) == [server.SendMuncher(FIRST, t)]
+    # b's copy has not reported leg 1: a latch now would cut its flight short, unreported
+    # (I §9.4.1), so b waits and is latched by its own report.
+    assert latches(out, b) == []
+    assert latches(arrive(c, b, FIRST, 16.5), b) == [server.SendMuncher(FIRST, t)]
     assert c.munchers.alive[FIRST].acted == 1
 
 
@@ -128,7 +130,7 @@ def test_a_client_cannot_report_more_legs_than_it_was_sent() -> None:
     arrive(c, a, FIRST, 16.0)
     assert arrive(c, a, FIRST, 16.1) == []  # a second report of a leg it was sent once
     assert c.munchers.ignored_reports == 1
-    assert arrive(c, b, FIRST, 16.2) == []  # b's own report: a duplicate, not out of protocol
+    assert latches(arrive(c, b, FIRST, 16.2), b)  # b's own report: answered, not out of protocol
     assert c.munchers.ignored_reports == 1
 
 
@@ -164,6 +166,7 @@ def test_after_a_meal_it_chains_to_the_next_tower_within_600_feet_of_where_it_is
     two = tower(c, 1500, 2300)  # 500 from the first, 800 from the caller
     call(c, a)
     arrive(c, a, FIRST, 16.0)
+    arrive(c, b, FIRST, 16.5)
     out = tick(c, 31.0)
     assert ks(out, a) == [xz(1500, 2300)] and ks(out, b) == [xz(1500, 2300)]
     assert c.munchers.alive[FIRST].target == two and one not in c.orders.towers
@@ -298,8 +301,9 @@ def test_a_slower_clients_reports_of_each_leg_never_act_a_second_time() -> None:
     tower(c, 1500, 2300)
     call(c, a)
     assert latches(arrive(c, a, FIRST, 16.0), a)  # leg 1, a first
+    assert latches(arrive(c, b, FIRST, 16.5), b)  # b is latched by its own report, once
     tick(c, 31.0)  # tower one eaten, leg 2 dispatched
-    assert arrive(c, b, FIRST, 31.5) == []  # b's leg-1 report: a duplicate of the one acted on
-    assert latches(arrive(c, a, FIRST, 40.0), b)  # leg 2, a first again
-    assert arrive(c, b, FIRST, 40.5) == []
+    assert latches(arrive(c, a, FIRST, 40.0), a)  # leg 2, a first again
+    assert latches(arrive(c, b, FIRST, 40.5), b)  # b is answered, not skipped
+    assert arrive(c, b, FIRST, 41.0) == []  # nothing owed any more
     assert c.munchers.alive[FIRST].acted == 2

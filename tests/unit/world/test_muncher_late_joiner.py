@@ -68,7 +68,11 @@ def test_a_client_present_when_it_was_called_flies_it_from_the_start_like_everyo
     t = trip()
     c, a, b, one = t.c, t.a, t.b, t.one
     assert not c.player(b).view.munchers[FIRST].joining  # type: ignore[union-attr]
-    assert latches(arrive(c, a, FIRST, 16.0), b) == [server.SendMuncher(FIRST, one)]
+    out = arrive(c, a, FIRST, 16.0)  # a reports first: b's copy has not reported leg 1 yet, so
+    assert latches(out, b) == []  # it is held back (joining) rather than overtaken
+    assert c.player(b).view.munchers[FIRST].joining  # type: ignore[union-attr]
+    assert latches(arrive(c, b, FIRST, 16.5), b) == [server.SendMuncher(FIRST, one)]
+    assert not c.player(b).view.munchers[FIRST].joining  # type: ignore[union-attr]
 
 
 def test_a_joiner_is_created_where_the_current_leg_began_and_dispatched_at_once() -> None:
@@ -87,10 +91,12 @@ def test_a_joining_client_is_sent_no_live_traffic_before_its_copy_has_reported()
     t = trip()
     c, a, b, two = t.c, t.a, t.b, t.two
     arrive(c, a, FIRST, 16.0)
+    arrive(c, b, FIRST, 16.5)
     tick(c, 31.0)
     late, _ = join_late(c, 33.0)
-    out = arrive(c, a, FIRST, 40.0)  # leg 2 arrives at the others: latched on tower two
-    assert latches(out, a) and latches(out, b)
+    out = arrive(c, a, FIRST, 40.0)  # leg 2 arrives at a: latched on tower two
+    assert latches(out, a)
+    assert latches(arrive(c, b, FIRST, 40.5), b)
     assert to(out, late) == []  # no latch for a copy that never saw leg 2 arrive
     out = tick(c, 55.0)  # tower two eaten, the Muncher leaves
     assert ks(out, a) and ks(out, b)

@@ -260,6 +260,7 @@ class Munchers:
         if leg != m.legs or m.acted >= leg:
             return []  # an old leg, or one another client reported first
         m.acted = leg
+        self._hold_back_laggards(m, leg)
         if m.phase is Phase.LEAVING:
             log.info("Muncher %d left the city", m.entity_id)
             return self._remove(m, now)
@@ -271,6 +272,16 @@ class Munchers:
             Event(server.SendMuncher(m.entity_id, tower.entity_id), ToPlayer(p.id))
             for p in self._synced(m)
         ]
+
+    def _hold_back_laggards(self, m: Muncher, leg: int) -> None:
+        """Every in-step client whose own copy has not yet reported ``leg`` is made *joining* at
+        that leg: the latch or next dispatch about to be sent would replace the leg it is still
+        flying, which would then never be reported (I §9.4.1, I §7.3). Its own report is answered
+        with whatever the Muncher is doing by then."""
+        for p in self._host.players():
+            other = p.view.munchers.get(m.entity_id)
+            if other is not None and not other.joining and other.reports < leg:
+                other.joining, other.sent_leg = True, leg
 
     def _joining_report(
         self, m: Muncher, player: Player, sync: MuncherSync, now: float

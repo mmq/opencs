@@ -39,9 +39,11 @@ class MuncherSync:
     """One client's copy of a Muncher (I §7.3, I §9.5.2, II §16.2). Its create is never reported, so
     ``reports`` counts completed legs from the dispatches only: its n-th report is about leg n.
 
-    A client introduced after the Muncher's first leg was acted on is *joining*: it is sent no live
-    ``'K'`` or ``'E'``-``'C'`` (to it a ``'K'`` would be a new id, a stray Muncher) until its own
-    copy has reported. ``sent_leg`` is the leg last sent to it as a copy; ``owed`` is how many
+    A client is *joining* when its copy is not in step: it was introduced after the Muncher was
+    made, or its copy has not yet reported a leg another client's report has acted on.
+    It is sent no live ``'K'`` or ``'E'``-``'C'`` (a latch or dispatch would replace the leg it is
+    still flying, unreported; to a client without the create a ``'K'`` is a stray Muncher) until its
+    own copy has reported. ``sent_leg`` is the leg last sent to it as a copy; ``owed`` is how many
     reports it can still make, one per dispatch sent (a report with none owed is out of protocol
     and ignored)."""
 
