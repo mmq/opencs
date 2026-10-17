@@ -16,9 +16,9 @@ from pathlib import Path
 from opencs.app import serve
 from opencs.clock import ManualClock
 from opencs.config import AppConfig, load_config
-from opencs.messages import ServerMessage, decode_server
+from opencs.messages import ClientMessage, ServerMessage, client_payload, decode_server, server
 from opencs.session.phases import Services
-from opencs.wire.frame import Frame, FrameReader
+from opencs.wire.frame import Frame, FrameReader, build_frame
 
 TIMEOUT = 5.0
 SHIPPED = Path(__file__).parents[2] / "config" / "server.toml"
@@ -164,3 +164,22 @@ async def start(
 async def connect(port: int) -> Client:
     reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), TIMEOUT)
     return Client(reader, writer)
+
+
+def frame(msg: ClientMessage) -> bytes:
+    return build_frame(client_payload(msg), terminator=b"\x0a")
+
+
+async def enter(port: int, team: str) -> tuple[Client, server.Session]:
+    c = await connect(port)
+    await c.send("HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r")
+    await c.expect(b"\x05PRESS RETURN\r")
+    await c.send("\r")
+    await c.expect(b"\x05A\r")
+    await c.send(f"/PLAY A {team}\r")
+    await c.expect(b"\x05E 1 1\r")
+    await c.send("/GO 0\r")
+    await c.expect(b"\x05C\r")
+    hello = await c.expect_frame("B")
+    assert isinstance(hello, server.Session)
+    return c, hello

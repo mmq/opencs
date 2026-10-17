@@ -5,31 +5,11 @@ from __future__ import annotations
 
 import asyncio
 
-from fixtures.loopback import TIMEOUT, Client, LogWatch, TickGate, connect, local_config, start
+from fixtures.loopback import TIMEOUT, Client, LogWatch, TickGate, enter, frame, local_config, start
 from fixtures.pods import report
 from opencs.app import build_services
 from opencs.clock import ManualClock
-from opencs.messages import ServerMessage, WirePos, client, client_payload, server
-from opencs.wire.frame import build_frame
-
-
-def frame(msg: client.ClientMessage) -> bytes:
-    return build_frame(client_payload(msg), terminator=b"\x0a")
-
-
-async def enter(port: int, team: str) -> tuple[Client, server.Session]:
-    c = await connect(port)
-    await c.send("HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r")
-    await c.expect(b"\x05PRESS RETURN\r")
-    await c.send("\r")
-    await c.expect(b"\x05A\r")
-    await c.send(f"/PLAY A {team}\r")
-    await c.expect(b"\x05E 1 1\r")
-    await c.send("/GO 0\r")
-    await c.expect(b"\x05C\r")
-    hello = await c.expect_frame("B")
-    assert isinstance(hello, server.Session)
-    return c, hello
+from opencs.messages import ServerMessage, WirePos, client, server
 
 
 def test_two_players_see_each_other_chat_throw_and_leave() -> None:
