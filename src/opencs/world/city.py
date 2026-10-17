@@ -17,8 +17,9 @@ from dataclasses import dataclass, field
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, client, server
-from opencs.world.events import Event, ToHolders
+from opencs.messages import ClientMessage, ServerMessage, client, server
+from opencs.world.entities import Entity, introduce
+from opencs.world.events import Event, ToHolders, ToPlayer
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.pods import Pod
 from opencs.world.view import ClientView
@@ -39,6 +40,29 @@ class Player:
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
+
+    @property
+    def entity_id(self) -> int:
+        return self.id
+
+    def creating_messages(self) -> Sequence[ServerMessage]:
+        """``'G'`` at the pod's last position, then ``'A'``: ``'G'`` leaves the new pod in drop
+        state and a pod in drop state discards every ``'b'`` (I §7.2 steps 2 and 3). A pod that
+        is dead and awaiting its drop is introduced where it last stood; the normal ``'A'`` flow
+        then applies (I §7.2)."""
+        placed = self.pod.placed
+        assert placed is not None, "a pod is introduced only after its first 'b' (I §7.2)"
+        return (
+            server.Introduce(
+                id=self.id,
+                callsign=self.callsign.encode("ascii"),
+                index=self.index,
+                team=self.team,
+                pos=placed.pos,
+                orient=placed.orient,
+            ),
+            server.ReleaseDrop(self.id),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +89,13 @@ class City:
         self.config = config
         self._players: dict[int, Player] = {}
         self._ids = IdSpace()
+        #: The entities every client that is playing should hold: the pods that have reported
+        #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
+        self._live: dict[int, Entity] = {}
         self._handlers: dict[
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
-            client.PodState: lambda p, m, now: p.pod.on_report(_as(client.PodState, m), now),
+            client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -125,6 +152,7 @@ class City:
         if player is None:
             return []
         self._ids.release(IdRange.PLAYER, player_id, now)
+        self._live.pop(player_id, None)
         # The leaver is out of the roster, so ``ToHolders`` cannot reach its own client.
         events = [Event(server.Delete(player_id), ToHolders(player_id))]
         if not self._players:
@@ -134,6 +162,7 @@ class City:
     def _reset(self) -> None:
         """Nobody is here: the next game starts fresh (S13)."""
         self._ids = IdSpace()
+        self._live.clear()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -158,6 +187,30 @@ class City:
         events: list[Event] = []
         for player in self.players():
             events += player.pod.tick(now)
+        return events
+
+    def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
+        """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2)."""
+        first = player.pod.last is None
+        events = player.pod.on_report(report, now)
+        if first:
+            # Nobody else holds this pod yet, so its drop 'A' is for its owner alone; the others
+            # are given theirs by the introduction, after their 'G'.
+            events = [Event(e.message, ToPlayer(player.id)) for e in events]
+            events += self._go_live(player)
+        return events
+
+    def _go_live(self, player: Player) -> list[Event]:
+        """The player's first ``'b'`` is in: it is told about every pod already live, and they are
+        told about it, once per pair (I §7.2). Players that have not reported yet are
+        introduced when they do."""
+        events: list[Event] = []
+        for entity in self._live.values():
+            events += introduce(entity, player.view)
+        self._live[player.id] = player
+        for other in self.players():
+            if other.id in self._live:
+                events += introduce(player, other.view)
         return events
 
     def _died(self, player: Player, now: float) -> list[Event]:

@@ -38,6 +38,9 @@ class Pod:
         self.phase = PodPhase.AWAIT_FIRST_FRAME
         #: The pod's last ``'b'`` (position, orientation, state, power, weight, armor).
         self.last: client.PodState | None = None
+        #: The last ``'b'`` that described where the pod stands: not one sent during a death's
+        #: fly-over, which describes the camera. What a later joiner's ``'G'`` carries (I §7.2).
+        self.placed: client.PodState | None = None
         self._died_at = 0.0
 
     @property
@@ -53,6 +56,7 @@ class Pod:
         self.last = report
         if self.phase is PodPhase.DEAD:
             return []  # the fly-over reports state 4; answering it would re-drop the pod
+        self.placed = report
         if report.state == policy.POD_STATE_DROPPING:
             self.phase = PodPhase.DROPPING
             return [self._release()]

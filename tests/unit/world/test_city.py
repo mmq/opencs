@@ -9,7 +9,7 @@ from fixtures.pods import report
 from opencs.messages import client, server, server_payload
 from opencs.wire.frame import build_frame
 from opencs.world.city import City, JoinRefused, JoinResult
-from opencs.world.events import Event, ToAll, ToHolders
+from opencs.world.events import Event, ToAll, ToHolders, ToPlayer
 
 # I App. A.1: the first frame of a real session (city "CYBERCITY ONE"), tag 11.
 A3_B_FRAME = bytes.fromhex(
@@ -81,7 +81,8 @@ def test_the_drop_handshake_through_the_city() -> None:
     c = cyber_city_one()
     pid = joined(c).player_id
     release = Event(server.ReleaseDrop(pid), ToHolders(pid))
-    assert c.client_message(pid, report(4), 1.0) == [release]
+    # The first report: nobody else holds the pod yet, so the release is its owner's alone.
+    assert c.client_message(pid, report(4), 1.0) == [Event(server.ReleaseDrop(pid), ToPlayer(pid))]
     assert c.tick(1.2) == [release]
     assert c.client_message(pid, report(1), 1.5) == []
     assert c.tick(1.6) == []
