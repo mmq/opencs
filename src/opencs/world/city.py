@@ -336,7 +336,9 @@ class City:
         shot = relay.shot(fired)
         if shot is None:
             self.unsafe_shots += 1
-            log.warning("dropping a shot of KIND %d from player %d", fired.kind, player.id)
+            # Warn once, then DEBUG: a hostile client could otherwise log at the relay rate.
+            level = logging.WARNING if self.unsafe_shots == 1 else logging.DEBUG
+            log.log(level, "dropping a shot of KIND %d from player %d", fired.kind, player.id)
             return []
         return [Event(shot, self._playing(but=player.id))]
 
@@ -353,7 +355,8 @@ class City:
             # The client applies that damage itself and never reports it (I §9.1.4); relaying
             # one would apply it twice. None has been seen: a modified client.
             self.own_pod_hit_reports += 1
-            log.warning("player %d reported a hit on its own pod; ignored", reporter.id)
+            level = logging.WARNING if self.own_pod_hit_reports == 1 else logging.DEBUG  # once
+            log.log(level, "player %d reported a hit on its own pod; ignored", reporter.id)
             return []
         credit = reporter.shots.attribute(now)
         victim = self._players.get(hit.target)
@@ -367,7 +370,8 @@ class City:
         damage = damage_to_victim(reporter.id, hit.damage)
         if damage is None:
             self.unrelayable_damage += 1
-            log.warning("dropping damage byte %d from player %d", hit.damage, reporter.id)
+            level = logging.WARNING if self.unrelayable_damage == 1 else logging.DEBUG  # once
+            log.log(level, "dropping damage byte %d from player %d", hit.damage, reporter.id)
             return []
         return [Event(damage, ToPlayer(victim.id))]
 

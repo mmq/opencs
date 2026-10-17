@@ -3,6 +3,8 @@ I §9.1.4, II §9)."""
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from fixtures.cities import Npc, seat
@@ -135,3 +137,17 @@ def test_damage_to_a_pod_that_has_not_reported_is_dropped() -> None:
     c, ids = seat([0, 1], reported=False)
     c.client_message(ids[0], report(4), 1.0)
     assert c.client_message(ids[0], hit(ids[1]), 2.0) == []
+
+
+def test_the_hostile_input_warnings_are_logged_once_then_at_debug(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    c, (a, b) = playing([0, 1])
+    with caplog.at_level(logging.DEBUG, logger="opencs.world"):
+        for i in range(5):
+            c.client_message(a, hit(a), 5.0 + i)  # a hit on its own pod
+            c.client_message(a, hit(b, 25), 5.0 + i)  # damage class 5: past the client's table
+            c.client_message(a, client.Shot(a, report(0).pos, 0, 0, 99), 5.0 + i)  # unsafe KIND
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 3
+    assert c.own_pod_hit_reports == 5 and c.unrelayable_damage == 5 and c.unsafe_shots == 5
