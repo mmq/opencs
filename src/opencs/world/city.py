@@ -499,7 +499,9 @@ class City:
         tower = Tower.new(tower_id, team, pos, mega)
         self._towers[tower_id] = tower
         log.info("tower %d placed for team %d in block %s", tower_id, team, tower.block)
-        return self.spawn(tower, now)
+        events = self.spawn(tower, now)
+        self.log_territory()
+        return events
 
     def _destroy_tower(self, tower: Tower, now: float) -> list[Event]:
         """``'J'`` to every client that holds it, then forget it: a later joiner is not given its
@@ -514,7 +516,19 @@ class City:
         del self._towers[tower.entity_id]
         self._ids.release(IdRange.STRUCTURE, tower.entity_id, now)
         log.info("tower %d of team %d destroyed", tower.entity_id, tower.team)
+        self.log_territory()
         return events
+
+    def territory_income(self) -> dict[int, int]:
+        """Team -> the points per second (before multipliers) its controlled blocks are worth, from
+        the towers the server knows. The clients compute their own income; this is for the
+        server's log and, in M9, for the free Muncher's target (I §9.2.6)."""
+        territory = self._territory
+        controlled = territory.controllers((t.block, t.team) for t in self._towers.values())
+        return territory.income(controlled)
+
+    def log_territory(self) -> None:
+        log.info("territory income per second by team: %s", self.territory_income())
 
     def _is_known_npc(self, entity_id: int) -> bool:
         """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""

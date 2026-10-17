@@ -157,3 +157,19 @@ def test_a_hit_on_a_tower_still_uses_up_the_reporters_shot() -> None:
     assert player is not None and len(player.shots) == 1
     c.client_message(a, hit(tower, 0), 5.0)
     assert len(player.shots) == 0
+
+
+def test_territory_income_follows_the_towers_the_server_knows() -> None:
+    # POS is in block (3, 2), made worth 10 (class 3) in this city's map.
+    blocks = tuple(tuple(3 if (x, z) == (3, 2) else 0 for x in range(8)) for z in range(8))
+    c, ids = seat([0, 1], blocks=blocks)
+    for pid in ids:
+        c.client_message(pid, report(0), 1.0)
+    assert c.territory_income() == {}
+    c.place_tower(0, POS, False, 2.0)
+    assert c.territory_income() == {0: 10}
+    rival = place(c, team=1, now=3.0)  # a rival in the same block: disputed
+    assert c.territory_income() == {}
+    for n in range(20):
+        c.client_message(ids[0], hit(rival, 0), 5.0 + n)  # the rival falls: team 0 holds it again
+    assert c.territory_income() == {0: 10}
