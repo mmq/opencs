@@ -152,6 +152,8 @@ def test_capacity_ceiling_is_sixteen(tmp_path: Path) -> None:
         "banned_modules = [0]",
         "banned_modules = [48]",
         "banned_modules = [99]",
+        "banned_modules = [10]",  # inside 1-47 but names no module (I §9.3.1)
+        "banned_modules = [6, 38]",
     ],
 )
 def test_empty_duplicate_and_out_of_catalog_lists(tmp_path: Path, line: str) -> None:
@@ -256,3 +258,8 @@ def test_the_score_overflow_constraint_is_checked_at_the_boundary(
 def test_the_largest_possible_map_fits_the_largest_multiplier(tmp_path: Path) -> None:
     text = with_line("max_multiplier = 51") + "\n" + blocks_line(["33333333"] * 8)
     assert load_config(write_config(tmp_path, {"A": text})).cities[0].max_multiplier == 51
+
+
+def test_a_ban_may_name_any_catalog_module(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path, {"A": with_line("banned_modules = [1, 47, 32]")}))
+    assert config.cities[0].banned_modules == (1, 47, 32)
