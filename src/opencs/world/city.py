@@ -38,6 +38,7 @@ from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.podreport import pod_state
 from opencs.world.progress import ProgressChanged, SavedProgress
+from opencs.world.resume import Dropped, NoReservations, Reservations, drop_player
 from opencs.world.scoring import multiplier_floor
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
@@ -66,8 +67,18 @@ class JoinRefused:
 class City:
     """The world of one city letter."""
 
-    def __init__(self, config: CityConfig, rng: random.Random | None = None) -> None:
+    def __init__(
+        self,
+        config: CityConfig,
+        rng: random.Random | None = None,
+        reservations: Reservations | None = None,
+    ) -> None:
         self.config = config
+        #: The slots held for dropped players, which the city keeps room and a world for (II §13
+        #: item 4).
+        self._reservations = reservations or NoReservations()
+        #: True from the first player until the world is reset; a held slot keeps it true.
+        self._in_game = False
         #: Where the city's random choices come from (Sentinel spots, free Muncher targets), so a
         #: test can seed them.
         self._rng = rng or random.Random()
@@ -170,11 +181,12 @@ class City:
         stored record it starts from (None: a new identity). The client is restored to it when it
         sends its first ``'b'`` (I §9.2.11, II §11.3); starting the game rolls the last SCORE into
         the career, which is a change to save (``take_progress``)."""
-        if len(self._players) >= self.config.capacity:
+        held = [t for key, t in self._reservations.slots(self.config.letter) if key != identity]
+        if len(self._players) + len(held) >= self.config.capacity:
             return JoinRefused(f"CITY {self.config.letter} IS FULL")
         taken = {p.index for p in self._players.values() if p.team == team}
         free = [i for i in range(policy.MAX_PLAYERS_PER_TEAM) if i not in taken]
-        if not free:
+        if not free or len(taken) + held.count(team) >= policy.MAX_PLAYERS_PER_TEAM:
             return JoinRefused(f"{policy.TEAM_NAMES[team]} IS FULL")
         player_id = self._ids.allocate(IdRange.PLAYER, self._earliest_start())
         if player_id is None:
@@ -210,15 +222,17 @@ class City:
         # A fresh client already shows its own default palette (I §8.20), which is a client fact,
         # not the city's starting condition: it is sent one only once the weather differs from it.
         player.view.tell(WEATHER_KEY, CLIENT_CONDITION)
-        if not self._players:
+        if not self._in_game:
             self._start_game(now)
         self._players[player_id] = player
         self._ledger.note(player)
         return JoinResult(player_id, team, player.index, hello)
 
-    def leave(self, player_id: int, now: float) -> list[Event]:
+    def leave(self, player_id: int, now: float, *, keep_alive: bool = False) -> list[Event]:
         """A player left (quit or line drop): free its id and delete its pod on the clients that
-        hold it, never ``'J'`` which would respawn it there (I §7.6)."""
+        hold it, never ``'J'`` which would respawn it there (I §7.6). The world is reset
+        when nobody is left and no slot is held for a dropped player (``keep_alive`` says one is
+        about to be, II §13 item 4)."""
         player = self._players.pop(player_id, None)
         if player is None:
             return []
@@ -232,19 +246,41 @@ class City:
             if other.view.holds(player_id):
                 other.view.forget(player_id)
                 events.append(Event(server.Delete(player_id), ToPlayer(other.id)))
-        if not self._players:
-            self._reset()
+        if not keep_alive:
+            self._reset_if_abandoned()
         return events
+
+    def line_drop(
+        self, player_id: int, now: float, *, fight_at: float | None = None, hold: bool = False
+    ) -> Dropped:
+        """The player's line dropped (II §13): a fight it was losing is a death, anything else
+        only the delete. ``fight_at`` is when the line actually went (default ``now``); ``hold``
+        says the player is to be held for ``/RESUME``. See ``world.resume``."""
+        player = self._players.get(player_id)
+        if player is None:
+            return Dropped([], None)
+        at = now if fight_at is None else fight_at
+        try:
+            return drop_player(self, player, now, fight_at=at, hold=hold)
+        finally:
+            self._ledger.note(player)  # a death at the drop changed the marker
+
+    def _reset_if_abandoned(self) -> None:
+        """Reset the world when nobody is here and nothing is held for anyone (S13)."""
+        if not self._players and not self._reservations.slots(self.config.letter):
+            self._reset()
 
     def _start_game(self, now: float) -> None:
         """The first player is in: the city's game begins, and the clocks of its programs with
         it (II §17, II §5)."""
+        self._in_game = True
         self.weather.start(now)
         self.sentinels.start(now)  # nobody has reported yet, so nobody is sent anything
         self.munchers.start(now)
 
     def _reset(self) -> None:
         """Nobody is here: the next game starts fresh (S13)."""
+        self._in_game = False
         self._ids = IdSpace()
         self._live.clear()
         self.orders.reset()
@@ -300,6 +336,8 @@ class City:
         """Timed rules: the weather program (I §8.20), Sentinel replacements, Muncher meals
         and free Munchers (II §16.2), and each pod's drop ``'A'`` repeat (I §7.1, II §7) and
         bounty pushes (I §9.2.9)."""
+        if self._in_game:
+            self._reset_if_abandoned()  # a held slot ran out
         events: list[Event] = []
         events += self._tick_weather(now)
         events += self.sentinels.tick(now)
