@@ -144,7 +144,7 @@ class InGamePhase(Phase):
             joined.player_id,
             joined.team,
             joined.index,
-            "; resuming" if resume is not None and saved is not None else "",
+            "; resuming" if resume is not None and key is not None else "",
         )
         self._hello = joined.hello
         self._hello_size = len(build_frame(server_payload(joined.hello, BYTE_MIN)))

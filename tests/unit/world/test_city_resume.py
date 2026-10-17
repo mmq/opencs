@@ -37,10 +37,12 @@ def held(**kw: object) -> ResumeRecord:
 
 
 def resumed(
-    record: ResumeRecord | None = None, stored: SavedProgress | None = STORED
+    record: ResumeRecord | None = None,
+    stored: SavedProgress | None = STORED,
+    identity: str | None = KEY,
 ) -> tuple[City, int]:
     c = City(city("A", max_multiplier=8, max_module_level=2))
-    r = c.join("ALICE", 2, 0.0, identity=KEY, saved=stored, resume=record or held())
+    r = c.join("ALICE", 2, 0.0, identity=identity, saved=stored, resume=record or held())
     assert isinstance(r, JoinResult)
     return c, r.player_id
 
@@ -156,7 +158,16 @@ def test_a_report_built_before_the_restore_does_not_wipe_the_held_status() -> No
     assert p is not None and (p.progress.record.score, p.progress.record.bay_points) == (1670, 957)
 
 
-def test_without_the_stored_record_there_is_nothing_to_resume_and_it_is_a_new_game() -> None:
+def test_a_new_account_with_no_stored_row_still_resumes() -> None:
     c, pid = resumed(stored=None)
+    sent = first(c, pid)
+    assert [m for m in sent if isinstance(m, server.SetStatus)] == [server.SetStatus(1670, 1, 957)]
+    p = c.player(pid)
+    assert p is not None and p.progress.record.score == 1670
+    assert [m for m in land(c, pid) if isinstance(m, server.InstallModule)]
+
+
+def test_without_an_identity_nothing_is_kept_and_it_is_a_new_game() -> None:
+    c, pid = resumed(stored=None, identity=None)  # the record could not be read
     sent = [m for m in first(c, pid) if isinstance(m, server.SetStatus | server.InstallModule)]
     assert sent == [server.SetStatus(0, 2, 0)]

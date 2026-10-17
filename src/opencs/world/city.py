@@ -189,7 +189,8 @@ class City:
         sends its first ``'b'`` (I §9.2.11, II §11.3); starting the game rolls the last SCORE into
         the career, which is a change to save (``take_progress``). ``resume`` is the held game being
         returned to (II §13 item 5): the same game, so SCORE, bay points and multiplier come
-        back as they were; without the stored record there is nothing to resume."""
+        back as they were. A new account has no stored row yet and resumes all the same; only a
+        player nothing is kept for (``identity`` None: the record could not be read) starts anew."""
         held = [t for key, t in self._reservations.slots(self.config.letter) if key != identity]
         if len(self._players) + len(held) >= self.config.capacity:
             return JoinRefused(f"CITY {self.config.letter} IS FULL")
@@ -226,7 +227,7 @@ class City:
             ClientView(player_id, now),
             identity=identity,
             saved=saved,
-            resume=resume if saved is not None else None,
+            resume=resume if identity is not None else None,
         )
         if player.resume is not None:
             player.score.multiplier = min(player.score.multiplier, cfg.max_multiplier)
