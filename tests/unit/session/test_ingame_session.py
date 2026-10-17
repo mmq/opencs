@@ -435,3 +435,16 @@ def test_a_quit_line_long_after_the_return_is_chat() -> None:
     h.advance(policy.LATE_QUIT_WINDOW)
     h.feed(QUIT)
     assert b"JOINGENI: QUIT" in bystander.take()
+
+
+def test_a_shot_over_the_budget_is_not_relayed_but_still_reaches_the_shot_log() -> None:
+    """II §9.3: a declined relay must not hide the shot from attribution."""
+    world = make_world()
+    h = play(world)
+    h.feed(frame(report(4)))
+    player = city_a(world).player(0)
+    assert player is not None
+    burst = int(policy.RELAY_LIMIT_SHOT[0])
+    shot = frame(client.Shot(0, report(0).pos, 0, 0, 1))
+    h.feed(shot * (burst + 1))
+    assert len(player.shots) == burst + 1

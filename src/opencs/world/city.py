@@ -171,6 +171,14 @@ class City:
             return []
         return handler(player, msg, now)
 
+    def note_shot(self, player_id: int, fired: client.Shot, now: float) -> None:
+        """Log a shot the session declined to pass on (it was over the shot budget): the shot log
+        must see every ``'c'`` even when it is not relayed (II §9.3). The log is
+        capped (``SHOT_LOG_MAX``), so a flood cannot grow it."""
+        player = self._players.get(player_id)
+        if player is not None:
+            player.shots.record(now, fired.shooter)
+
     def tick(self, now: float) -> list[Event]:
         """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7) and the bounty pushes (I
         §9.2.12, II §11.2)."""
