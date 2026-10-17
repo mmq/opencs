@@ -74,3 +74,10 @@ DEFAULT_TEAM_POLICY = "request-or-balance"
 
 #: The city a bare ``/PLAY`` picks when every city is empty. II §5.
 DEFAULT_CITY_LETTER = "B"
+
+# --- Wire (I §5.2, I §4.1; DESIGN §5) ------------------------------------------------------------
+
+#: Longest inbound Chamber line kept, in bytes; longer lines are discarded and counted. The
+#: client's own armed buffer is 512 bytes (I §5.2), and no lobby command comes near it. Ours
+#: (DESIGN §5 "line length in the Chamber").
+MAX_LINE_BYTES = 512
