@@ -1,11 +1,11 @@
-"""Wiring and shutdown (DESIGN §3): read config, start the listener, stop cleanly on a signal.
-
-For now an accepted connection is closed at once; the net layer arrives in M3.
+"""Wiring and shutdown (DESIGN §3): read config, build the services, start the listener, stop
+cleanly on a signal.
 """
 
 import argparse
 import asyncio
 import logging
+import random
 import signal
 import sys
 from collections.abc import Callable, Sequence
@@ -13,15 +13,43 @@ from dataclasses import replace
 from pathlib import Path
 
 from opencs import policy
+from opencs.clock import Clock, MonotonicClock
 from opencs.config import AppConfig, ConfigError, load_config
+from opencs.connlog import ConnectionContext, ConnectionLog
+from opencs.lobby.identity import Identity
+from opencs.lobby.lobby import Lobby
+from opencs.net.connection import ConnectionIO, SessionFactory
+from opencs.net.listener import Listener
+from opencs.session.phases import Services
+from opencs.session.session import Session
+from opencs.store.base import AccountStore
+from opencs.store.memory import MemoryAccountStore
 
 log = logging.getLogger("opencs.app")
 
 DEFAULT_CONFIG_PATH = Path("config") / "server.toml"
 
 
-async def _refuse(_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    writer.close()
+def build_session_factory(
+    config: AppConfig,
+    *,
+    store: AccountStore | None = None,
+    clock: Clock | None = None,
+    rng: random.Random | None = None,
+) -> SessionFactory:
+    """Build the services every session shares and return the factory the listener calls.
+
+    Accounts are kept in memory until the persistence milestone (M10).
+    """
+    clock = clock or MonotonicClock()
+    identity = Identity(store or MemoryAccountStore())
+    lobby = Lobby(config.cities, config.server.default_city, rng or random.Random())
+    services = Services(identity, lobby, clock)
+
+    def factory(io: ConnectionIO, context: ConnectionContext) -> Session:
+        return Session(io, services, ConnectionLog(logging.getLogger("opencs.session"), context))
+
+    return factory
 
 
 async def serve(
@@ -29,13 +57,20 @@ async def serve(
     *,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None = None,
+    store: AccountStore | None = None,
+    clock: Clock | None = None,
+    rng: random.Random | None = None,
 ) -> None:
-    """Listen on the configured address until ``stop`` is set, then close the listener.
+    """Listen on the configured address until ``stop`` is set, then close every connection.
 
     ``ready`` receives the first bound socket's port once listening (port 0 binds an ephemeral
-    one). A host naming several addresses binds several sockets; each is logged.
+    one). A host naming several addresses binds several sockets; each is logged. ``store``,
+    ``clock`` and ``rng`` are for tests.
     """
-    server = await asyncio.start_server(_refuse, config.server.host, config.server.port)
+    clock = clock or MonotonicClock()
+    factory = build_session_factory(config, store=store, clock=clock, rng=rng)
+    listener = Listener(factory, clock)
+    server = await listener.start(config.server.host, config.server.port)
     bound = [sock.getsockname()[:2] for sock in server.sockets]
     for address, bound_port in bound:
         log.info("listening on %s:%d", address, bound_port)
@@ -45,8 +80,7 @@ async def serve(
     try:
         await stop.wait()
     finally:
-        server.close()
-        await server.wait_closed()
+        await listener.stop()
     log.info("stopped")
 
 

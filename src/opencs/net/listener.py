@@ -39,6 +39,7 @@ class Listener:
         self._connections: dict[int, Connection] = {}
         self._per_address: Counter[str] = Counter()
         self._server: asyncio.Server | None = None
+        self._stopping = False
 
     @property
     def connection_count(self) -> int:
@@ -51,6 +52,7 @@ class Listener:
 
     async def stop(self) -> None:
         """Stop accepting, close every connection (flushing), and wait for them to end."""
+        self._stopping = True  # a connection accepted but not yet handed to us is refused
         if self._server is not None:
             self._server.close()
         connections = list(self._connections.values())
@@ -64,6 +66,9 @@ class Listener:
     async def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
         address = str(peer[0]) if peer else "?"
+        if self._stopping:
+            await self._refuse(writer)
+            return
         if len(self._connections) >= self._max:
             log.warning("refusing %s: %d connections", address, len(self._connections))
             await self._refuse(writer)
