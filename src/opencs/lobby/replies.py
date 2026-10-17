@@ -18,6 +18,7 @@ from opencs.wire.text import arm_line, plain_line
 if TYPE_CHECKING:
     from opencs.config import CityConfig
     from opencs.lobby.lobby import Lobby, Member
+    from opencs.store.base import ProgressRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,15 +131,32 @@ def status(lobby: Lobby) -> list[Line]:
     return lines
 
 
-def who_is(member: Member | None, callsign: str) -> list[Line]:
+def record_lines(record: ProgressRecord) -> list[Line]:
+    """A player's persistent record (II §4.2, II §11.3): the latest game's SCORE, the
+    career total of the games before it, bay points, the nine bays and the battle marker."""
+    bays = " ".join(str(level) for level in record.bays)
+    return [
+        body(f"LAST GAME SCORE: {record.score}"),
+        body(f"CAREER TOTAL: {record.career}"),
+        body(f"BAY POINTS: {record.bay_points}"),
+        body(f"BAYS: {bays}"),
+        body(f"BATTLE MARKER: {record.marker}"),
+    ]
+
+
+def who_is(member: Member | None, callsign: str, record: ProgressRecord | None) -> list[Line]:
+    """One pilot: where, and the record kept for it (II §4.2)."""
     if member is None:
         return [error(f"NO SUCH PILOT: {callsign}")]
-    # The persistent record is M10; until then none is kept (I §9.2.11, II §11.3).
-    return [body(f"{member.callsign}: {where(member)}"), body("RECORD: NONE KEPT YET")]
+    lines = [body(f"{member.callsign}: {where(member)}")]
+    return lines + (record_lines(record) if record else [body("NO RECORD YET")])
 
 
-def score() -> list[Line]:
-    return [body("NO RECORD IS KEPT YET")]
+def score(callsign: str, record: ProgressRecord | None) -> list[Line]:
+    """The player's own record (II §4.2)."""
+    if record is None:
+        return [body("NO RECORD YET: PLAY A GAME AND YOUR PROGRESS IS KEPT")]
+    return [heading(f"RECORD OF {callsign}"), *record_lines(record)]
 
 
 def resume_refused(*, guest: bool) -> list[Line]:

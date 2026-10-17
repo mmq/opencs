@@ -8,6 +8,8 @@ from opencs import policy
 from opencs.session.chamber import ChamberPhase
 from opencs.session.ingame import InGamePhase
 from opencs.session.login import LoginPhase
+from opencs.store.base import ProgressRecord
+from opencs.store.memory import MemoryProgressStore
 from opencs.wire.frame import build_frame
 
 PRESS_RETURN = b"\x05PRESS RETURN\r"
@@ -251,19 +253,56 @@ def test_status_and_who_list_every_pilot_and_where() -> None:
         assert b"JOINGENI  CHAMBER" in out
 
 
-def test_who_callsign_gives_location_and_no_record_for_now() -> None:
+def test_who_callsign_gives_location_and_the_record() -> None:
     world = make_world()
     h = enter_lobby(world)
-    add(world.lobby, "ALPHA", "A", 0)
+    other = add(world.lobby, "ALPHA", "A", 0)
     out = ask(h, "/WHO alpha")
-    assert b"ALPHA: A RED" in out
-    assert b"RECORD: NONE KEPT YET" in out
+    assert b"ALPHA: A RED" in out and b"NO RECORD YET" in out
+    world.progress.save(other.key, ProgressRecord((3, 2, 1, 1, 5, 4, 0, 1, 2), -2, 957, 1670, 500))
+    out = ask(h, "/WHO alpha")
+    for expected in (b"LAST GAME SCORE: 1670", b"CAREER TOTAL: 500", b"BAY POINTS: 957"):
+        assert expected in out
+    assert b"BAYS: 3 2 1 1 5 4 0 1 2" in out and b"BATTLE MARKER: -2" in out
     assert b"NO SUCH PILOT: NOBODY" in ask(h, "/WHO nobody")
 
 
-def test_score_says_no_record_yet() -> None:
-    h = enter_lobby(make_world())
-    assert b"NO RECORD IS KEPT YET" in ask(h, "/SCORE")
+def test_who_callsign_reads_the_record_of_that_pilot_not_the_askers() -> None:
+    world = make_world()
+    h = enter_lobby(world)
+    other = add(world.lobby, "ALPHA", "A", 0)
+    assert h.session.member is not None
+    world.progress.save(h.session.member.key, ProgressRecord((1,) * 9, 0, 11, 22, 33))
+    world.progress.save(other.key, ProgressRecord((2,) * 9, 0, 44, 55, 66))
+    out = ask(h, "/WHO alpha")
+    assert b"SCORE: 55" in out and b"SCORE: 22" not in out
+
+
+def test_score_shows_the_players_own_record_for_a_guest_and_for_an_account() -> None:
+    world = make_world()
+    guest = enter_lobby(world)
+    assert b"NO RECORD YET" in ask(guest, "/SCORE")
+    world.progress.save("JOINGENI", ProgressRecord((5,) * 9, -7, 123, 4567, 89))
+    out = ask(guest, "/SCORE")
+    for expected in (b"RECORD OF JOINGENI", b"LAST GAME SCORE: 4567", b"CAREER TOTAL: 89"):
+        assert expected in out
+    assert b"BAY POINTS: 123" in out and b"BAYS: 5 5 5 5 5 5 5 5 5" in out
+    assert b"BATTLE MARKER: -7" in out
+    account = enter_lobby(world, "ALICE,pw")
+    world.progress.save("acct:ALICE", ProgressRecord((4,) * 9, 3, 1, 2, 3))
+    assert b"BATTLE MARKER: 3" in ask(account, "/SCORE")
+
+
+def test_an_unreadable_record_is_reported_and_the_session_carries_on() -> None:
+    class Broken(MemoryProgressStore):
+        def load(self, identity: str) -> ProgressRecord | None:
+            raise OSError("gone")
+
+    world = make_world(progress=Broken())
+    h = enter_lobby(world)
+    assert b"CANNOT BE READ" in ask(h, "/SCORE")
+    assert b"CANNOT BE READ" in ask(h, "/WHO joingeni")
+    assert b"PILOTS ONLINE" in ask(h, "/STATUS")
 
 
 def test_resume_is_refused_for_joingenie_and_for_an_account_with_no_held_game() -> None:
