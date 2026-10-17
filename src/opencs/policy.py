@@ -53,6 +53,13 @@ READ_CHUNK = 4096
 #: Seconds a closing connection may take to flush its queue before it is cut. Ours.
 CLOSE_FLUSH_TIMEOUT = 5.0
 
+#: TCP keepalive on accepted sockets, so a peer that vanished without a FIN is noticed and its
+#: account freed (DESIGN §5): idle seconds before the first probe, seconds between probes, probes
+#: before the connection is dropped. Ours. (A Chamber idle timeout is M11's.)
+KEEPALIVE_IDLE = 60
+KEEPALIVE_INTERVAL = 15
+KEEPALIVE_PROBES = 4
+
 # --- Cities (II §5, I §9.2, II §5) ----------------------
 
 #: Longest city name, in characters. Ours (the test server's limit); the spec is silent.

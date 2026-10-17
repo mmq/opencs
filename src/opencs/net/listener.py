@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import itertools
 import logging
+import socket
 from collections import Counter
 
 from opencs import policy
@@ -18,6 +19,24 @@ from opencs.connlog import ConnectionContext
 from opencs.net.connection import Connection, SessionFactory
 
 log = logging.getLogger("opencs.net")
+
+
+def enable_keepalive(sock: socket.socket | None) -> None:
+    """Turn on TCP keepalive with the policy's timing, where the platform has the options."""
+    if sock is None:
+        return
+    options = (
+        ("TCP_KEEPIDLE", policy.KEEPALIVE_IDLE),  # macOS spells this TCP_KEEPALIVE
+        ("TCP_KEEPALIVE", policy.KEEPALIVE_IDLE),
+        ("TCP_KEEPINTVL", policy.KEEPALIVE_INTERVAL),
+        ("TCP_KEEPCNT", policy.KEEPALIVE_PROBES),
+    )
+    with contextlib.suppress(OSError):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for name, value in options:
+            option = getattr(socket, name, None)
+            if option is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
 
 
 class Listener:
@@ -77,6 +96,7 @@ class Listener:
             log.warning("refusing %s: %d from that address", address, self._per_address[address])
             await self._refuse(writer)
             return
+        enable_keepalive(writer.get_extra_info("socket"))
         conn_id = next(self._ids)
         connection = Connection(
             reader, writer, self._factory, self._clock, ConnectionContext(conn_id)

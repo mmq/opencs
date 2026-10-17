@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import socket
+
+import pytest
 
 from fixtures.streams import until, wait
 from opencs.clock import ManualClock
 from opencs.connlog import ConnectionContext
 from opencs.net.connection import ConnectionIO
-from opencs.net.listener import Listener
+from opencs.net.listener import Listener, enable_keepalive
 
 
 class Greeter:
@@ -95,3 +98,25 @@ def test_stop_closes_every_connection_after_flushing() -> None:
 
     a, b, remaining = asyncio.run(scenario())
     assert (a, b, remaining) == (b"hi", b"hi", 0)
+
+
+def test_enable_keepalive_sets_so_keepalive() -> None:
+    with socket.socket() as sock:
+        enable_keepalive(sock)
+        assert sock.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+    enable_keepalive(None)  # a transport with no socket is tolerated
+
+
+def test_accepted_sockets_get_keepalive(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+    monkeypatch.setattr("opencs.net.listener.enable_keepalive", seen.append)
+
+    async def scenario() -> None:
+        listener = Listener(factory, ManualClock())
+        reader, writer = await open_to(listener)
+        await wait(reader.readexactly(2))
+        writer.close()
+        await listener.stop()
+
+    asyncio.run(scenario())
+    assert len(seen) == 1 and seen[0] is not None
