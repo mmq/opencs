@@ -33,6 +33,7 @@ from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.hits import Hits
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.modules import Drops, ModuleRules
+from opencs.world.npcs.munchers import Munchers
 from opencs.world.npcs.sentinels import Sentinels
 from opencs.world.orders import Orders
 from opencs.world.player import Player
@@ -85,12 +86,16 @@ class City:
         self.orders = Orders(self, self._territory, rules, self.drops)
         #: Resident and called Sentinels (II §16.3).
         self.sentinels = Sentinels(self, config.sentinels, config.sentinel_respawn, self._rng)
+        #: Munchers, called and free (I §9.5.2, II §16.2, II §16.2).
+        self.munchers = Munchers(self, self.orders)
         #: The effect modules (I §9.3.5, II §16.1).
-        self.effects = Effects(self, self.orders, self.weather, rules, self.sentinels)
+        self.effects = Effects(
+            self, self.orders, self.weather, rules, self.sentinels, self.munchers
+        )
         #: Shots and hit reports (I §9.1.2, II §9.3).
-        self.hits = Hits(self, self.orders, self.effects, [self.sentinels])
+        self.hits = Hits(self, self.orders, self.effects, [self.sentinels, self.munchers])
         self._handlers: dict[type[ClientMessage], Handler] = {
-            **module_handlers(self.orders, self.drops, self.effects),
+            **module_handlers(self.orders, self.drops, self.effects, self.munchers),
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
             **score_handlers(self.config.max_module_level, self.config.max_multiplier),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
@@ -209,6 +214,7 @@ class City:
         self.drops.reset()
         self.weather.reset()
         self.sentinels.reset()
+        self.munchers.reset()
         self.effects.reset()
 
     def _earliest_start(self) -> float | None:
@@ -243,6 +249,7 @@ class City:
         events: list[Event] = []
         events += self._tick_weather(now)
         events += self.sentinels.tick(now)
+        events += self.munchers.tick(now)
         for player in self.players():
             events += player.pod.tick(now)
             events += player.bounty.tick(now)

@@ -19,6 +19,7 @@ from opencs.world.entities import inform
 from opencs.world.events import Event, ToPlayer
 from opencs.world.host import WorldHost
 from opencs.world.modules import ModuleRules
+from opencs.world.npcs.munchers import Munchers
 from opencs.world.npcs.sentinels import Sentinels
 from opencs.world.orders import Orders
 from opencs.world.player import Player
@@ -49,12 +50,14 @@ class Effects:
         weather: Weather,
         rules: ModuleRules,
         sentinels: Sentinels,
+        munchers: Munchers,
     ) -> None:
         self._host = host
         self._rules = rules
         self._orders = orders
         self._weather = weather
         self._sentinels = sentinels
+        self._munchers = munchers
         self._effects: dict[str, _Effect] = {
             "R": self._repair,
             "H": self._harden,
@@ -64,6 +67,7 @@ class Effects:
             "M": self._lay_mine,
             "D": self._sweep_mines,
             "S": self._call_sentinel,
+            "C": self._call_muncher,
         }
         #: Every mine laid, by id, oldest first. Hits on a mine are ignored: a mine has no
         #: durability (ours).
@@ -146,6 +150,12 @@ class Effects:
             if p.pod.has_reported:
                 events += inform(self._weather, p.view, now)
         return events
+
+    # --- NPCs --------------------------------------------------------------------------------
+
+    def _call_muncher(self, player: Player, here: WirePos, now: float) -> list[Event]:
+        """Call Muncher: one Muncher at the sender's last position (I §9.3.5, I §9.5.2)."""
+        return self._munchers.call(here, now)
 
     # --- Sentinels ---------------------------------------------------------------------------
 

@@ -508,3 +508,23 @@ SENTINEL_OFFSET_FEET = (150, 450)
 #: and lasts until shot down (II §16), so without a bound a client sending ``'E'``-``'S'``
 #: at its rate limit would grow the city forever. Ours (DESIGN §5).
 MAX_CALLED_SENTINELS = 16
+
+#: Seconds a Muncher stays latched on a tower before the tower is destroyed. The client times no
+#: meal (its latched state just waits), so the number is ours (II §16.2).
+MUNCHER_EAT_SECONDS = 15.0
+
+#: A Muncher's durability on the client's per-shot table, as towers and Sentinels: "can be
+#: destroyed with weapons" (manual), the number ours (I §9.5.2, II §16.2).
+MUNCHER_HP = 3000
+
+#: How far from itself a Muncher looks for its next tower, in feet, straight-line across the
+#: ground: the manual's "within one block" (II §16.2).
+MUNCHER_HUNT_FEET = 600
+
+#: A Muncher with nothing left to eat flies to the nearest city edge, to a point this many feet
+#: inside it, and is removed on arrival (II §16.2).
+MUNCHER_EDGE_INSET_FEET = 50
+
+#: Most Munchers in a city at once; a Call Muncher past it is ignored. Ours (DESIGN §5): the module
+#: is used up per request, so honest play never nears it, but each Muncher costs legs of traffic.
+MAX_MUNCHERS = 16

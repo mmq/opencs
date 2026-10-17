@@ -324,13 +324,12 @@ def test_a_hit_on_a_mine_is_ignored() -> None:
     assert mine_id in c.effects.mines
 
 
-# --- not this milestone's ---
+# --- not ruled ---
 
 
-def test_call_muncher_and_the_drone_are_logged_and_ignored() -> None:
+def test_the_drone_is_ignored() -> None:
     c, (a, _b) = world()
     t = tower(c, 1, at(10))
-    assert use(c, a, "C") == []
     assert c.client_message(a, client.Drone(None), 10.0) == []
     assert t in c.orders.towers and not c.effects.mines
 
