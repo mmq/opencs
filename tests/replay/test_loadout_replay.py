@@ -12,9 +12,11 @@ and the client's own weight in every ``'b'`` confirms it. Each fixture is fed in
 * every client ``'b'`` reports a weight, which must agree with the ledger past the grace.
 
 Runs whose capture holds only the client's side (July 2026) cannot say which module a grant was
-for, so they are not replayed. Three broken ledgers must each disagree somewhere, so the check is
+for, so they are not replayed. The exception is ``module-rack``, whose installs are ``'Q'`` sub 5
+frames the older log dumped on INFO lines (``make_fixture.py --info-frames``): it holds three
+installs the client never took. Three broken ledgers must each disagree somewhere, so the check is
 known to have teeth: one that ignores removals, one that ignores deaths and one that trusts every
-install.
+install (which the module-rack run catches on real data).
 """
 
 from __future__ import annotations
@@ -60,7 +62,10 @@ class Replayer:
         self.out = Result()
 
     def server_frame(self, payload: bytes) -> None:
-        msg, _tag = decode_server(payload)
+        try:
+            msg, _tag = decode_server(payload)
+        except DecodeError:
+            return  # a frame our messages do not model (an old build's 'B'): not about modules
         if isinstance(msg, server.SpawnModule):
             self.objects[msg.id] = msg.module
         elif isinstance(msg, server.GrantPickup) and msg.object in self.objects:
@@ -116,7 +121,7 @@ FIXTURES = module_fixtures()
 
 
 def test_there_are_runs_with_module_traffic_to_replay() -> None:
-    assert len(FIXTURES) >= 11
+    assert len(FIXTURES) >= 16
     assert sum(replay(n).reports for n in FIXTURES) >= 1500
     assert sum(replay(n).removals for n in FIXTURES) >= 10
 
@@ -137,14 +142,30 @@ def test_a_ledger_that_ignores_removals_or_deaths_disagrees(broken: str) -> None
     assert failing, f"no run noticed a ledger that ignores {broken}"
 
 
-def test_only_the_run_that_died_with_modules_notices_a_ledger_that_ignores_deaths() -> None:
-    died = [n for n in FIXTURES if replay(n).deaths]
-    assert any(replay(n, "clear").failures for n in died)
+def test_a_ledger_that_ignores_deaths_fails_only_on_runs_that_died() -> None:
+    failing = {n for n in FIXTURES if replay(n, "clear").failures}
+    assert failing
+    assert failing <= {n for n in FIXTURES if replay(n).deaths}
 
 
-def test_an_install_that_never_landed_is_dropped_by_the_ledger_but_not_by_one_that_trusts() -> None:
-    # No captured grant failed to land, so a phantom install is injected into a real stream: the
-    # client's weight never shows it. The real ledger drops it; the trusting one disagrees.
+MODULE_RACK = "2026-07-29-015155_001-module-rack.txt"
+
+
+def test_the_installs_a_real_client_never_took_are_dropped_as_never_landed() -> None:
+    # Three 'Q' sub 5 installs (11, 12, 13) that left the client's weight unchanged (I §9.3.4, II
+    # §13).
+    result = replay(MODULE_RACK)
+    assert result.installs == 3 and result.never_landed == 3
+    assert result.failures == []
+
+
+def test_a_ledger_that_trusts_every_install_disagrees_with_the_real_client() -> None:
+    assert replay(MODULE_RACK, "pending").failures
+
+
+def test_an_injected_phantom_install_is_dropped_by_the_ledger_but_not_by_one_that_trusts() -> None:
+    # A supplement to the module-rack run: a phantom install injected into another real stream,
+    # whose weight never shows it. The outcome is decided by the injection, not by the client.
     name = "2026-10-16-113841_002-play-p1.txt"
     real = replay(name, phantom=MEGA_TOWER)
     assert real.failures == [] and real.never_landed == 1
