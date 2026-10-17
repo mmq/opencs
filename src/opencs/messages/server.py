@@ -17,6 +17,7 @@ from opencs.messages.fields import (
     WirePos,
     WireXZ,
     check_b88,
+    check_callsign,
     check_pod_id,
     check_printable,
     check_range,
@@ -83,15 +84,13 @@ class Session(ServerMessage):
     def validate(self) -> None:
         check_pod_id("self_id", self.self_id)
         check_slot(self.index, self.team)
+        check_callsign(self.callsign)
         for name, text, longest in (
-            ("callsign", self.callsign, policy.MAX_CALLSIGN_LENGTH),
             ("network", self.network, policy.MAX_NETWORK_NAME_LENGTH),
             ("city", self.city, policy.MAX_CITY_NAME_LENGTH),
         ):
             check_printable(name, text)
             check_range(f"{name} length", len(text), 1, longest)
-        if self.callsign != self.callsign.upper():
-            raise ValueError("callsign must be upper case (II §3)")
         check_range("max_mult", self.max_mult, 1, policy.MAX_MULTIPLIER_CEILING)
         check_range("tower_output", self.tower_output, 0, policy.MAX_TOWER_OUTPUT)
         check_range("max_module_level", self.max_module_level, 0, policy.MAX_MODULE_LEVEL)
@@ -398,8 +397,7 @@ class Introduce(ServerMessage):
     def validate(self) -> None:
         check_pod_id("id", self.id)
         check_slot(self.index, self.team)
-        check_printable("callsign", self.callsign)
-        check_range("callsign length", len(self.callsign), 1, policy.MAX_CALLSIGN_LENGTH)
+        check_callsign(self.callsign)
         check_b88("v1", self.v1)
 
     def body(self) -> bytes:

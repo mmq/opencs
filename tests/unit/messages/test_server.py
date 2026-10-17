@@ -537,6 +537,7 @@ def test_introduce_callsign_and_velocity() -> None:
     bad(lambda: make(b"A" * 9))
     bad(lambda: make(b""))
     bad(lambda: make(b"A\n"))
+    bad(lambda: make(b"Joe"))  # one rule for 'B' and 'G': no lower case
     bad(lambda: make(v1=120))
     bad(lambda: replace(make(), index=4))
     bad(lambda: replace(make(), team=4))

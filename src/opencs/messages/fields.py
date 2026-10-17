@@ -76,6 +76,15 @@ def check_printable(name: str, text: bytes) -> None:
         raise ValueError(f"{name} holds a byte outside 0x20..0x7e")
 
 
+def check_callsign(callsign: bytes) -> None:
+    """A callsign the server sends (``'B'``, ``'G'``): 1 to ``MAX_CALLSIGN_LENGTH`` printable ASCII
+    bytes, no lower case, so every client sees the same name (II §3; II §3)."""
+    check_printable("callsign", callsign)
+    check_range("callsign length", len(callsign), 1, policy.MAX_CALLSIGN_LENGTH)
+    if callsign != callsign.upper():
+        raise ValueError("callsign must be upper case (II §3)")
+
+
 def make_slot(index: int, team: int) -> int:
     """The wire slot ``(index << 3) | team`` (I §8.4, I §6.3)."""
     return (index << 3) | team
