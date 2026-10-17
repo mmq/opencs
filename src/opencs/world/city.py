@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, client, server
+from opencs.messages import ClientMessage, WirePos, client, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
 from opencs.world.entities import Entity, introduce
@@ -26,6 +26,7 @@ from opencs.world.ids import IdRange, IdSpace
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
+from opencs.world.structures import Tower, damage_of
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
 
@@ -61,6 +62,8 @@ class City:
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
+        #: Every tower standing, by id (a subset of ``_live``): what hit reports reduce (II §10).
+        self._towers: dict[int, Tower] = {}
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -155,6 +158,7 @@ class City:
         """Nobody is here: the next game starts fresh (S13)."""
         self._ids = IdSpace()
         self._live.clear()
+        self._towers.clear()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -365,7 +369,7 @@ class City:
         credit = reporter.shots.attribute(now)
         victim = self._players.get(hit.target)
         if victim is None:
-            return self._hit_entity(reporter, hit, credit.credited)
+            return self._hit_entity(reporter, hit, credit.credited, now)
         if victim.pod.phase is PodPhase.DEAD or not victim.pod.has_reported:
             log.debug("hit on player %d, which is not in play; ignored", victim.id)
             return []
@@ -379,9 +383,14 @@ class City:
             return []
         return [Event(damage, ToPlayer(victim.id))]
 
-    def _hit_entity(self, reporter: Player, hit: client.HitReport, credited: bool) -> list[Event]:
-        """A hit on something that is not a player's pod: a tower, Sentinel, Muncher or mine. Their
-        durability is the structures' and NPCs' (M7, M9); until then the report is ignored."""
+    def _hit_entity(
+        self, reporter: Player, hit: client.HitReport, credited: bool, now: float
+    ) -> list[Event]:
+        """A hit on something that is not a player's pod. A tower loses hit points (II §10); a
+        Sentinel, Muncher or mine is M9's, and until then the report is ignored."""
+        tower = self._towers.get(hit.target)
+        if tower is not None:
+            return self._hit_tower(reporter, tower, hit, now)
         log.debug(
             "player %d hit entity %d (credited=%s); not ruled yet",
             reporter.id,
@@ -389,6 +398,47 @@ class City:
             credited,
         )
         return []
+
+    def _hit_tower(
+        self, reporter: Player, tower: Tower, hit: client.HitReport, now: float
+    ) -> list[Event]:
+        """Subtract the damage byte's table entry, whoever fired and whatever their team (II §9.1).
+        A weapon class past the client's table is ignored."""
+        if damage_of(hit.damage) is None:
+            self.unrelayable_damage += 1
+            level = logging.WARNING if self.unrelayable_damage == 1 else logging.DEBUG  # once
+            log.log(level, "dropping damage byte %d from player %d", hit.damage, reporter.id)
+            return []
+        if not tower.take_damage(hit.damage):
+            return []
+        return self._destroy_tower(tower, now)
+
+    def place_tower(self, team: int, pos: WirePos, mega: bool, now: float) -> list[Event]:
+        """A tower lands for ``team`` at its ordered point: every playing client is sent its ``'M'``
+        and a later joiner is given it by the sync (I §7.3). No id left: nothing is placed."""
+        tower_id = self._ids.allocate(IdRange.STRUCTURE, self._earliest_start())
+        if tower_id is None:
+            log.warning("no free structure id; a tower for team %d was not placed", team)
+            return []
+        tower = Tower.new(tower_id, team, pos, mega)
+        self._towers[tower_id] = tower
+        log.info("tower %d placed for team %d in block %s", tower_id, team, tower.block)
+        return self.spawn(tower, now)
+
+    def _destroy_tower(self, tower: Tower, now: float) -> list[Event]:
+        """``'J'`` to every client that holds it, then forget it: a later joiner is not given its
+        create, and its id is released for reuse (I §6.2, II §8, II §10). The holders are named now:
+        forgetting it leaves ``ToHolders`` nobody to reach."""
+        events = [
+            Event(server.Destroy(tower.entity_id), ToPlayer(p.id))
+            for p in self.players()
+            if p.view.holds(tower.entity_id)
+        ]
+        self.despawn(tower.entity_id)
+        del self._towers[tower.entity_id]
+        self._ids.release(IdRange.STRUCTURE, tower.entity_id, now)
+        log.info("tower %d of team %d destroyed", tower.entity_id, tower.team)
+        return events
 
     def _is_known_npc(self, entity_id: int) -> bool:
         """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""

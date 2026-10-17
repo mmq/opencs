@@ -359,3 +359,11 @@ GRACE_BOX_TILES = 3
 #: at most 3 a second); four times that with a burst of several seconds' worth, as the other
 #: relayed kinds (``RELAY_LIMIT_*``). Ours.
 RELAY_LIMIT_HIT = (40, 16.0)
+
+# --- Towers, guppies and territory (I §9.4, II §10, II §5, II §14; DESIGN §3.1 ``structures``) ---
+
+#: Damage a tower absorbs before it is destroyed, and a MegaTower's (twice: the manual's 2:1 ratio).
+#: The client holds no tower health, so the number is ours: a full pod's power, so the same per-shot
+#: table applies and the starting gun's 150 destroys a tower in 20 hits. II §10.
+TOWER_HP = 3000
+MEGATOWER_HP = 6000
