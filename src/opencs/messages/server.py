@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import ClassVar, Self
 
 from opencs import policy
+from opencs.messages import limits
 from opencs.messages.base import ServerMessage, message, sub_letters
 from opencs.messages.catalog import is_module_index
 from opencs.messages.fields import (
@@ -38,10 +39,10 @@ BLOCK_SIDE = 8
 
 def sanitize_chat(raw: bytes) -> bytes:
     """Make arbitrary client text safe for an ``'a'`` line: every byte outside ``0x20..0x7e``
-    becomes a space and the result is cut to ``policy.MAX_CHAT_BYTES`` (I §8.23). The
+    becomes a space and the result is cut to ``limits.MAX_CHAT_BYTES`` (I §8.23). The
     session calls this; the ``Chat`` constructor refuses what it would have changed."""
     clean = bytes(b if 0x20 <= b <= 0x7E else policy.CHAT_FILL_BYTE for b in raw)
-    return clean[: policy.MAX_CHAT_BYTES]
+    return clean[: limits.MAX_CHAT_BYTES]
 
 
 @message
@@ -443,7 +444,7 @@ class Damage(ServerMessage):
 
     def validate(self) -> None:
         check_range("damage", self.damage, 0, BIAS10_MAX)
-        check_range("weapon class", self.damage % 10, 0, policy.DAMAGE_CLASS_MAX)
+        check_range("weapon class", self.damage % 10, 0, limits.DAMAGE_CLASS_MAX)
 
     @property
     def weapon_class(self) -> int:
@@ -689,9 +690,9 @@ class Ambient(ServerMessage):
     def validate(self) -> None:
         check_range("sub", self.sub, 0, 4)
         limit = (
-            policy.AMBIENT_PALETTE_MAX
+            limits.AMBIENT_PALETTE_MAX
             if self.sub in (0, 1)
-            else policy.AMBIENT_RAIN_MAX
+            else limits.AMBIENT_RAIN_MAX
             if self.sub in (2, 3)
             else policy.AMBIENT_LIGHTNING_MAX
         )
@@ -738,7 +739,7 @@ class SetBlocks(ServerMessage):
     def validate(self) -> None:
         check_range("block count", len(self.classes), BLOCK_COUNT, BLOCK_COUNT)
         for c in self.classes:
-            check_range("block class", c, 0, policy.BLOCK_CLASS_MAX)
+            check_range("block class", c, 0, limits.BLOCK_CLASS_MAX)
 
     def class_at(self, x: int, z: int) -> int:
         """The class of world block (X, Z)."""
@@ -771,7 +772,7 @@ class SetBlock(ServerMessage):
     def validate(self) -> None:
         check_range("x", self.x, 0, BLOCK_SIDE - 1)
         check_range("z", self.z, 0, BLOCK_SIDE - 1)
-        check_range("block class", self.block_class, 0, policy.BLOCK_CLASS_MAX)
+        check_range("block class", self.block_class, 0, limits.BLOCK_CLASS_MAX)
         check_range("sub", self.sub, 0x10, 0xFF)
         if self.sub == ord("I"):
             raise ValueError("a single-cell 'T' sub byte must not be 'I' (I §8.22)")
@@ -794,8 +795,8 @@ class SetBlock(ServerMessage):
 @message
 class Chat(ServerMessage):
     """``'a'`` ``sender:b10, style:b10, text:str``: HUD/chat text (I §8.23). ``sender`` is
-    a pod id or ``policy.SYSTEM_SENDER``; ``style`` 0 open, other = shown with ``:``. Lowercase, so
-    no tag. The text is printable ASCII and at most ``policy.MAX_CHAT_BYTES``: the constructor
+    a pod id or ``limits.SYSTEM_SENDER``; ``style`` 0 open, other = shown with ``:``. Lowercase, so
+    no tag. The text is printable ASCII and at most ``limits.MAX_CHAT_BYTES``: the constructor
     refuses anything else; use ``sanitize_chat`` first."""
 
     TYPE: ClassVar[str] = "a"
@@ -807,7 +808,7 @@ class Chat(ServerMessage):
         check_range("sender", self.sender, 0, BIAS10_MAX)
         check_range("style", self.style, 0, BIAS10_MAX)
         check_printable("text", self.text)
-        check_range("text length", len(self.text), 0, policy.MAX_CHAT_BYTES)
+        check_range("text length", len(self.text), 0, limits.MAX_CHAT_BYTES)
 
     def body(self) -> bytes:
         return Writer().b10(self.sender).b10(self.style).str(self.text).bytes()

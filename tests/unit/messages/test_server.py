@@ -9,7 +9,15 @@ import pytest
 
 from fixtures.wire_bytes import b10, b88, grid, num, string
 from opencs import policy
-from opencs.messages import DecodeError, WirePos, WireXZ, decode_server, server, server_payload
+from opencs.messages import (
+    DecodeError,
+    WirePos,
+    WireXZ,
+    decode_server,
+    limits,
+    server,
+    server_payload,
+)
 from opencs.messages.base import _SERVER, ServerMessage
 from opencs.messages.catalog import CATALOG
 from opencs.wire.frame import MAX_PAYLOAD, build_frame
@@ -351,7 +359,7 @@ def test_chat_length_limit() -> None:
 
 
 def test_chat_sender_and_style_are_bytes() -> None:
-    server.Chat(policy.SYSTEM_SENDER, 239, b"x")
+    server.Chat(limits.SYSTEM_SENDER, 239, b"x")
     for v in (240, -1):
         bad(lambda v=v: server.Chat(v, 0, b"x"))
         bad(lambda v=v: server.Chat(0, v, b"x"))
