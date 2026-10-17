@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+/data/
+/captures/
+# The game's files never enter this repo
+CYBER/
+*.FUN
+*.CBD
+*.CRS
+*.GRS
