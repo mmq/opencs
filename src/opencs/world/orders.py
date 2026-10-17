@@ -103,6 +103,8 @@ class Orders:
         if not player.pod.has_reported:
             return []
         if isinstance(message, client.ModuleOrder):
+            if not is_module_index(message.module):
+                return []  # not a catalog index: a modified client, nothing to answer
             return _module_reply(player, message.module, policy.MODULE_ORDER_REFUSED)
         return [_reply(player, policy.ORDER_QUEUE_FULL)]
 
@@ -116,7 +118,8 @@ class Orders:
         if not player.pod.has_reported or not is_module_index(order.module):
             return []  # not a catalog index: a modified client
         placed = player.pod.placed
-        assert placed is not None
+        if placed is None:
+            return []  # a 'J' before the first 'b' leaves a pod that has reported but is unplaced
         no_stock = not self._rules.stocks(order.module)
         no_drop = in_enemy_no_drop_zone(player.team, placed.pos)
         home = in_home_zone(player.team, placed.pos)

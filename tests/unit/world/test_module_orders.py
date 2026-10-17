@@ -271,3 +271,11 @@ def test_an_over_budget_module_order_is_answered_ok_0() -> None:
     assert out == [(a, server.ModuleReply(REPAIR, 0))]
     out = deliveries(c, c.refuse_order(a, client.TowerOrder(WirePos(2, 2, 1, 20, 1), 0, 0)))
     assert out == [(a, server.OrderReply(policy.ORDER_QUEUE_FULL))]
+
+
+def test_an_order_after_a_death_before_the_first_report_is_ignored_not_asserted() -> None:
+    # A 'J' ahead of the first 'b' leaves a pod that has reported but was never placed.
+    c, (a, _) = seat([0, 1], reported=False)
+    c.client_message(a, client.Died(), 0.6)
+    c.client_message(a, report(1), 0.7)
+    assert c.client_message(a, client.ModuleOrder(21, 1, 0), 5.0) == []
