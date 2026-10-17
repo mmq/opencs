@@ -18,6 +18,8 @@ from opencs.clock import ManualClock
 from opencs.config import AppConfig, load_config
 from opencs.messages import ClientMessage, ServerMessage, client_payload, decode_server, server
 from opencs.session.phases import Services
+from opencs.store.base import Stores
+from opencs.store.memory import memory_stores
 from opencs.wire.frame import Frame, FrameReader, build_frame
 
 TIMEOUT = 5.0
@@ -144,6 +146,7 @@ async def start(
     *,
     clock: ManualClock | None = None,
     services: Services | None = None,
+    stores: Stores | None = None,
     tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> tuple[asyncio.Event, asyncio.Task[None], int]:
     stop = asyncio.Event()
@@ -155,6 +158,7 @@ async def start(
             ready=port_future.set_result,
             clock=clock,
             services=services,
+            stores=stores or (None if services else memory_stores()),
             tick_sleep=tick_sleep,
         )
     )

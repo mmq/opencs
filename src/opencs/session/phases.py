@@ -17,6 +17,7 @@ from opencs.clock import Clock
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.routing import Router
+from opencs.session.persistence import Persistence
 from opencs.wire.text import LineReader
 from opencs.world.city import City
 
@@ -35,6 +36,7 @@ class Services:
     clock: Clock
     cities: Mapping[str, City]  # the world, by city letter
     router: Router
+    persistence: Persistence
 
 
 class Phase(ABC):

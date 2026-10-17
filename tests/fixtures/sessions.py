@@ -15,9 +15,11 @@ from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.messages import ServerMessage
 from opencs.routing import Router
+from opencs.session.persistence import Persistence
 from opencs.session.phases import Services
 from opencs.session.session import Session
-from opencs.store.memory import MemoryAccountStore
+from opencs.store.base import ProgressStore
+from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
 from opencs.world.city import City
 
 FAST_ITERATIONS = 1000
@@ -62,6 +64,7 @@ class World:
     identity: Identity
     lobby: Lobby
     services: Services
+    progress: ProgressStore
     sessions: list[Harness] = field(default_factory=list)
 
 
@@ -90,7 +93,11 @@ class Harness:
 
 
 def make_world(
-    *cities: CityConfig, default: str = "B", seed: int = 1, start: float = 100.0
+    *cities: CityConfig,
+    default: str = "B",
+    seed: int = 1,
+    start: float = 100.0,
+    progress: ProgressStore | None = None,
 ) -> World:
     clock = ManualClock(start)
     identity = Identity(MemoryAccountStore(), iterations=FAST_ITERATIONS)
@@ -98,8 +105,9 @@ def make_world(
     configs = cities or (city("A"), city("B"), city("C"))
     cities_by_letter = {c.letter: City(c) for c in configs}
     router = Router()
-    services = Services(identity, lobby, clock, cities_by_letter, router)
-    return World(clock, identity, lobby, services)
+    progress = progress or MemoryProgressStore()
+    services = Services(identity, lobby, clock, cities_by_letter, router, Persistence(progress))
+    return World(clock, identity, lobby, services, progress)
 
 
 def connect(world: World, conn_id: int | None = None) -> Harness:
