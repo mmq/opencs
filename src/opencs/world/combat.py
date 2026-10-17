@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from opencs import policy
+from opencs.messages import limits, server
 
 #: The earliest a shot can be and still match a report made now, in seconds back (II §9.3:
 #: ``now - 1.0 +- 1.0``).
@@ -98,3 +99,14 @@ class HitSet:
 
     def clear(self) -> None:
         self._hits.clear()
+
+
+def damage_to_victim(reporter_id: int, damage: int) -> server.Damage | None:
+    """The ``'I'`` the victim's client is sent for a hit another client reported (I §8.11, II §9.1):
+    the damage byte verbatim, the attacker field the reporter's pod (the client ignores it). None if
+    the byte's weapon class (``byte % 10``) is past the client's five-entry table, where it would
+    read outside it: the caller drops and counts it.
+    """
+    if damage % 10 > limits.DAMAGE_CLASS_MAX:
+        return None
+    return server.Damage(reporter_id, damage)

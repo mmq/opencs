@@ -175,6 +175,16 @@ def test_chat_beyond_its_burst_is_dropped_and_counted_not_relayed() -> None:
     assert not h.io.closed
 
 
+def test_hit_reports_beyond_their_burst_are_dropped_and_counted_not_relayed() -> None:
+    # Each credited hit lands in the victim's outbox (I §9.1.4), so it is budgeted too.
+    h, seen = relayed_in_game()
+    burst, _ = policy.RELAY_LIMIT_HIT
+    hit = frame(client_payload(client.HitReport(1, 10)))
+    h.feed(hit * (burst + 3))
+    assert len(seen) == burst
+    assert h.session.phase._bad.total == 3  # type: ignore[attr-defined]
+
+
 def test_the_budget_refills_with_time() -> None:
     h, seen = relayed_in_game()
     h.feed(CHAT * (policy.RELAY_LIMIT_CHAT[0] + 1))
@@ -197,6 +207,7 @@ def test_a_sustained_flood_closes_the_flooder() -> None:
     [
         "2026-09-03-123853_002-hit-dedup-p2.txt",  # the densest shooting: 17 shots in 10 s
         "2026-10-16-142644_002-sentinel-down-p1.txt",
+        "2026-09-15-102453_001-bounty-payout-p1.txt",  # 15 hit reports among 46 Sentinel shots
         "2026-10-16-113841_002-play-p1.txt",
         "2026-10-13-140200_002-phase6-live-p1.txt",  # the most 'b' and chat
         "2026-10-16-154139_004-grenade-relay-p1.txt",

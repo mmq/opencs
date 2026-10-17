@@ -72,6 +72,7 @@ class InGamePhase(Phase):
         self._relay_buckets: dict[type[ClientMessage], TokenBucket] = {
             client.PodState: TokenBucket(*policy.RELAY_LIMIT_POD_STATE, now),
             client.Shot: TokenBucket(*policy.RELAY_LIMIT_SHOT, now),
+            client.HitReport: TokenBucket(*policy.RELAY_LIMIT_HIT, now),
             client.Chat: TokenBucket(*policy.RELAY_LIMIT_CHAT, now),
             client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
         }

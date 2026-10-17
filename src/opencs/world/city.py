@@ -19,7 +19,7 @@ from opencs import policy
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, ServerMessage, client, server
 from opencs.world import chat, relay
-from opencs.world.combat import HitSet, ShotLog
+from opencs.world.combat import HitSet, ShotLog, damage_to_victim
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
@@ -107,6 +107,10 @@ class City:
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
         #: (I §11.4, II §9.2), counted and logged; the shot is still relayed.
         self.shooter_mismatches = 0
+        #: Hit reports dropped, not relayed: a damage class the client cannot index (I §8.11), a
+        #: report naming the reporter's own pod (I §9.1.4 corollary).
+        self.unrelayable_damage = 0
+        self.own_pod_hit_reports = 0
         self._handlers: dict[
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
@@ -116,6 +120,7 @@ class City:
                 Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
             ],
             client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
+            client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -322,6 +327,48 @@ class City:
             log.warning("dropping a shot of KIND %d from player %d", fired.kind, player.id)
             return []
         return [Event(shot, self._playing(but=player.id))]
+
+    def _hit(self, reporter: Player, hit: client.HitReport, now: float) -> list[Event]:
+        """An ``'I'``: a hit the reporter's simulation registered on ``hit.target`` (I §9.1).
+
+        Damage is an effect and credit is who is paid (II §9.1), so they
+        are decided apart. Credit: one shot of the reporter's is used up per report whatever the
+        target (so an NPC-caused hit on a mine uses up the NPC's shot), and when that shot was the
+        reporter's own pod's, the reporter joins the victim's hit set (II §9.3). Damage: a pod
+        of another player gets the damage byte, whoever is credited and whatever the team (II §9.1).
+        """
+        if hit.target == reporter.id:
+            # The client applies that damage itself and never reports it (I §9.1.4); relaying
+            # one would apply it twice. None has been seen: a modified client.
+            self.own_pod_hit_reports += 1
+            log.warning("player %d reported a hit on its own pod; ignored", reporter.id)
+            return []
+        credit = reporter.shots.attribute(now)
+        victim = self._players.get(hit.target)
+        if victim is None:
+            return self._hit_entity(reporter, hit, credit.credited)
+        if victim.pod.phase is PodPhase.DEAD or not victim.pod.has_reported:
+            log.debug("hit on player %d, which is not in play; ignored", victim.id)
+            return []
+        if credit.credited:
+            victim.hits.record(reporter.id, now)
+        damage = damage_to_victim(reporter.id, hit.damage)
+        if damage is None:
+            self.unrelayable_damage += 1
+            log.warning("dropping damage byte %d from player %d", hit.damage, reporter.id)
+            return []
+        return [Event(damage, ToPlayer(victim.id))]
+
+    def _hit_entity(self, reporter: Player, hit: client.HitReport, credited: bool) -> list[Event]:
+        """A hit on something that is not a player's pod: a tower, Sentinel, Muncher or mine. Their
+        durability is the structures' and NPCs' (M7, M9); until then the report is ignored."""
+        log.debug(
+            "player %d hit entity %d (credited=%s); not ruled yet",
+            reporter.id,
+            hit.target,
+            credited,
+        )
+        return []
 
     def _is_known_npc(self, entity_id: int) -> bool:
         """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""
