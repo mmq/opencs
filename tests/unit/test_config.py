@@ -63,6 +63,8 @@ def test_defaults_apply(tmp_path: Path) -> None:
         ('letter = "AB"', "letter"),
         ('name = "SEVENTEEN CHARS XX"', "name"),
         ('name = ""', "name"),
+        ('name = "X\\u0001Y"', "name"),
+        ('name = "CAF\\u00c9"', "name"),
         ("map = 0", "map"),
         ("max_multiplier = 52", "max_multiplier"),
         ("max_module_level = 6", "max_module_level"),

@@ -15,8 +15,14 @@ TICK_HZ = 5
 
 # --- Cities (II §5, I §9.2, II §5) ----------------------
 
-#: Longest city name, in characters. II §5.
+#: Longest city name, in characters. Ours (the test server's limit); the spec is silent.
 MAX_CITY_NAME_LENGTH = 16
+
+#: Printable ASCII range allowed in text the server sends to clients (space to tilde). A 0x01 or
+#: 0x05 byte arms command mode on the receiving client, so no control byte may be relayed.
+#: II §4.3, I §7.2.
+PRINTABLE_LOW = " "
+PRINTABLE_HIGH = "~"
 
 #: Highest max multiplier a city may set; larger overflows the score arithmetic. I §9.2.6.
 MAX_MULTIPLIER_CEILING = 51

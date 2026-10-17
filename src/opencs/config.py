@@ -147,6 +147,8 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
     name = table.string("name")
     if not 1 <= len(name) <= policy.MAX_CITY_NAME_LENGTH:
         raise table.fail("name", f"must be 1..{policy.MAX_CITY_NAME_LENGTH} characters")
+    if not all(policy.PRINTABLE_LOW <= ch <= policy.PRINTABLE_HIGH for ch in name):
+        raise table.fail("name", "must be printable ASCII (0x20-0x7e)")
     team_policy = table.string("team_policy", policy.DEFAULT_TEAM_POLICY)
     if team_policy not in policy.TEAM_POLICIES:
         raise table.fail("team_policy", f"must be one of {', '.join(policy.TEAM_POLICIES)}")
