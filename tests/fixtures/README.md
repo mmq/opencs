@@ -45,3 +45,12 @@ server-side relay of a shot is in none of the chosen runs). No capture holds a M
 | `2026-10-15-144318_008-new-city-p1`, `2026-10-09-003444_002-tower-mine-p1` | quit request, tower orders |
 | `2026-07-29-025542_001-module-order`, `2026-07-28-203429_001-bay-upgrade` | module orders and `'Q'` subs; bay upgrades, `'D'`-`'B'` |
 | `2026-07-29-030741_002-city-name` | July build: client `'b'` frames with a trailing NUL inside LEN (I §4.1) |
+
+### Runs that are not in the corpus
+
+The kill and payout runs `2026-10-01-170222` and `2026-10-01-172859` are not in the capture corpus, and no other run of 2026-10-01 stands in. Kills (server `'J'`) are carried by
+`2026-10-16-113841_002-play-p1`, `2026-10-16-142644_002-sentinel-down-p1` and the two
+`2026-10-16-154139` grenade-relay fixtures. Payouts (`'D'`-`'S'`) appear in `2026-10-16-113841_002-play-p1`
+(3 frames) and in the resume and high-id fixtures; M6-M7 should replay those.
+
+The "never captured" list above was checked against the whole corpus (363 logs), not only the chosen runs.
