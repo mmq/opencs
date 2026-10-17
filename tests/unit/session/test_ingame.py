@@ -7,9 +7,9 @@ import pytest
 from fixtures.captures import load_capture
 from fixtures.sessions import Harness, make_world, play
 from opencs import policy
-from opencs.messages import ClientMessage, client
+from opencs.messages import ClientMessage, DecodeError, client, client_payload, decode_client
 from opencs.session.ingame import InGamePhase
-from opencs.wire.frame import build_frame
+from opencs.wire.frame import FrameReader, build_frame
 
 # A client 'b' that ends after ``power`` (I §4.1):
 # 26 of these were captured, 24 of them one a second.
@@ -148,3 +148,75 @@ def test_a_partial_frame_that_finishes_in_time_is_not_given_up() -> None:
     h.advance(policy.FRAME_STALL_SECONDS - 1.0)  # 3.0 s after the first feed, 2.0 after the second
     h.feed(quit_[5:])
     assert seen == [client.Ping(), client.Quit()]
+
+
+# --- the relay budgets (policy.RELAY_LIMIT_*) ----------------------------------------------------
+
+
+CHAT = frame(client_payload(client.Chat(0, b"hi")))
+
+
+def relayed_in_game() -> tuple[Harness, list[ClientMessage]]:
+    """A session whose hand-offs to the city are recorded; ``handle`` is the real one."""
+    h = play(make_world())
+    seen: list[ClientMessage] = []
+    phase = h.session.phase
+    assert isinstance(phase, InGamePhase)
+    phase._to_city = seen.append  # type: ignore[method-assign]
+    return h, seen
+
+
+def test_chat_beyond_its_burst_is_dropped_and_counted_not_relayed() -> None:
+    h, seen = relayed_in_game()
+    burst, _ = policy.RELAY_LIMIT_CHAT
+    h.feed(b"".join(CHAT for _ in range(burst + 5)))
+    assert len(seen) == burst
+    assert h.session.phase._bad.total == 5  # type: ignore[attr-defined]
+    assert not h.io.closed
+
+
+def test_the_budget_refills_with_time() -> None:
+    h, seen = relayed_in_game()
+    h.feed(CHAT * (policy.RELAY_LIMIT_CHAT[0] + 1))
+    before = len(seen)
+    h.advance(1.0 / policy.RELAY_LIMIT_CHAT[1])
+    h.feed(CHAT)
+    assert len(seen) == before + 1
+
+
+def test_a_sustained_flood_closes_the_flooder() -> None:
+    h, seen = relayed_in_game()
+    burst, _ = policy.RELAY_LIMIT_CHAT
+    h.feed(b"".join(CHAT for _ in range(burst + policy.MAX_BAD_INPUT + 1)))
+    assert len(seen) == burst
+    assert h.io.closed_with == ["too much bad input"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "2026-09-03-123853_002-hit-dedup-p2.txt",  # the densest shooting: 17 shots in 10 s
+        "2026-10-16-142644_002-sentinel-down-p1.txt",
+        "2026-10-16-113841_002-play-p1.txt",
+        "2026-10-13-140200_002-phase6-live-p1.txt",  # the most 'b' and chat
+        "2026-10-16-154139_004-grenade-relay-p1.txt",
+    ],
+)
+def test_a_real_captures_stream_is_never_limited(name: str) -> None:
+    h, seen = relayed_in_game()
+    sent_frames = [f for f in load_capture(name) if f.direction == "C"]
+    decoded = 0
+    for f in sent_frames:
+        h.clock.set(100.0 + f.t)
+        h.feed(f.raw)
+    reader = FrameReader()
+    for f in sent_frames:
+        for fr in reader.feed(f.raw):
+            try:
+                m = decode_client(fr.payload)
+            except DecodeError:
+                continue
+            if not isinstance(m, client.Ping | client.Quit | client.Acks | client.Flags):
+                decoded += 1
+    assert decoded > 0 and len(seen) == decoded
+    assert not h.io.closed
