@@ -45,15 +45,19 @@ def checksum(length_byte: int, payload: bytes) -> int:
 
 
 def build_frame(payload: bytes, *, terminator: bytes = b"\x0d") -> bytes:
-    """Wrap ``payload`` in a frame (I §4.1). Raises ``WireError`` for what no legal frame holds."""
+    """Wrap ``payload`` in a frame (I §4.1). Raises ``WireError`` for what no legal frame holds.
+
+    ``terminator`` is ``0x0d`` (the default, server to client), ``0x0e``, ``0x0a`` (what a client
+    ends its frames with, for tools that play the client) or empty.
+    """
     if not payload:
         raise WireError("empty payload")
     if len(payload) > MAX_PAYLOAD:
         raise WireError(f"payload {len(payload)} bytes exceeds {MAX_PAYLOAD}")
     if any(b in TERMINATORS for b in payload):
         raise WireError("payload contains 0x0a, 0x0d or 0x0e")
-    if terminator not in (b"", b"\x0d", b"\x0e"):
-        raise WireError("terminator must be 0x0d, 0x0e or empty")
+    if terminator not in (b"", b"\x0a", b"\x0d", b"\x0e"):
+        raise WireError("terminator must be 0x0a, 0x0d, 0x0e or empty")
     length = HEADER_SIZE + len(payload) + LEN_BIAS
     ck = checksum(length, payload)
     return MAGIC + bytes([ck, ck ^ 0xFF, length]) + payload + terminator
@@ -90,7 +94,8 @@ class FrameReader:
     and real frames inside the span are held back until then (at most 238 bytes). A CK outside
     ``0x10..0x8f`` is rejected at once, which halves the odds; ASCII text can never form a valid
     header (~CK of an ASCII byte is 0x80 or more). A caller that needs bounded latency for a
-    pending partial frame must time it out itself (M3).
+    pending partial frame must time it out itself: ``pending`` says how much is held and
+    ``give_up_pending`` drops the stray header so the real frames inside its span come out.
     """
 
     def __init__(self) -> None:
@@ -147,6 +152,24 @@ class FrameReader:
                 self._skip_term = True
         del buf[:pos]
         return out
+
+    @property
+    def pending(self) -> int:
+        """Bytes held back waiting for a frame to complete (at most ``MAX_PENDING``)."""
+        return len(self._buf)
+
+    def give_up_pending(self) -> list[Frame]:
+        """Abandon the frame being waited for: count its header as bad, skip its first byte and
+        re-scan what was held. Returns the frames that were hiding inside its claimed span.
+
+        A session calls this when a partial frame has waited too long (DESIGN §5; our partial-frame
+        timeout).
+        """
+        if not self._buf:
+            return []
+        self._reject()
+        del self._buf[0]
+        return self.feed(b"")
 
     def _reject(self) -> None:
         self.bad_frames += 1

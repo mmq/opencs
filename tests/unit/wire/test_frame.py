@@ -184,7 +184,7 @@ def test_build_frame_rejects_unframable_payloads() -> None:
         with pytest.raises(WireError):
             build_frame(bad)
     with pytest.raises(WireError):
-        build_frame(b"A", terminator=b"\x0a")
+        build_frame(b"A", terminator=b"\x0f")
     assert len(build_frame(b"A" * MAX_PAYLOAD, terminator=b"")) == 0xFF - 0x10
     assert build_frame(b"A", terminator=b"\x0e")[-1] == 0x0E
 
@@ -354,3 +354,38 @@ def test_h_helper_ignores_spaces() -> None:
 def test_frame_rejects_empty_payload() -> None:
     with pytest.raises(WireError):
         Frame(b"")
+
+
+def test_build_frame_accepts_the_clients_lf_terminator() -> None:
+    raw = build_frame(b"EN", terminator=b"\x0a")
+    assert raw[-1] == 0x0A
+    assert raw[:-1] == build_frame(b"EN", terminator=b"")
+    reader = FrameReader()
+    assert [f.payload for f in reader.feed(raw)] == [b"EN"]
+    assert reader.skipped_bytes == 0
+
+
+def _stray_header() -> bytes:
+    """A header that passes CK, ~CK and LEN but whose claimed span (0x80 bytes) never completes."""
+    length = 0x90
+    ck = 0x20
+    return b"CS" + bytes([ck, ck ^ 0xFF, length])
+
+
+def test_give_up_pending_releases_frames_hidden_in_a_stray_span() -> None:
+    real = build_frame(b"EN", terminator=b"")
+    reader = FrameReader()
+    assert reader.feed(_stray_header() + real) == []
+    assert reader.pending == len(_stray_header() + real)
+    frames = reader.give_up_pending()
+    assert [f.payload for f in frames] == [b"EN"]
+    assert reader.pending == 0
+    assert reader.bad_frames == 1
+
+
+def test_give_up_pending_with_nothing_held_is_a_no_op() -> None:
+    reader = FrameReader()
+    assert reader.give_up_pending() == []
+    assert reader.bad_frames == 0
+    assert reader.feed(b"C") == []
+    assert reader.pending == 1

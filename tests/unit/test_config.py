@@ -66,6 +66,7 @@ def test_defaults_apply(tmp_path: Path) -> None:
         ('name = "X\\u0001Y"', "name"),
         ('name = "CAF\\u00c9"', "name"),
         ("map = 0", "map"),
+        ("map = 10", "map"),
         ("max_multiplier = 0", "max_multiplier"),
         ("max_module_level = -1", "max_module_level"),
         ("tower_output = -1", "tower_output"),
@@ -190,3 +191,9 @@ def test_code_defaults_match_the_shipped_file(tmp_path: Path) -> None:
         shipped.port,
         shipped.log_level,
     )
+
+
+def test_map_number_may_be_any_single_digit_from_one(tmp_path: Path) -> None:
+    # I §5.4: <rev> repeats the map number and must be 0-9, so 9 is the last map a city can name.
+    config = load_config(write_config(tmp_path, {"A": with_line("map = 9")}))
+    assert config.cities[0].map == 9

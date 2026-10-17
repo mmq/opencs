@@ -13,7 +13,17 @@ ROOT = Path(opencs.__file__).parent
 ALLOWED: dict[str, set[str]] = {
     "wire": {"policy"},
     "messages": {"wire", "policy"},
+    "store": {"policy"},
+    "lobby": {"wire", "policy", "config", "store"},
+    "session": {"wire", "messages", "lobby", "store", "policy", "config", "clock", "connlog"},
+    "net": {"wire", "messages", "policy", "clock", "connlog"},
 }
+
+
+#: Packages that must be sans-IO (DESIGN §3, §3.4) and the standard-library modules they may not
+#: import: no sockets, no event loop, no threads, no wall clock. Extend to ``world`` in M4.
+SANS_IO = ("session", "lobby")
+FORBIDDEN_STDLIB = {"asyncio", "socket", "selectors", "threading", "time", "select", "ssl"}
 
 
 def _imports(path: Path) -> set[str]:
@@ -39,3 +49,19 @@ def test_packages_import_only_allowed_layers() -> None:
                     continue
                 top = parts[1]
                 assert top == package or top in allowed, f"{path.name} imports {name}"
+
+
+def test_the_guard_covers_the_layers_the_design_forbids() -> None:
+    # net knows nothing of session, lobby or world; session nothing of net; lobby of neither.
+    assert not {"session", "lobby", "world"} & ALLOWED["net"]
+    assert "net" not in ALLOWED["session"]
+    assert not {"net", "session"} & ALLOWED["lobby"]
+    assert not {"net", "session", "lobby", "world"} & ALLOWED["wire"]
+    assert not {"net", "session", "lobby", "world"} & ALLOWED["messages"]
+
+
+def test_sans_io_packages_import_no_io_modules() -> None:
+    for package in SANS_IO:
+        for path in (ROOT / package).rglob("*.py"):
+            for name in _imports(path):
+                assert name.split(".")[0] not in FORBIDDEN_STDLIB, f"{path.name} imports {name}"
