@@ -19,7 +19,6 @@ from opencs import policy
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, client, limits, server
 from opencs.world import chat, death, relay
-from opencs.world.combat import damage_to_victim
 from opencs.world.dispatch import (
     Handler,
     check_loadout,
@@ -30,6 +29,7 @@ from opencs.world.dispatch import (
 from opencs.world.effects import Effects
 from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
+from opencs.world.hits import Hits
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.modules import Drops, ModuleRules
 from opencs.world.orders import Orders
@@ -80,25 +80,18 @@ class City:
         self.orders = Orders(self, self._territory, rules, self.drops)
         #: The effect modules (I §9.3.5, II §16.1).
         self.effects = Effects(self, self.orders, self.weather, rules)
-        #: Shots dropped because their KIND would crash a client (I §8.25).
-        self.unsafe_shots = 0
-        #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
-        #: (I §11.4, II §9.2), counted and logged; the shot is still relayed.
-        self.shooter_mismatches = 0
-        #: Hit reports dropped, not relayed: a damage class the client cannot index (I §8.11), a
-        #: report naming the reporter's own pod (I §9.1.4 corollary).
-        self.unrelayable_damage = 0
-        self.own_pod_hit_reports = 0
+        #: Shots and hit reports (I §9.1.2, II §9.3).
+        self.hits = Hits(self, self.orders, self.effects)
         self._handlers: dict[type[ClientMessage], Handler] = {
             **module_handlers(self.orders, self.drops, self.effects),
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
             **score_handlers(self.config.max_module_level, self.config.max_multiplier),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.Grenade: lambda p, m, now: [
-                Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
+                Event(relay.grenade(_as(client.Grenade, m)), self.playing(but=p.id))
             ],
-            client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
-            client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
+            client.Shot: lambda p, m, now: self.hits.shot(p, _as(client.Shot, m), now),
+            client.HitReport: lambda p, m, now: self.hits.hit(p, _as(client.HitReport, m), now),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -108,6 +101,28 @@ class City:
     def players(self) -> Sequence[Player]:
         """Everyone in the city, by id."""
         return sorted(self._players.values(), key=lambda p: p.id)
+
+    # The shot and hit counters live in ``Hits``; the city exposes them for the tests and the admin
+    # channel (M12).
+    @property
+    def unsafe_shots(self) -> int:
+        return self.hits.unsafe_shots
+
+    @property
+    def shooter_mismatches(self) -> int:
+        return self.hits.shooter_mismatches
+
+    @property
+    def unrelayable_damage(self) -> int:
+        return self.hits.unrelayable_damage
+
+    @property
+    def own_pod_hit_reports(self) -> int:
+        return self.hits.own_pod_hit_reports
+
+    def is_known_npc(self, entity_id: int) -> bool:
+        """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""
+        return entity_id in self._live and entity_id not in self._players
 
     def player(self, player_id: int) -> Player | None:
         return self._players.get(player_id)
@@ -285,7 +300,7 @@ class City:
         for player in self._players.values():
             player.view.forget(entity_id)
 
-    def _playing(self, *, team: int | None = None, but: int | None = None) -> ToPlayers:
+    def playing(self, *, team: int | None = None, but: int | None = None) -> ToPlayers:
         """The clients that have reported, for messages every client takes (chat, shots,
         Grenades; I App. B means every client in the game). One still loading has
         its receive ring nearly full from the ``'B'`` repeat (I §7.1, II §7), and has been
@@ -320,100 +335,13 @@ class City:
         event = chat.chat_line(
             player.id,
             typed,
-            open_to=self._playing(),
-            team_to=self._playing(team=player.team),
+            open_to=self.playing(),
+            team_to=self.playing(team=player.team),
         )
         if event is None:
             log.debug("dropping chat of style %d from player %d", typed.style, player.id)
             return []
         return [event]
-
-    def _shot(self, player: Player, fired: client.Shot, now: float) -> list[Event]:
-        """A shot (I §8.25, II §9.3, I §11, I App. B).
-
-        It is logged on the sender's connection first, whatever the shooter and whether or not it
-        is relayed: an NPC's shot the client simulated is what keeps its hit from being credited
-        to the player (II §9.3). The shooter must be the sender's own pod or a known NPC;
-        a mismatch is logged and the shot still relayed. A shot is relayed verbatim to every other
-        client that has reported, except one whose KIND would crash a client, which is dropped and
-        counted.
-        """
-        player.shots.record(now, fired.shooter)
-        if fired.shooter != player.id and not self._is_known_npc(fired.shooter):
-            self.shooter_mismatches += 1
-            # Warn once; a client that simulates NPCs this city does not know yet (before they
-            # exist) would otherwise fill the log with one line per shot.
-            level = logging.WARNING if self.shooter_mismatches == 1 else logging.DEBUG
-            log.log(
-                level,
-                "player %d reported a shot by %d, which is neither its pod nor a known NPC",
-                player.id,
-                fired.shooter,
-            )
-        shot = relay.shot(fired)
-        if shot is None:
-            self.unsafe_shots += 1
-            # Warn once, then DEBUG: a hostile client could otherwise log at the relay rate.
-            level = logging.WARNING if self.unsafe_shots == 1 else logging.DEBUG
-            log.log(level, "dropping a shot of KIND %d from player %d", fired.kind, player.id)
-            return []
-        return [Event(shot, self._playing(but=player.id))]
-
-    def _hit(self, reporter: Player, hit: client.HitReport, now: float) -> list[Event]:
-        """An ``'I'``: a hit the reporter's simulation registered on ``hit.target`` (I §9.1).
-
-        Damage is an effect and credit is who is paid (II §9.1), so they
-        are decided apart. Credit: one shot of the reporter's is used up per report whatever the
-        target (so an NPC-caused hit on a mine uses up the NPC's shot), and when that shot was the
-        reporter's own pod's, the reporter joins the victim's hit set (II §9.3). Damage: a pod
-        of another player gets the damage byte, whoever is credited and whatever the team (II §9.1).
-        """
-        if hit.target == reporter.id:
-            # The client applies that damage itself and never reports it (I §9.1.4); relaying
-            # one would apply it twice. None has been seen: a modified client.
-            self.own_pod_hit_reports += 1
-            level = logging.WARNING if self.own_pod_hit_reports == 1 else logging.DEBUG  # once
-            log.log(level, "player %d reported a hit on its own pod; ignored", reporter.id)
-            return []
-        credit = reporter.shots.attribute(now)
-        victim = self._players.get(hit.target)
-        if victim is None:
-            return self._hit_entity(reporter, hit, credit.credited, now)
-        if victim.pod.phase is PodPhase.DEAD or not victim.pod.has_reported:
-            log.debug("hit on player %d, which is not in play; ignored", victim.id)
-            return []
-        if credit.credited:
-            victim.hits.record(reporter.id, now)
-        damage = damage_to_victim(reporter.id, hit.damage)
-        if damage is None:
-            self.unrelayable_damage += 1
-            level = logging.WARNING if self.unrelayable_damage == 1 else logging.DEBUG  # once
-            log.log(level, "dropping damage byte %d from player %d", hit.damage, reporter.id)
-            return []
-        return [Event(damage, ToPlayer(victim.id))]
-
-    def _hit_entity(
-        self, reporter: Player, hit: client.HitReport, credited: bool, now: float
-    ) -> list[Event]:
-        """A hit on something that is not a player's pod. A tower loses hit points (II §10); a mine
-        is ignored; a Sentinel or Muncher is M9's, and until then it is ignored too."""
-        tower = self.orders.towers.get(hit.target)
-        if tower is not None:
-            return self.orders.hit_tower(reporter, tower, hit, now)
-        if hit.target in self.effects.mines:
-            log.debug("player %d hit mine %d; mines have no durability", reporter.id, hit.target)
-            return []  # mines have no durability (ours)
-        log.debug(
-            "player %d hit entity %d (credited=%s); not ruled yet",
-            reporter.id,
-            hit.target,
-            credited,
-        )
-        return []
-
-    def _is_known_npc(self, entity_id: int) -> bool:
-        """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""
-        return entity_id in self._live and entity_id not in self._players
 
     def _died(self, player: Player, now: float) -> list[Event]:
         """The client's bare ``'J'``: its pod died. The payout, the notices, the ``'J'`` and the
