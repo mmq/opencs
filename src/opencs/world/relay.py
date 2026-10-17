@@ -9,6 +9,19 @@ from __future__ import annotations
 
 from opencs import policy
 from opencs.messages import client, server
+from opencs.wire.codec import BIAS88_MAX, BIAS88_MIN
+
+#: The client multiplies a received forward speed by ``0xe666 / 0x10000`` (0.9, I §8.24), so the
+#: relay divides by it first.
+FWD_SCALE_NUM = 0xE666
+FWD_SCALE_DEN = 0x10000
+
+
+def relayed_speed(v: int) -> int:
+    """A reported forward speed as relayed: ``ceil(v * 0x10000 / 0xe666)``, clamped to what a
+    ``b88`` field may carry (I §8.24, I §4.3)."""
+    w = -(-v * FWD_SCALE_DEN // FWD_SCALE_NUM)
+    return max(BIAS88_MIN, min(BIAS88_MAX, w))
 
 
 def pod_state(pod_id: int, report: client.PodState) -> server.PodState:
@@ -17,15 +30,17 @@ def pod_state(pod_id: int, report: client.PodState) -> server.PodState:
     ``state`` is 1 if the reporter's is 1 and otherwise 0: 1 keeps ``v1``/``v2`` meaning vertical
     velocity, and 0 is the only value for which the client applies forward speed. Never 4 (the
     client discards the whole packet) or 2. ``v1``/``v2`` stay as sent, with the state they
-    belong to (rule 1). The S→C form ends at the weight: no power, no armor.
+    belong to (rule 1). ``fwd``/``fwd_target`` are divided by the client's 0.9 (``relayed_speed``)
+    so the pod keeps its reported speed on other screens. The S→C form ends at the weight: no
+    power, no armor.
     """
     state = 1 if report.state == policy.POD_STATE_FALLING else 0
     return server.PodState(
         id=pod_id,
         pos=report.pos,
         orient=report.orient,
-        fwd=report.fwd,
-        fwd_target=report.fwd_target,
+        fwd=relayed_speed(report.fwd),
+        fwd_target=relayed_speed(report.fwd_target),
         v1=report.v1,
         v2=report.v2,
         state=state,

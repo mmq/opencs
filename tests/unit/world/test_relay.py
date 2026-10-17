@@ -1,5 +1,5 @@
-"""The 'b' relay: state 1 or 0, motion passed through, signed offsets kept, owner excluded
-(I §6.1, I §8.24, I App. A.2)."""
+"""The 'b' relay: state 1 or 0, motion passed through, forward speed divided by 0.9, signed
+offsets kept, owner excluded (I §6.1, I §8.24, I App. A.2)."""
 
 from __future__ import annotations
 
@@ -24,10 +24,29 @@ def test_the_relayed_state_is_1_if_the_reporter_is_falling_otherwise_0(
 
 def test_motion_fields_are_passed_through_with_the_state_they_belong_to() -> None:
     falling = relay.pod_state(7, report(1, v1=-12, v2=345, fwd=-9, fwd_target=17, weight=33))
-    assert (falling.v1, falling.v2, falling.fwd, falling.fwd_target) == (-12, 345, -9, 17)
+    assert (falling.v1, falling.v2) == (-12, 345)
     assert falling.weight == 33 and falling.id == 7 and falling.state == 1
     walking = relay.pod_state(7, report(0, v1=21, v2=-6))  # turn rates: same values, state 0
     assert (walking.v1, walking.v2, walking.state) == (21, -6, 0)
+
+
+@pytest.mark.parametrize(
+    ("sent", "relayed"),
+    [(0, 0), (8, 9), (9, 11), (17, 19), (45, 51), (-9, -10), (-17, -18), (107, 119)],
+)
+def test_forward_speed_is_divided_by_the_clients_0_9(sent: int, relayed: int) -> None:
+    """ceil(v * 0x10000 / 0xe666): the client multiplies by 0xe666 / 0x10000 (I §8.24)."""
+    msg = relay.pod_state(7, report(0, fwd=sent, fwd_target=sent))
+    assert (msg.fwd, msg.fwd_target) == (relayed, relayed)
+
+
+@pytest.mark.parametrize(
+    ("sent", "relayed"), [(108, 119), (119, 119), (-108, -120), (-109, -120), (-120, -120)]
+)
+def test_a_divided_speed_is_clamped_to_the_b88_range(sent: int, relayed: int) -> None:
+    msg = relay.pod_state(7, report(0, fwd=sent, fwd_target=0))
+    assert (msg.fwd, msg.fwd_target) == (relayed, 0)
+    decode_server(server_payload(msg, 0))  # and it encodes
 
 
 def test_signed_offsets_are_kept_never_clamped() -> None:
