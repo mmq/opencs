@@ -498,14 +498,11 @@ class Shot(ClientMessage):
         return cls(shooter, pos, r.num(), r.num(), read_b10(r))
 
 
-#: Most tags the client batches into one ``'d'`` (I §4.2, I §8.26: flushed at 11 or end of frame).
-ACK_BATCH_MAX = 11
-
-
 @message
 class Acks(ClientMessage):
     """``'d'`` ``tag x n``: raw echoed tag bytes, an acknowledgment of uppercase server packets
-    (I §4.2, I §8.26). Accepts any count; ``ACK_BATCH_MAX`` is what the client batches."""
+    (I §4.2, I §8.26). Takes any count the payload holds: the client sends at most 10 (A.2) or 11
+    (I §8.26), see I §8.26; a longer one is the session's business."""
 
     TYPE: ClassVar[str] = "d"
     tags: bytes
