@@ -81,3 +81,48 @@ DEFAULT_CITY_LETTER = "B"
 #: client's own armed buffer is 512 bytes (I §5.2), and no lobby command comes near it. Ours
 #: (DESIGN §5 "line length in the Chamber").
 MAX_LINE_BYTES = 512
+
+# --- Messages (I §8, I §8, I §8.20) ----------------------------------------------------
+
+#: Longest callsign the server sends in ``'B'``/``'G'``. II §3: 8 is
+#: our choice; test servers have always sent it.
+MAX_CALLSIGN_LENGTH = 8
+
+#: Longest network name in ``'B'`` (the banner reads "City: <city> on <network>"). Ours; the spec
+#: gives none; the real one is 5 characters.
+MAX_NETWORK_NAME_LENGTH = 16
+
+#: Most bytes of chat/HUD text in one ``'a'`` frame: the 234-byte payload less type, sender, style
+#: and length bytes. I §8.23, I §4.1.
+MAX_CHAT_BYTES = 230
+
+#: The ``'a'`` sender id that prints a system line (``- text``) and needs no pod. I §8.23.
+SYSTEM_SENDER = 100
+
+#: Replaces each byte outside ``0x20..0x7e`` in chat text (I §8.23: "replace 0x0a/0x0d/0x0e").
+CHAT_FILL_BYTE = 0x20
+
+#: The sub byte of a single-cell ``'T'``: the client only tests it against ``'I'`` (I §8.22,
+#: A.1); test servers use ``'C'``. Ours.
+BLOCK_CELL_SUB = ord("C")
+
+#: The byte after ``'E'``-``'K'`` for "Kill Recorded" (not earned); any byte but ``'E'`` works
+#: (I §8.7). Ours.
+KILL_NOT_EARNED_BYTE = ord("N")
+
+#: The ``'Q'`` sub the server sends to destroy an object (any sub but 0 and 5 does; I §8).
+#: Ours.
+DESTROY_OBJECT_SUB = 2
+
+#: Highest ``'R'`` argument per sub: palette 0-4, rain 0-3, lightning 0-1. The client does not check
+#: palette or rain (I §8.20, I §4.1, I §8.20, I §8.22, I §8.25); the lightning bound is ours (I
+#: §8.20).
+AMBIENT_PALETTE_MAX = 4
+AMBIENT_RAIN_MAX = 3
+AMBIENT_LIGHTNING_MAX = 1
+
+#: Block classes the client's value table holds (I §8.22): 0-3.
+BLOCK_CLASS_MAX = 3
+
+#: Damage weapon classes the client's base-damage table holds (I §8.11): 0-4.
+DAMAGE_CLASS_MAX = 4
