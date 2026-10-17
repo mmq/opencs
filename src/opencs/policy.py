@@ -75,6 +75,11 @@ DEFAULT_TEAM_POLICY = "request-or-balance"
 #: The city a bare ``/PLAY`` picks when every city is empty. II §5.
 DEFAULT_CITY_LETTER = "B"
 
+#: Map numbers a city may name: the launch sends ``E <map> <map>`` and ``<rev>`` must be a single
+#: digit (I §5.4). 0 is excluded: the client's files are numbered from 1.
+MAP_NUMBER_LOW = 1
+MAP_NUMBER_HIGH = 9
+
 # --- Wire (I §5.2, I §4.1; DESIGN §5) ------------------------------------------------------------
 
 #: Longest inbound Chamber line kept, in bytes; longer lines are discarded and counted. The

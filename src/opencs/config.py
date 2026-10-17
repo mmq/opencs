@@ -4,7 +4,6 @@
 and wrong types raise ``ConfigError`` naming the file and the key, so a typo fails at startup.
 """
 
-import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -164,8 +163,8 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
     config = CityConfig(
         letter=letter,
         name=name,
-        # Any map number: only 1-3 ship with the client (II §5).
-        map=table.integer("map", low=1, high=sys.maxsize),
+        # Only maps 1-3 ship with the client, but any digit names a file (I §5.4, II §5).
+        map=table.integer("map", low=policy.MAP_NUMBER_LOW, high=policy.MAP_NUMBER_HIGH),
         max_multiplier=table.integer("max_multiplier", low=1, high=policy.MAX_MULTIPLIER_CEILING),
         tower_output=table.integer("tower_output", low=0, high=policy.MAX_TOWER_OUTPUT),
         max_module_level=table.integer("max_module_level", low=0, high=policy.MAX_MODULE_LEVEL),
