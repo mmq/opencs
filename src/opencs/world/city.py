@@ -372,7 +372,11 @@ class City:
         player.shots.record(now, fired.shooter)
         if fired.shooter != player.id and not self._is_known_npc(fired.shooter):
             self.shooter_mismatches += 1
-            log.warning(
+            # Warn once; a client that simulates NPCs this city does not know yet (before they
+            # exist) would otherwise fill the log with one line per shot.
+            level = logging.WARNING if self.shooter_mismatches == 1 else logging.DEBUG
+            log.log(
+                level,
                 "player %d reported a shot by %d, which is neither its pod nor a known NPC",
                 player.id,
                 fired.shooter,
