@@ -14,6 +14,8 @@ from opencs.clock import ManualClock
 from opencs.config import load_config
 from opencs.messages import ServerMessage, client, client_payload, server
 from opencs.routing import Router
+from opencs.store.base import ProgressRecord
+from opencs.store.memory import memory_stores
 from opencs.wire.frame import build_frame
 from opencs.world.city import City, JoinResult
 
@@ -30,6 +32,26 @@ def test_serve_listens_then_stops_on_event() -> None:
         # Shutdown closed the connection.
         assert await asyncio.wait_for(client.reader.read(), TIMEOUT) == b""
         client.writer.close()
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_saves_a_player_still_seated_with_an_unflushed_change() -> None:
+    async def scenario() -> None:
+        config = local_config()
+        stores = memory_stores()
+        services = build_services(config, stores=stores, clock=ManualClock())
+        city = services.cities["B"]
+        joined = city.join("ALICE", 0, 0.0, identity="acct:ALICE", saved=None)
+        assert isinstance(joined, JoinResult)
+        city.client_message(joined.player_id, report(4), 5.0)
+        city.client_message(joined.player_id, client.Status(777, 1, 88), 20.0)  # never flushed
+        assert stores.progress.load("acct:ALICE") is None
+        stop, task, _ = await start(config, services=services)
+        stop.set()
+        await asyncio.wait_for(task, TIMEOUT)
+        record = stores.progress.load("acct:ALICE")
+        assert isinstance(record, ProgressRecord) and (record.score, record.bay_points) == (777, 88)
 
     asyncio.run(scenario())
 

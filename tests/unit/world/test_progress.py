@@ -76,9 +76,9 @@ def test_a_reported_marker_is_stored_within_the_b88_field() -> None:
 
 
 def test_negative_bay_points_are_not_saved() -> None:
-    p = restored(SavedProgress(BAYS, 0, 0, 0, 0))
+    p = Progress(SavedProgress(BAYS, 0, 50, 0, 0))  # no restore guard: the check itself is tested
     p.on_status(5, -3, 101.0)
-    assert (p.record.score, p.record.bay_points) == (0, 0)
+    assert (p.record.score, p.record.bay_points) == (0, 50)
 
 
 # --- rule 2: the SCORE floor --------------------------------------------------------------------

@@ -300,6 +300,22 @@ def test_score_is_answered_from_the_record_waiting_for_a_retry() -> None:
     assert world.progress.load(KEY) is None
 
 
+def test_the_score_command_shows_the_record_waiting_for_a_retry() -> None:
+    store = Flaky()
+    world = make_world(progress=store)
+    h = start(world)
+    land(h)
+    store.fail_saves = 1
+    h.feed(frame(client.Status(10, 1, 4_321)))  # fails: the store has nothing
+    h.session.closed()  # inside the wait, so the leave's flush does not retry either
+    assert world.progress.load(KEY) is None
+    again = enter_lobby(world, ACCOUNT)
+    again.take()
+    again.feed("/SCORE\r")
+    out = again.take()
+    assert b"BAY POINTS: 4321" in out
+
+
 def test_save_all_writes_the_record_of_every_player_seated() -> None:
     world = make_world()
     h = start(world)
