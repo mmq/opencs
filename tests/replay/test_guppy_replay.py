@@ -66,6 +66,8 @@ class SimClient:
     guppies: dict[int, SimGuppy] = field(default_factory=dict)
     outbox: list[tuple[float, int]] = field(default_factory=list)
     towers: set[int] = field(default_factory=set)
+    #: How fast this client's simulation runs relative to the others' (frame rate, emulator load).
+    speed: float = 1.0
 
     def receive(self, t: float, message: server.MobileCreate) -> None:
         self.inbox.append((t + self.latency, message))
@@ -84,7 +86,7 @@ class SimClient:
         reports = []
         for gid, g in self.guppies.items():
             distance = math.hypot(g.dx - g.x, g.dz - g.z)
-            move = SPEED * STEP
+            move = SPEED * self.speed * STEP
             if distance <= move:
                 g.x, g.z = g.dx, g.dz
                 if not g.reported:
@@ -143,7 +145,12 @@ def all_orders(spacing: float) -> list[Order]:
 class Replay:
     """The city, its modeled clients and the orders still to be made."""
 
-    def __init__(self, stream: list[Order]) -> None:
+    def __init__(
+        self,
+        stream: list[Order],
+        latencies: tuple[float, float] = LATENCIES,
+        speeds: tuple[float, float] = (1.0, 1.0),
+    ) -> None:
         self.stream = stream
         self.pending = list(stream)
         self.clock = ManualClock()
@@ -151,8 +158,8 @@ class Replay:
         for pid in (self.a, self.b):
             self.city.client_message(pid, report(4), 0.0)
         self.clients = {
-            self.a: SimClient(self.a, LATENCIES[0]),
-            self.b: SimClient(self.b, LATENCIES[1]),
+            self.a: SimClient(self.a, latencies[0], speed=speeds[0]),
+            self.b: SimClient(self.b, latencies[1], speed=speeds[1]),
         }
         self.orderer = self.a
         self.joiner: int | None = None
@@ -285,3 +292,47 @@ def test_late_joiners_in_a_dense_stream_meet_the_guppy_in_every_phase() -> None:
         assert o.held_by_joiner, f"joined at {join:.1f}: the joiner lacks a tower"
         by_joiner += o.by_joiner
     assert by_joiner > 200  # the joiner really did carry orders: it was not idle after the leave
+
+
+# --- clients that fly at different speeds -----------------------------------------------------
+#
+# Two clients whose simulations differ by a few percent (two emulators on one machine) with round
+# trips much shorter than the difference in their arrival times. The first report of a leg acts at
+# once, so the next 'K' would reach the slower client before its own copy has reported the leg it
+# is flying; that leg is then never reported (I §9.4.1) and, once the faster client leaves, nothing
+# can move the guppy. The slower client stays, orders, and must have every order delivered.
+
+SPEED_FACTORS = [(1.0, 0.8), (0.8, 1.0), (1.0, 0.97), (1.03, 0.97), (0.99, 1.0), (1.2, 1.0)]
+NEAR_ZERO = [(0.0, 0.0), (0.05, 0.05), (0.01, 0.1), (0.4, 0.9), (0.9, 0.4)]
+
+
+def run_at_speeds(
+    latencies: tuple[float, float], speeds: tuple[float, float], leave_faster_at: float | None
+) -> Outcome:
+    stream = all_orders(3.0)[:20]
+    replay = Replay(stream, latencies, speeds)
+    faster, slower = (replay.a, replay.b) if speeds[0] >= speeds[1] else (replay.b, replay.a)
+    replay.orderer = slower
+    end = stream[-1][0] + SETTLE
+    while replay.clock.now() < end and not replay.done(replay.clock.now()):
+        t = replay.clock.now()
+        if leave_faster_at is not None and t >= leave_faster_at and faster in replay.clients:
+            replay.city.leave(faster, t)
+            del replay.clients[faster]
+            replay.in_flight = [r for r in replay.in_flight if r[1] != faster]
+        replay.tick(t)
+        replay.clock.advance(STEP)
+    outcome = replay.outcome
+    outcome.ignored = replay.city.orders.logistics.ignored_reports
+    outcome.stalled = len(outcome.towers) != outcome.accepted
+    return outcome
+
+
+@pytest.mark.parametrize("leaves", [None, 20.0], ids=["stay", "faster leaves"])
+@pytest.mark.parametrize("latencies", NEAR_ZERO, ids=lambda x: f"lat={x[0]:g}/{x[1]:g}")
+@pytest.mark.parametrize("speeds", SPEED_FACTORS, ids=lambda x: f"speed={x[0]:g}/{x[1]:g}")
+def test_the_guppy_delivers_when_the_clients_fly_at_different_speeds(
+    speeds: tuple[float, float], latencies: tuple[float, float], leaves: float | None
+) -> None:
+    o = run_at_speeds(latencies, speeds, leaves)
+    assert_clean(o, f"speeds {speeds} latencies {latencies} leaving {leaves}")

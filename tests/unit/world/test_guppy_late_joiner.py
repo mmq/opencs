@@ -67,19 +67,19 @@ def test_a_joiner_during_the_create_leg_counts_like_everyone() -> None:
     j, got = join(c)
     assert [m for m in got if isinstance(m, server.MobileCreate)] == [CREATE]
     arrive(c, a)  # A's create report: the guppy is sent to the point
-    # J's copy reports the create too: a duplicate leg 0, nothing happens and nothing is sent.
-    assert arrive(c, j) == []
+    # J's copy has not reported the create, so it was held back; its own report is answered with
+    # the destination and nothing is acted on twice.
+    assert ks(arrive(c, j), j) == [server.MobileCreate(GUPPY, dest(1))]
     out = arrive(c, j)  # J's leg 1: first to report it, so it acts
     assert towers(out, a) and towers(out, j)
-    # It was sent the dispatch with everybody else, as it counts from the start.
 
 
 def test_a_joiner_during_the_create_leg_is_sent_the_dispatch() -> None:
     c, a, _b = playing()
     order(c, a, 1)
     j, _ = join(c)
-    out = arrive(c, a)
-    assert ks(out, j) == [server.MobileCreate(GUPPY, dest(1))]
+    assert ks(arrive(c, a), j) == []  # held back: its copy has not reported the create
+    assert ks(arrive(c, j), j) == [server.MobileCreate(GUPPY, dest(1))]
 
 
 # --- step 2: no other 'K' until its copy reports ---
@@ -253,9 +253,8 @@ def test_early_reports_cannot_pre_report_a_leg_that_has_not_been_sent() -> None:
     assert guppy is not None
     assert count.reports <= guppy.legs
     assert c.orders.logistics.ignored_reports >= 1
-    # b has been sent the same legs and is unaffected: its own reports are all honored.
-    sent_to_b = c.player(b).view.legs[GUPPY].owed  # type: ignore[union-attr]
-    assert sent_to_b == guppy.legs
+    # b never reported, so it was held back and sent only the create.
+    assert c.player(b).view.legs[GUPPY].owed == 1  # type: ignore[union-attr]
 
 
 def test_a_late_joiners_real_peak_is_never_ignored() -> None:

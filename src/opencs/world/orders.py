@@ -159,7 +159,8 @@ class Orders:
         count = player.view.legs.get(arrival.id)
         if count is None:
             return []
-        return self._perform(self.logistics.report(arrival.id, player.id, count), now)
+        others = [c for p in self._host.players() if (c := p.view.legs.get(arrival.id)) is not None]
+        return self._perform(self.logistics.report(arrival.id, player.id, count, others), now)
 
     def _perform(self, actions: Sequence[Action], now: float) -> list[Event]:
         """Turn the guppy's decisions into events for the clients that should hear them."""
