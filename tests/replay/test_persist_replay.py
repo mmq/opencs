@@ -27,6 +27,7 @@ import pytest
 from fixtures.captures import capture_names, client_messages, load_capture
 from fixtures.lobbies import city
 from opencs import policy
+from opencs.clock import ManualClock
 from opencs.messages import DecodeError, client, decode_server, server
 from opencs.session.persistence import Persistence
 from opencs.store.base import ProgressRecord
@@ -106,7 +107,7 @@ class Session:
     """One session's city and persistence, over a store that outlives it."""
 
     def __init__(self, store: MemoryProgressStore, seed: SavedProgress | None) -> None:
-        self.persistence = Persistence(store)
+        self.persistence = Persistence(store, ManualClock())
         self.city = City(city("A"))
         self.now = 0.0
         if seed is not None:

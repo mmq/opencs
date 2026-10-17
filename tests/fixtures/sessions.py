@@ -106,7 +106,9 @@ def make_world(
     cities_by_letter = {c.letter: City(c) for c in configs}
     router = Router()
     progress = progress or MemoryProgressStore()
-    services = Services(identity, lobby, clock, cities_by_letter, router, Persistence(progress))
+    services = Services(
+        identity, lobby, clock, cities_by_letter, router, Persistence(progress, clock)
+    )
     return World(clock, identity, lobby, services, progress)
 
 

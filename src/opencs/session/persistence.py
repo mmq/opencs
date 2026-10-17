@@ -7,6 +7,8 @@ and are small, single-row transactions.
 
 A write that fails is logged and retried with the next flush, so a database that blips does not
 cost a record; the retry always writes the *newest* record of that identity, never an older one.
+After a failure nothing is tried again for ``SAVE_RETRY_INTERVAL`` (a failing save can block for the
+store's busy timeout, and a flush follows every client message); a shutdown save ignores the wait.
 """
 
 from __future__ import annotations
@@ -14,6 +16,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 
+from opencs import policy
+from opencs.clock import Clock
 from opencs.store.base import ProgressRecord, ProgressStore
 from opencs.world.city import City
 from opencs.world.progress import ProgressChanged, SavedProgress
@@ -34,8 +38,10 @@ def to_record(saved: SavedProgress) -> ProgressRecord:
 class Persistence:
     """Loads records for the world and writes the ones it reports."""
 
-    def __init__(self, store: ProgressStore) -> None:
+    def __init__(self, store: ProgressStore, clock: Clock) -> None:
         self._store = store
+        self._clock = clock
+        self._hold_until = 0.0  # no save is tried before this time
         self._retry: dict[str, SavedProgress] = {}
 
     def record(self, key: str) -> ProgressRecord | None:
@@ -59,15 +65,25 @@ class Persistence:
     def save_all(self, cities: Iterable[City]) -> None:
         """Write every kept player's record in these cities (a graceful shutdown, M12)."""
         for city in cities:
-            self._write(city.all_progress())
+            self._write(city.all_progress(), force=True)
 
-    def _write(self, changes: Iterable[ProgressChanged]) -> None:
+    def _write(self, changes: Iterable[ProgressChanged], *, force: bool = False) -> None:
         pending = dict(self._retry)
         pending.update({n.identity: n.record for n in changes})  # the newest wins
+        if not force and self._clock.now() < self._hold_until:
+            self._retry = pending
+            return
         self._retry = {}
-        for identity, saved in pending.items():
+        items = list(pending.items())
+        for n, (identity, saved) in enumerate(items):
             try:
                 self._store.save(identity, to_record(saved))
             except Exception:
                 log.exception("could not save the record of %s; will retry", identity)
-                self._retry[identity] = saved
+                self._hold_until = self._clock.now() + policy.SAVE_RETRY_INTERVAL
+                if force:
+                    self._retry[identity] = saved
+                    continue
+                # The store is failing: do not spend a timeout on every other record as well.
+                self._retry.update(items[n:])
+                return

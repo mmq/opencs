@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from opencs import policy
 from opencs.lobby.identity import Identity, Pilot
 from opencs.store.base import Account, ProgressRecord, Stores
 from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
@@ -169,3 +171,24 @@ def test_passwords_are_never_in_the_file(tmp_path: Path) -> None:
     assert b"ALICE" in raw  # the name is stored, and the check above could otherwise be vacuous
     stored = SqliteStore(path).get("ALICE")
     assert stored is not None and len(stored.password_hash) == 32 and len(stored.salt) > 0
+
+
+def test_a_locked_database_fails_the_save_quickly_and_recovers(tmp_path: Path) -> None:
+    path = tmp_path / "locked.db"
+    store = SqliteStore(path)
+    record = ProgressRecord((1,) * 9, 0, 5, 6, 7)
+    # A second connection holding a read transaction: the writer's COMMIT cannot get the lock.
+    other = sqlite3.connect(path, isolation_level=None)
+    other.execute("BEGIN")
+    other.execute("SELECT * FROM progress").fetchall()
+    began = time.monotonic()
+    with pytest.raises(sqlite3.OperationalError):
+        store.save("A", record)
+    # DESIGN §3.3: the event loop is never held longer than the busy timeout (plus slack).
+    assert time.monotonic() - began < policy.DATABASE_BUSY_TIMEOUT + 1.0
+    assert not store._db.in_transaction  # the failed COMMIT was rolled back
+    other.execute("ROLLBACK")
+    other.close()
+    store.save("A", record)  # the connection recovered
+    assert store.load("A") is not None
+    store.close()

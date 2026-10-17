@@ -13,6 +13,7 @@ import pytest
 from fixtures.pods import report
 from fixtures.sessions import Harness, World, enter_lobby, make_world
 from opencs import policy
+from opencs.clock import ManualClock
 from opencs.messages import ClientMessage, ServerMessage, client, client_payload, server
 from opencs.session.persistence import Persistence, to_record
 from opencs.store.base import ProgressRecord
@@ -253,10 +254,50 @@ def test_a_failed_write_is_retried_with_the_newest_record(
     with caplog.at_level(logging.ERROR):
         h.feed(frame(client.Status(10, 1, 20)))  # fails
     assert world.progress.load(KEY) is None
+    world.clock.advance(policy.SAVE_RETRY_INTERVAL)
     h.feed(frame(client.Status(30, 1, 40)))  # the retry writes this one, not the lost one
     now = saved(world)
     assert (now.score, now.bay_points) == (30, 40)
     assert "could not save" in caplog.text
+
+
+def test_a_failed_write_is_retried_when_nothing_new_changed() -> None:
+    store = Flaky()
+    world = make_world(progress=store)
+    h = start(world)
+    land(h)
+    store.fail_saves = 1
+    h.feed(frame(client.Status(10, 1, 20)))  # fails
+    world.clock.advance(policy.SAVE_RETRY_INTERVAL)
+    h.feed(frame(client.Status(10, 1, 20)))  # the same report: nothing new, the waiting one lands
+    assert (saved(world).score, saved(world).bay_points) == (10, 20)
+
+
+def test_a_failing_store_is_not_tried_on_every_message() -> None:
+    store = Flaky()
+    world = make_world(progress=store)
+    h = start(world)
+    land(h)
+    store.fail_saves = 1
+    h.feed(frame(client.Status(10, 1, 20)))  # fails, and the wait begins
+    h.feed(frame(client.Status(30, 1, 40)))
+    h.feed(frame(client.Status(50, 1, 60)))
+    assert world.progress.load(KEY) is None  # no attempt was made inside the wait
+    world.clock.advance(policy.SAVE_RETRY_INTERVAL)
+    h.feed(frame(client.Status(70, 1, 80)))
+    assert (saved(world).score, saved(world).bay_points) == (70, 80)
+
+
+def test_score_is_answered_from_the_record_waiting_for_a_retry() -> None:
+    store = Flaky()
+    world = make_world(progress=store)
+    h = start(world)
+    land(h)
+    store.fail_saves = 1
+    h.feed(frame(client.Status(10, 1, 20)))  # fails: the store has nothing
+    waiting = world.services.persistence.record(KEY)
+    assert waiting is not None and (waiting.score, waiting.bay_points) == (10, 20)
+    assert world.progress.load(KEY) is None
 
 
 def test_save_all_writes_the_record_of_every_player_seated() -> None:
@@ -272,5 +313,5 @@ def test_save_all_writes_the_record_of_every_player_seated() -> None:
 def test_persistence_converts_between_the_store_and_the_world() -> None:
     record = SavedProgress(BAYS, -2, 957, 1, 2)
     assert to_record(record) == ProgressRecord(BAYS, -2, 957, 1, 2)
-    p = Persistence(MemoryProgressStore())
+    p = Persistence(MemoryProgressStore(), ManualClock())
     assert p.load("nobody") is None

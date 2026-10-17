@@ -201,6 +201,15 @@ PBKDF2_SALT_BYTES = 16
 #: The SQLite file inside ``data_dir``. Ours (DESIGN §2 "Persistence"; one file, no server).
 DATABASE_FILE_NAME = "opencs.db"
 
+#: How long a database call waits for another connection's lock before it fails. Ours (DESIGN
+#: §3.3: a save runs on the event loop, which must not stall; SQLite's default is 5 s).
+DATABASE_BUSY_TIMEOUT = 0.2
+
+#: After a failed save, no further save is tried for this many seconds (a failed one can cost up to
+#: ``DATABASE_BUSY_TIMEOUT``, so retrying on every client message would stall the loop). The
+#: waiting records are written then, newest first. Ours (DESIGN §3.3, §5).
+SAVE_RETRY_INTERVAL = 5.0
+
 #: Prefix of a real account's progress key: ``acct:NAME``. A guest's key is its bare callsign,
 #: which is upper case, so the two can never collide. II §3.
 ACCOUNT_KEY_PREFIX = "acct:"

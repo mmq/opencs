@@ -59,7 +59,7 @@ class SqliteStore:
     ) -> None:
         self._now = now
         # Autocommit mode, so every transaction below is an explicit BEGIN .. COMMIT.
-        self._db = sqlite3.connect(path, isolation_level=None)
+        self._db = sqlite3.connect(path, isolation_level=None, timeout=policy.DATABASE_BUSY_TIMEOUT)
         try:
             self._migrate(migrations)
         except BaseException:
@@ -95,21 +95,27 @@ class SqliteStore:
                 for statement in migrations[version - 1]:
                     self._db.execute(statement)
                 self._db.execute("UPDATE schema_version SET version = ?", (version,))
+                self._db.execute("COMMIT")
             except BaseException:
-                self._db.execute("ROLLBACK")
+                self._rollback()
                 raise
-            self._db.execute("COMMIT")
 
     def _write(self, sql: str, params: tuple[object, ...]) -> sqlite3.Cursor:
         """One statement in its own transaction."""
         self._db.execute("BEGIN")
         try:
             cursor = self._db.execute(sql, params)
+            self._db.execute("COMMIT")
         except BaseException:
-            self._db.execute("ROLLBACK")
+            self._rollback()
             raise
-        self._db.execute("COMMIT")
         return cursor
+
+    def _rollback(self) -> None:
+        """Leave no transaction open after a failure (a failed COMMIT leaves one), so the next
+        write starts clean instead of failing for as long as the server runs."""
+        if self._db.in_transaction:
+            self._db.execute("ROLLBACK")
 
     # --- AccountStore ------------------------------------------------------------------------
 

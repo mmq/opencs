@@ -49,7 +49,7 @@ def build_services(
     rng = rng or random.Random()
     lobby = Lobby(config.cities, config.server.default_city, rng)
     cities = {c.letter: City(c, rng) for c in config.cities if c.enabled}
-    return Services(identity, lobby, clock, cities, Router(), Persistence(stores.progress))
+    return Services(identity, lobby, clock, cities, Router(), Persistence(stores.progress, clock))
 
 
 def build_session_factory(services: Services) -> SessionFactory:
