@@ -348,6 +348,9 @@ GRACE_TIMEOUT = 120.0
 #: black): the client's spawn tables. I §9.4.3, I §9.1.5.
 TEAM_CORNER_CELLS = ((0, 0), (7, 0), (0, 7), (7, 7))
 
+#: The city is 8 x 8 tiles of 600 ft (I §6.1); the home corners are at tile 0 or 7 on each axis.
+CITY_TILES = 8
+
 #: The grace box is the 3x3 tiles centered on the corner tile: it starts one tile before the
 #: corner tile and is three tiles long. I §9.1.5 (``corner x 600 - 600`` to that ``+ 1800``).
 GRACE_BOX_START_TILES = -1
@@ -382,11 +385,6 @@ ORDER_QUEUE_FULL = 2
 #: and its cruise altitude. I §6.2, I §9.4.1, II §14.
 GUPPY_BASE_ID = GUPPY_IDS[0]
 
-#: The ``'E'``-``'P'`` ok byte M7 answers every module order with, until M8 delivers modules: 0
-#: ("Unable, no X modules in stock") so the client's purchase menu re-opens at once instead of
-#: after a second. I §8.7.
-MODULE_ORDER_UNAVAILABLE = 0
-
 #: Per-session limit on orders (tower and module), a token bucket ``(burst, per second)``, as
 #: ``RELAY_LIMIT_*`` (DESIGN §5). A player orders at most once a second (the manual's one purchase
 #: per second, II §14); each accepted order queues work, so an unlimited sender is bounded here
@@ -399,3 +397,36 @@ RELAY_LIMIT_ORDER = (4, 1.0)
 #: A city starts in the client's default palette 0, "bright daylight". I §8.20, I §9.3.5, II §16.1
 #: (test servers take the starting condition as 0).
 DEFAULT_PALETTE = 0
+
+#: The ``'E'``-``'P'`` ok byte: 1 = "Rgr, module drop", 0 = "no X modules in stock" and nothing is
+#: delivered (a refusal never refunds anything, so never ``'O'``). I §8.7.
+MODULE_ORDER_ACCEPTED = 1
+MODULE_ORDER_REFUSED = 0
+
+#: A delivered module appears this many feet above the orderer's reported Y and this far ahead of
+#: its facing at request time. I §9.4.3 (the manual's "~100 ft above and ~20 ft ahead"); the height
+#: is a server choice.
+MODULE_DROP_HEIGHT = 100
+MODULE_DROP_AHEAD_FEET = 20
+
+#: Most jobs (towers, modules, Air Support) a team's guppy may have waiting before a module order
+#: is refused with ok = 0 or Air Support is not queued. A safety bound only: a player orders at most
+#: once a second (``RELAY_LIMIT_ORDER``), so honest play never nears it. Ours (DESIGN §5).
+MAX_WAITING_JOBS = 32
+
+#: Most dropped modules a city keeps; past it the oldest is destroyed. A drop lasts until picked up
+#: (I §9.3.3), so without a bound a client ejecting at its rate limit would grow the city forever.
+#: Ours (DESIGN §5).
+MAX_DROPS = 200
+
+#: An ejected module appears this many feet above the pod's last reported position with vertical
+#: velocity ``EJECT_VY`` and a horizontal kick of one foot per frame, cycling through these four
+#: ``(vx, vz)`` directions: about 18 frames in the air, ~18 ft of travel, inside the 50 ft pickup
+#: radius. A server choice (a guess).
+EJECT_HEIGHT = 15
+EJECT_VY = 1
+EJECT_KICKS = ((1, 0), (0, 1), (-1, 0), (0, -1))
+
+#: The client enforces a 50 ft pickup radius itself; a request from further away is logged, not
+#: refused. I §9.4.1, I §9.3.3.
+PICKUP_RANGE_FEET = 50

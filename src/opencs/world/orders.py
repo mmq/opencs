@@ -1,22 +1,22 @@
-"""Tower orders and the towers they deliver (I §9.4, II §10, II §14; DESIGN §3.1).
+"""Orders and what they deliver: towers and modules (I §9.4, II §10, II §15, II §14; DESIGN §3.1).
 
-The glue between a client's orders, the team guppies (``logistics``) and the towers that land:
-answering an order, turning the guppy's decisions into events for the clients that should hear
-them, placing a tower, reducing it by hit reports and destroying it. ``City`` owns one ``Orders``
-and delegates to it; it asks the city, through ``OrderHost``, for the things only the city has
-(the roster, spawning, the structure ids). M8 adds module deliveries and Air Support here.
+The glue between a client's orders, the team guppies (``logistics``) and what lands: answering an
+order, turning the guppy's decisions into events for the clients that should hear them, placing a
+tower, dropping a module, reducing a tower by hit reports and destroying it. ``City`` owns one
+``Orders`` and delegates to it; it asks the city, through ``WorldHost``, for the things only the
+city has (the roster, spawning, the structure ids).
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Protocol
 
 from opencs import policy
-from opencs.messages import WirePos, client, server
-from opencs.world.entities import Entity
+from opencs.messages import ClientMessage, WirePos, client, server
+from opencs.messages.catalog import is_module_index
 from opencs.world.events import Event, ToPlayer
+from opencs.world.host import WorldHost
 from opencs.world.logistics import (
     Action,
     CatchUp,
@@ -24,9 +24,12 @@ from opencs.world.logistics import (
     Deliver,
     Dispatch,
     Logistics,
+    ModuleJob,
     TowerJob,
     in_enemy_no_drop_zone,
+    in_home_zone,
 )
+from opencs.world.modules import Drops, ModuleRules, drop_point
 from opencs.world.player import Player
 from opencs.world.structures import Tower, TowerHit
 from opencs.world.territory import Territory
@@ -34,28 +37,16 @@ from opencs.world.territory import Territory
 log = logging.getLogger("opencs.world")
 
 
-class OrderHost(Protocol):
-    """What the orders need of the city that owns them."""
-
-    def players(self) -> Sequence[Player]: ...
-
-    def spawn(self, entity: Entity, now: float) -> list[Event]: ...
-
-    def despawn(self, entity_id: int) -> None: ...
-
-    def allocate_structure_id(self) -> int | None:
-        """A free id in the structure range, or None if none is safely reusable (II §8)."""
-        ...
-
-    def release_structure_id(self, entity_id: int, now: float) -> None: ...
-
-
 class Orders:
     """One city's guppies, job queues and standing towers."""
 
-    def __init__(self, host: OrderHost, territory: Territory) -> None:
+    def __init__(
+        self, host: WorldHost, territory: Territory, rules: ModuleRules, drops: Drops
+    ) -> None:
         self._host = host
         self._territory = territory
+        self._rules = rules
+        self._drops = drops
         #: The team guppies and their job queues (II §14).
         self.logistics = Logistics()
         #: Every tower standing, by id (a subset of the city's live entities): what hit reports
@@ -87,22 +78,39 @@ class Orders:
         reply = _reply(player, policy.ORDER_ACCEPTED)
         return [reply, *self._perform(self.logistics.order(job), now)]
 
-    def refuse_order(self, player: Player) -> list[Event]:
-        """A tower order the session would not pass on (over the order budget): answered ``'O'`` 2
-        so the client refunds the point it spent on sending it (I §8.17, I §8.7); nothing is
+    def refuse_order(self, player: Player, message: ClientMessage) -> list[Event]:
+        """An order the session would not pass on (over the order budget): a tower order is
+        answered ``'O'`` 2 so the client refunds the point it spent on sending it; a module order
+        ``'E'``-``'P'`` ok = 0, which refunds nothing because it cost nothing (I §9.4.2). Nothing is
         queued."""
         if not player.pod.has_reported:
             return []
+        if isinstance(message, client.ModuleOrder):
+            return _module_reply(player, message.module, policy.MODULE_ORDER_REFUSED)
         return [_reply(player, policy.ORDER_QUEUE_FULL)]
 
-    def module_order(self, player: Player, order: client.ModuleOrder) -> list[Event]:
-        """Module orders are M8's; until then the client is answered "no stock" so it is not left
-        waiting (I §8.7)."""
-        try:
-            reply = server.ModuleReply(order.module, policy.MODULE_ORDER_UNAVAILABLE)
-        except ValueError:  # not a catalog index: a modified client
-            return []
-        return [Event(reply, ToPlayer(player.id))]
+    def module_order(self, player: Player, order: client.ModuleOrder, now: float) -> list[Event]:
+        """A module purchase (I §9.4.2, II §15, I §9.4.3). The reply goes to the orderer alone:
+        ok = 0 and nothing delivered when the city does not stock it (not a catalog index, above
+        the city's level, banned) or the orderer stands in the 3x3 tiles around an enemy home
+        corner (never ``'O'``: its refusals refund a point a module never cost). Otherwise ok = 1,
+        and the module drops at once if the orderer is in its team's home zone, else the team's
+        guppy flies it in. The point is fixed now, from the orderer's last reported place."""
+        if not player.pod.has_reported or not is_module_index(order.module):
+            return []  # not a catalog index: a modified client
+        placed = player.pod.placed
+        assert placed is not None
+        no_stock = not self._rules.stocks(order.module)
+        no_drop = in_enemy_no_drop_zone(player.team, placed.pos)
+        home = in_home_zone(player.team, placed.pos)
+        if no_stock or no_drop or (not home and self.logistics.queue_saturated(player.team)):
+            return _module_reply(player, order.module, policy.MODULE_ORDER_REFUSED)
+        reply = _module_reply(player, order.module, policy.MODULE_ORDER_ACCEPTED)
+        point = drop_point(placed.pos, placed.orient)
+        if home:
+            return reply + self._drops.create(order.module, point, now)
+        job = ModuleJob(player.team, order.module, point, order.priority != 0, player.id)
+        return reply + self._perform(self.logistics.order(job), now)
 
     def leg_arrived(self, player: Player, arrival: client.LegArrived, now: float) -> list[Event]:
         """A client's copy of a guppy completed a leg (I §9.4.1). Only guppies this client holds
@@ -119,8 +127,10 @@ class Orders:
             match action:
                 case Create(guppy):
                     events += self._host.spawn(guppy, now)
-                case Deliver(job):
+                case Deliver(TowerJob() as job):
                     events += self.place_tower(job.team, job.pos, job.mega, now)
+                case Deliver(ModuleJob() as job):
+                    events += self._drops.create(job.module, job.pos, now)
                 case Dispatch(guppy, dest):
                     # Only clients that count legs for it; one still joining is sent no 'K' for
                     # this guppy until its copy has reported (I §7.3 step 2).
@@ -205,3 +215,8 @@ class Orders:
 def _reply(player: Player, result: int) -> Event:
     """An ``'O'`` to the orderer alone (I App. B)."""
     return Event(server.OrderReply(result), ToPlayer(player.id))
+
+
+def _module_reply(player: Player, module: int, ok: int) -> list[Event]:
+    """An ``'E'``-``'P'`` to the orderer alone (I App. B)."""
+    return [Event(server.ModuleReply(module, ok), ToPlayer(player.id))]

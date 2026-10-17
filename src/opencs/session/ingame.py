@@ -219,8 +219,8 @@ class InGamePhase(Phase):
                     self._over_budget += 1  # dropped: counted with the bad input in ``_process``
                     if isinstance(message, client.Shot):
                         self._note_shot(message)  # not relayed, but still a shot (II §9.3)
-                    elif isinstance(message, client.TowerOrder):
-                        self._refuse_order()  # the point it spent comes back (I §9.4.2)
+                    elif isinstance(message, client.TowerOrder | client.ModuleOrder):
+                        self._refuse_order(message)  # a tower's point comes back (I §9.4.2)
                     return
                 self._to_city(message)
 
@@ -230,11 +230,12 @@ class InGamePhase(Phase):
         assert city is not None
         city.note_shot(self._player_id, shot, self.host.now())
 
-    def _refuse_order(self) -> None:
-        """Answer an over-budget tower order ``'O'`` 2 instead of leaving the client waiting."""
+    def _refuse_order(self, order: ClientMessage) -> None:
+        """Answer an over-budget order instead of leaving the client waiting: ``'O'`` 2 for a
+        tower, ``'E'``-``'P'`` ok = 0 for a module."""
         city = self._city
         assert city is not None
-        self.host.services.router.deliver(city, city.refuse_order(self._player_id))
+        self.host.services.router.deliver(city, city.refuse_order(self._player_id, order))
 
     def _to_city(self, message: ClientMessage) -> None:
         """Hand a message to the world. An exception in the city is a bug: log it with the

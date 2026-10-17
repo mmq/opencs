@@ -23,6 +23,7 @@ from opencs.world.combat import damage_to_victim
 from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
+from opencs.world.modules import Drops, ModuleRules
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
@@ -66,7 +67,13 @@ class City:
         #: The city's weather condition, sent on a client's first report and on every change.
         self.weather = Weather()
         #: Tower orders, the team guppies and the standing towers (I §9.4).
-        self.orders = Orders(self, self._territory)
+        self.drops = Drops(self)
+        self.orders = Orders(
+            self,
+            self._territory,
+            ModuleRules(config.max_module_level, frozenset(config.banned_modules)),
+            self.drops,
+        )
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -92,7 +99,7 @@ class City:
                 p, _as(client.TowerOrder, m), now
             ),
             client.ModuleOrder: lambda p, m, now: self.orders.module_order(
-                p, _as(client.ModuleOrder, m)
+                p, _as(client.ModuleOrder, m), now
             ),
             client.LegArrived: lambda p, m, now: self.orders.leg_arrived(
                 p, _as(client.LegArrived, m), now
@@ -174,6 +181,7 @@ class City:
         self._ids = IdSpace()
         self._live.clear()
         self.orders.reset()
+        self.drops.reset()
         self.weather = Weather()
 
     def _earliest_start(self) -> float | None:
@@ -294,11 +302,11 @@ class City:
     def release_structure_id(self, entity_id: int, now: float) -> None:
         self._ids.release(IdRange.STRUCTURE, entity_id, now)
 
-    def refuse_order(self, player_id: int) -> list[Event]:
-        """A tower order the session did not pass on (over the order budget): see
+    def refuse_order(self, player_id: int, message: ClientMessage) -> list[Event]:
+        """A tower or module order the session did not pass on (over the order budget): see
         ``Orders.refuse_order``."""
         player = self._players.get(player_id)
-        return [] if player is None else self.orders.refuse_order(player)
+        return [] if player is None else self.orders.refuse_order(player, message)
 
     def despawn(self, entity_id: int) -> None:
         """The entity is gone: later joiners are not given it. Clients are told by the caller."""
