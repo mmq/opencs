@@ -1,0 +1,17 @@
+# OpenCS server settings. Paths are relative to this file.
+
+# Address and TCP port the listener binds (I §3: transport is TCP). Port 0 picks a free port.
+host = "0.0.0.0"
+port = 2399
+
+# Where the server keeps its state (accounts, progress); created on first use.
+data_dir = "../data"
+
+# One TOML file per city lives here (II §4.2).
+cities_dir = "cities"
+
+# DEBUG, INFO, WARNING, ERROR or CRITICAL.
+log_level = "INFO"
+
+# The city a bare /PLAY picks when every city is empty (II §4.2: B is the default).
+default_city = "B"
