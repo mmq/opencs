@@ -89,7 +89,7 @@ def battle_reason(player: Player, strikes: Iterable[Strike], since: float) -> st
             and strike.team != player.team
             and in_fight_range(placed.pos, strike.pos)
         ):
-            return "AN AIR STRIKE"
+            return "AN ENEMY AIR STRIKE"
     return ""
 
 

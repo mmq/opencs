@@ -186,7 +186,7 @@ def test_a_drop_under_fire_is_a_death_and_the_record_says_why() -> None:
     assert any(isinstance(m, server.Delete) for m in sent)  # then 'H'
     assert isinstance(sent[-1], server.Delete)
     record = held(world)
-    assert record is not None and not record.eligible and record.reason == "SHOTS"
+    assert record is not None and not record.eligible and record.reason == "ENEMY FIRE"
     assert world.services.held.slots("A") == []  # nothing to reserve
 
 

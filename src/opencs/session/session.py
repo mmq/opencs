@@ -17,6 +17,7 @@ from opencs.session.ingame import InGamePhase
 from opencs.session.io import SessionIO
 from opencs.session.login import LoginPhase
 from opencs.session.phases import Phase, Services
+from opencs.world.resume import ResumeRecord
 
 
 class Session:
@@ -28,6 +29,8 @@ class Session:
         self.log = log
         self.pilot: Pilot | None = None
         self.member: Member | None = None
+        #: The held game the Chamber launched this session for, taken by the in-game phase.
+        self.resuming: ResumeRecord | None = None
         self._active = True
         #: Why the server closed the connection, None while it has not (a drop by the peer).
         self.close_reason: str | None = None

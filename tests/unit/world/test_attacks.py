@@ -129,7 +129,7 @@ def test_an_enemy_grenade_out_of_range_and_a_teammates_are_not() -> None:
 def test_a_non_teammates_hit_report_naming_the_pod_is_an_attack() -> None:
     c, (a, b) = field_of([0, 1], [1000, 5000])
     c.client_message(b, client.HitReport(a, 99), 5.0)  # a damage class the client cannot index
-    assert last(c, a) == "A HIT REPORT"  # reported, though no 'I' could be delivered
+    assert last(c, a) == "A HIT"  # reported, though no 'I' could be delivered
 
 
 def test_damage_delivered_is_an_attack_even_from_a_teammate() -> None:

@@ -159,6 +159,28 @@ def score(callsign: str, record: ProgressRecord | None) -> list[Line]:
     return [heading(f"RECORD OF {callsign}"), *record_lines(record)]
 
 
+def resume_held(letter: str, seconds_left: float) -> list[Line]:
+    """Back in the Chamber with a game held: where, and how long there is to type ``/RESUME``
+    (II §13 item 4)."""
+    left = int(seconds_left)
+    return [
+        heading(f"YOUR GAME IN CITY {letter} WAS INTERRUPTED."),
+        heading(f"TYPE /RESUME WITHIN {left // 60}:{left % 60:02d} TO RETURN TO IT."),
+    ]
+
+
+def resume_dead(letter: str, reason: str) -> list[Line]:
+    """The held game was a death: the drop came while the pod was under attack (II §13 item 3)."""
+    return [
+        error(f"YOUR LINE DROPPED IN CITY {letter} DURING A FIGHT ({reason})."),
+        error("THAT COUNTED AS A DEATH: IT CANNOT BE RESUMED."),
+    ]
+
+
+def resume_launch(city: CityConfig) -> list[Line]:
+    return [heading(f"RESUMING IN CITY {city.letter}, {city.name}")]
+
+
 def resume_refused(*, guest: bool) -> list[Line]:
     if guest:
         return [error("/RESUME IS FOR REGISTERED ACCOUNTS: JOINGENIE LOGINS CANNOT RESUME")]

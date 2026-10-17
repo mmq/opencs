@@ -342,7 +342,7 @@ class City:
         player = self._players.get(player_id)
         if player is not None:
             player.shots.record(now, fired.shooter)
-            self.hits.note_fire(fired.shooter, fired.pos, now, "SHOTS")
+            self.hits.note_fire(fired.shooter, fired.pos, now, "ENEMY FIRE")
 
     def tick(self, now: float) -> list[Event]:
         """Timed rules: the weather program (I §8.20), Sentinel replacements, Muncher meals
@@ -430,7 +430,7 @@ class City:
     def _grenade(self, player: Player, thrown: client.Grenade, now: float) -> list[Event]:
         """A thrown Grenade is relayed to the other clients (I §9.3.6); it is also an attack on any
         enemy pod near it (II §13 item 3)."""
-        self.hits.note_fire(player.id, thrown.pos, now, "A GRENADE")
+        self.hits.note_fire(player.id, thrown.pos, now, "AN ENEMY GRENADE")
         return [Event(relay.grenade(thrown), self.playing(but=player.id))]
 
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:

@@ -66,7 +66,7 @@ class Hits:
         counted.
         """
         player.shots.record(now, fired.shooter)
-        self.note_fire(fired.shooter, fired.pos, now, "SHOTS")
+        self.note_fire(fired.shooter, fired.pos, now, "ENEMY FIRE")
         if fired.shooter != player.id and not self._host.is_known_npc(fired.shooter):
             self.shooter_mismatches += 1
             # Warn once; a client that simulates NPCs this city does not know yet (before they
@@ -131,7 +131,7 @@ class Hits:
         if credit.credited:
             victim.hits.record(reporter.id, now)
         if reporter.team != victim.team:
-            victim.attacks.mark(now, "A HIT REPORT")  # II §13 item 3
+            victim.attacks.mark(now, "A HIT")  # II §13 item 3
         damage = damage_to_victim(reporter.id, hit.damage)
         if damage is None:
             self.unrelayable_damage += 1

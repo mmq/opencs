@@ -118,8 +118,11 @@ class InGamePhase(Phase):
             # it: keep nothing for this session instead (I §9.2.11, II §11.3).
             self.host.log.exception("could not read the record of %s; none is kept", member.key)
             saved, key = None, None
+        resume, self.host.resuming = self.host.resuming, None
         try:
-            joined = city.join(member.callsign, member.team, now, identity=key, saved=saved)
+            joined = city.join(
+                member.callsign, member.team, now, identity=key, saved=saved, resume=resume
+            )
         except Exception:
             # A bug in the world: log it with the request and close; nobody is seated (DESIGN §5).
             self.host.log.exception("city %s failed on a join", city.config.letter)
@@ -137,7 +140,11 @@ class InGamePhase(Phase):
         persistence.flush(city)  # the new game rolled the last SCORE into the career
         self.host.services.router.register(city.config.letter, joined.player_id, _Sink(self))
         self.host.log.info(
-            "seated as player %d, team %d index %d", joined.player_id, joined.team, joined.index
+            "seated as player %d, team %d index %d%s",
+            joined.player_id,
+            joined.team,
+            joined.index,
+            "; resuming" if resume is not None and saved is not None else "",
         )
         self._hello = joined.hello
         self._hello_size = len(build_frame(server_payload(joined.hello, BYTE_MIN)))
