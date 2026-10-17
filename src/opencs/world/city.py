@@ -222,6 +222,23 @@ class City:
             )
         return events
 
+    def spawn(self, entity: Entity) -> list[Event]:
+        """A new entity (M7-M9: tower, drop, mine, Sentinel, guppy, Muncher): every client that is
+        playing gets its creating packets through ``introduce``, the function a later joiner's
+        sync uses, and the city remembers it for them (I §7.3)."""
+        self._live[entity.entity_id] = entity
+        events: list[Event] = []
+        for player in self.players():
+            if player.id in self._live:  # has reported: its client is past the 'B'
+                events += introduce(entity, player.view)
+        return events
+
+    def despawn(self, entity_id: int) -> None:
+        """The entity is gone: later joiners are not given it. Clients are told by the caller."""
+        self._live.pop(entity_id, None)
+        for player in self._players.values():
+            player.view.forget(entity_id)
+
     def _go_live(self, player: Player) -> list[Event]:
         """The player's first ``'b'`` is in: it is told about every pod already live, and they are
         told about it, once per pair (I §7.2). Players that have not reported yet are

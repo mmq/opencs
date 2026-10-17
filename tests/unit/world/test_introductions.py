@@ -165,3 +165,28 @@ def test_a_leaver_is_never_sent_j_which_would_respawn_it() -> None:
     first_b(c, b)
     messages = [m for _, m in deliveries(c, c.leave(a, 9.0))]
     assert not any(isinstance(m, server.Destroy) for m in messages)
+
+
+class Tower:
+    """A stand-in for the entities of M7-M9: an id and the packets that create it."""
+
+    entity_id = 8192
+
+    def creating_messages(self) -> list[ServerMessage]:
+        return [server.Destroy(8192)]  # any message will do
+
+
+def test_a_spawn_and_a_late_joiners_sync_use_the_same_path_once_per_client() -> None:
+    c = City(city("A"))
+    a, b = join(c, "AAA"), join(c, "BBB", 1)
+    first_b(c, a)
+    out = deliveries(c, c.spawn(Tower()))
+    assert out == [(a, server.Destroy(8192))]  # b has not reported: not yet
+    assert deliveries(c, c.spawn(Tower())) == []  # never a second create
+    synced = first_b(c, b)
+    assert [m for m in to(synced, b) if isinstance(m, server.Destroy)] == [server.Destroy(8192)]
+    assert c.player(b).view.holds(8192)  # type: ignore[union-attr]
+    c.despawn(8192)
+    d = join(c, "DDD", 2)
+    assert not [m for m in to(first_b(c, d), d) if isinstance(m, server.Destroy)]
+    assert not c.player(a).view.holds(8192)  # type: ignore[union-attr]
