@@ -19,7 +19,7 @@ from enum import Enum, auto
 
 from opencs import policy
 from opencs.messages import ServerMessage, WirePos, WireXZ, server
-from opencs.wire.codec import CELL_SIZE
+from opencs.wire.codec import CELL_SIZE, CITY_CELLS
 from opencs.world.view import ClientView, LegCount
 
 #: A tile of the 3x3 around an enemy corner is within this many tiles of it. I §9.4.
@@ -49,7 +49,7 @@ def in_home_zone(team: int, pos: WirePos) -> bool:
     a module arrives at once with no guppy (I §9.4.3)."""
     cx, cz = policy.TEAM_CORNER_CELLS[team]
     tx, tz = tile_of(pos.world_x, pos.world_z)
-    last = policy.CITY_TILES - 1
+    last = CITY_CELLS - 1
     off_x = -1 if cx == 0 else last + 1  # the off-map tile beside the corner, on each axis
     off_z = -1 if cz == 0 else last + 1
     return tx in (cx, off_x) and tz in (cz, off_z)

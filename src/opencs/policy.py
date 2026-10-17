@@ -346,10 +346,7 @@ GRACE_TIMEOUT = 120.0
 
 #: Each team's home corner tile ``(cell x, cell z)``, indexed by team 0-3 (red, blue, green,
 #: black): the client's spawn tables. I §9.4.3, I §9.1.5.
-TEAM_CORNER_CELLS = ((0, 0), (7, 0), (0, 7), (7, 7))
-
-#: The city is 8 x 8 tiles of 600 ft (I §6.1); the home corners are at tile 0 or 7 on each axis.
-CITY_TILES = 8
+TEAM_CORNER_CELLS = ((0, 0), (7, 0), (0, 7), (7, 7))  # tile 0 or 7 (``codec.CITY_CELLS`` - 1)
 
 #: The grace box is the 3x3 tiles centered on the corner tile: it starts one tile before the
 #: corner tile and is three tiles long. I §9.1.5 (``corner x 600 - 600`` to that ``+ 1800``).
