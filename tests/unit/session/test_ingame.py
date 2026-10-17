@@ -129,7 +129,18 @@ def test_noise_without_headers_is_skipped_silently(junk: bytes) -> None:
     assert not h.io.closed
 
 
-def test_progress_on_a_partial_frame_restarts_the_stall_clock() -> None:
+def test_a_growing_partial_frame_is_still_given_up_when_the_stall_began_long_ago() -> None:
+    h, seen = in_game()
+    stray = b"CS" + bytes([0x20, 0x20 ^ 0xFF, 0x90])  # claims 0x80 bytes that never come
+    h.feed(stray + frame(b"EN"))  # the stall clock starts here
+    h.advance(policy.FRAME_STALL_SECONDS - 1.0)
+    h.feed(b"\x00")  # the partial grows: this must not restart the clock
+    assert seen == []
+    h.advance(1.0)
+    assert seen == [client.Ping()]
+
+
+def test_a_partial_frame_that_finishes_in_time_is_not_given_up() -> None:
     h, seen = in_game()
     ping, quit_ = frame(b"EN"), frame(b"C")
     h.feed(ping + quit_[:3])  # a whole frame completed: nothing is stalled yet
