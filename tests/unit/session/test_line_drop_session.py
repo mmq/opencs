@@ -79,7 +79,7 @@ def test_a_death_creates_no_record() -> None:
     assert held(world) is None and world.services.held.slots("A") == []
 
 
-def test_a_close_by_the_server_is_not_a_line_drop() -> None:
+def test_a_close_by_the_server_leaves_nothing_to_resume() -> None:
     world = make_world()
     h = alice(world)
     h.session.close("too much bad input")
@@ -188,6 +188,19 @@ def test_a_drop_under_fire_is_a_death_and_the_record_says_why() -> None:
     record = held(world)
     assert record is not None and not record.eligible and record.reason == "ENEMY FIRE"
     assert world.services.held.slots("A") == []  # nothing to reserve
+
+
+def test_a_close_by_the_server_under_fire_is_still_a_death_with_no_record() -> None:
+    world = make_world()
+    a, b = fight(world)
+    b.io.messages.clear()
+    shoot(b)
+    a.session.close("too much bad input")
+    a.session.closed()
+    sent = b.io.messages
+    assert any(isinstance(m, server.Destroy) for m in sent)  # 'J': hanging up does not dodge it
+    assert isinstance(sent[-1], server.Delete)
+    assert held(world) is None
 
 
 def test_a_quiet_drop_next_to_a_player_only_deletes_the_pod() -> None:

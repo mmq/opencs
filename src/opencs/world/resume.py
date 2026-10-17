@@ -104,10 +104,20 @@ def modules_highest_first(modules: Iterable[int]) -> tuple[int, ...]:
     return tuple(sorted(modules, key=lambda m: -module_level(m)))
 
 
-def drop_player(city: City, player: Player, now: float, *, fight_at: float, hold: bool) -> Dropped:
+def drop_player(
+    city: City,
+    player: Player,
+    now: float,
+    *,
+    fight_at: float,
+    hold: bool,
+    keep_record: bool = True,
+) -> Dropped:
     """The player's line dropped. ``fight_at`` is when it did (``now``, or the last byte for a
     silent line); a fight is an attack within ``BATTLE_WINDOW`` before it. ``hold`` says the
-    player will be held for a ``/RESUME``, which keeps the city alive when it empties."""
+    player will be held for a ``/RESUME``, which keeps the city alive when it empties.
+    ``keep_record`` is False when the server ended the connection: hanging up does not dodge a
+    death, but the peer did not drop, so no game is left to resume."""
     reason = battle_reason(player, city.orders.strikes, fight_at)
     events: list[Event] = []
     if reason:
@@ -119,7 +129,7 @@ def drop_player(city: City, player: Player, now: float, *, fight_at: float, hold
         # Dead and not yet raised to the city floor: the player was owed it, and a resume skips it
         # (II §12), so the record carries the floor instead of the client's reset to 1.
         multiplier = max(multiplier, city.multiplier_floor)
-    if player.identity is not None:
+    if player.identity is not None and keep_record:
         record = ResumeRecord(
             identity=player.identity,
             callsign=player.callsign,

@@ -264,17 +264,24 @@ class City:
         return events
 
     def line_drop(
-        self, player_id: int, now: float, *, fight_at: float | None = None, hold: bool = False
+        self,
+        player_id: int,
+        now: float,
+        *,
+        fight_at: float | None = None,
+        hold: bool = False,
+        keep_record: bool = True,
     ) -> Dropped:
         """The player's line dropped (II §13): a fight it was losing is a death, anything else
         only the delete. ``fight_at`` is when the line actually went (default ``now``); ``hold``
-        says the player is to be held for ``/RESUME``. See ``world.resume``."""
+        says the player is to be held for ``/RESUME`` and ``keep_record`` that a record is made at
+        all. See ``world.resume``."""
         player = self._players.get(player_id)
         if player is None:
             return Dropped([], None)
         at = now if fight_at is None else fight_at
         try:
-            return drop_player(self, player, now, fight_at=at, hold=hold)
+            return drop_player(self, player, now, fight_at=at, hold=hold, keep_record=keep_record)
         finally:
             self._ledger.note(player)  # a death at the drop changed the marker
 
