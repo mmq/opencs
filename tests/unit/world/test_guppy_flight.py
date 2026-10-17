@@ -48,13 +48,18 @@ def test_the_whole_trip_create_outbound_deliver_home() -> None:
     # Leg 0 (the create) reported: the guppy is sent to the order point, for both clients.
     out = arrive(c, a)
     assert sent_to(out, a, server.MobileCreate) == [server.MobileCreate(GUPPY, dest(1))]
-    assert sent_to(out, b, server.MobileCreate) == [server.MobileCreate(GUPPY, dest(1))]
+    # B's copy has not reported the create yet: a 'K' now would cut it short, so B waits for its
+    # own report, which is answered with the destination.
+    assert sent_to(out, b, server.MobileCreate) == []
+    assert sent_to(arrive(c, b), b, server.MobileCreate) == [server.MobileCreate(GUPPY, dest(1))]
     # Leg 1 (arrival at the point): the tower is delivered to both, the guppy is sent home.
     out = arrive(c, a)
     tower = server.SpawnTower(0, policy.STRUCTURE_IDS[0], 0, point(1), 0)
     assert sent_to(out, a, server.SpawnTower) == [tower]
     assert sent_to(out, b, server.SpawnTower) == [tower]
-    assert sent_to(out, b, server.MobileCreate) == [server.MobileCreate(GUPPY, HOME)]
+    assert sent_to(out, a, server.MobileCreate) == [server.MobileCreate(GUPPY, HOME)]
+    assert sent_to(out, b, server.MobileCreate) == []  # B has not reported leg 1 yet
+    assert sent_to(arrive(c, b), b, server.MobileCreate) == [server.MobileCreate(GUPPY, HOME)]
     # Leg 2 (home): idle; nothing is sent.
     assert arrive(c, a) == []
 
@@ -73,10 +78,12 @@ def test_the_delivered_tower_carries_the_orders_team_flag_and_point() -> None:
 def test_duplicate_reports_of_a_leg_do_nothing_and_each_client_counts_its_own_legs() -> None:
     c, (a, b) = playing([0, 1])
     order(c, a, 1)
-    assert arrive(c, a)  # A: leg 0 -> dispatch
-    assert arrive(c, b) == []  # B: leg 0 again, a duplicate
-    assert arrive(c, b)  # B: leg 1 comes first from B -> acts: the tower is delivered
-    assert arrive(c, a) == []  # A: leg 1, now a duplicate
+    assert arrive(c, a)  # A: leg 0 -> dispatch (B, not yet reported, is held back)
+    assert sent_to(arrive(c, b), b, server.MobileCreate)  # B: leg 0 late: answered, not acted on
+    assert sent_to(arrive(c, b), a, server.SpawnTower)  # B: leg 1 comes first from B -> acts
+    assert sent_to(
+        arrive(c, a), a, server.MobileCreate
+    )  # A: leg 1 late: answered with the way home
     assert arrive(c, a) == []  # leg 2, home: acts, but the guppy is idle so nothing is sent
     assert arrive(c, b) == []  # B's leg 2: a duplicate
     assert c.orders.logistics.ignored_reports == 0

@@ -17,6 +17,7 @@ from opencs.messages import ClientMessage, client
 from opencs.world.effects import Effects
 from opencs.world.events import Event, ToPlayer
 from opencs.world.modules import Drops
+from opencs.world.npcs.munchers import Munchers
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.scoring import multiplier_floor
@@ -32,16 +33,18 @@ def _as[M: ClientMessage](kind: type[M], msg: ClientMessage) -> M:
 
 
 def module_handlers(
-    orders: Orders, drops: Drops, effects: Effects
+    orders: Orders, drops: Drops, effects: Effects, munchers: Munchers
 ) -> dict[type[ClientMessage], Handler]:
-    """The entries for tower and module orders, guppy legs, pickups, rests, ejects, used-up
-    reports, effect requests and Air Support."""
+    """The entries for tower and module orders, guppy and Muncher legs, pickups, rests, ejects,
+    used-up reports, effect requests and Air Support."""
     return {
         client.TowerOrder: lambda p, m, now: orders.tower_order(p, _as(client.TowerOrder, m), now),
         client.ModuleOrder: lambda p, m, now: orders.module_order(
             p, _as(client.ModuleOrder, m), now
         ),
-        client.LegArrived: lambda p, m, now: orders.leg_arrived(p, _as(client.LegArrived, m), now),
+        client.LegArrived: lambda p, m, now: _leg_arrived(
+            orders, munchers, p, _as(client.LegArrived, m), now
+        ),
         client.PickupRequest: lambda p, m, now: drops.pickup(
             p, _as(client.PickupRequest, m).object, now
         ),
@@ -55,6 +58,15 @@ def module_handlers(
         ),
         client.AirSupport: lambda p, m, now: orders.air_support(p, _as(client.AirSupport, m), now),
     }
+
+
+def _leg_arrived(
+    orders: Orders, munchers: Munchers, player: Player, arrival: client.LegArrived, now: float
+) -> list[Event]:
+    """A leg report is a guppy's or a Muncher's: the id says which (I §6.2, I §9.4.1, I §9.5.2)."""
+    if munchers.owns(arrival.id):
+        return munchers.arrived(player, arrival.id, now)
+    return orders.leg_arrived(player, arrival, now)
 
 
 def _rested(drops: Drops, player: Player, rested: client.ModuleRested) -> list[Event]:

@@ -55,8 +55,9 @@ def test_on_arrival_a_kind_9_grenade_by_the_guppy_at_the_point_and_the_senders_a
     request(c, a)
     flight = fly(c, a, 2, 1)
     assert shots(flight, b) == []
-    sent = [m for m in to(flight, b) if isinstance(m, server.MobileCreate)]
-    assert sent[0].pos == TARGET
+    assert [m for m in to(flight, b) if isinstance(m, server.MobileCreate)] == []  # b is held back
+    sent = [m for m in to(fly(c, b, 2, 1), b) if isinstance(m, server.MobileCreate)]
+    assert sent[0].pos == TARGET  # b's own report is answered with the destination
     out = fly(c, a, 2, 1, now=40.0)
     expected = server.Shot(252, WirePos(3, 3, 120, STAND_Y, 340), 0, 0, 9)
     assert shots(out, a) == [expected] and shots(out, b) == [expected]

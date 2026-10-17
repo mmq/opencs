@@ -466,3 +466,72 @@ AIR_SUPPORT_ACKNOWLEDGED = 0
 
 #: Air Support strikes kept for M10's resume check (enemy strikes near a dropped pod). Ours.
 STRIKE_LOG_MAX = 64
+
+# --- The living city: weather, Sentinels, Munchers (I §8.20, I §9.5.2, II §16.2, II §16.2, II §5)
+# ----------
+
+#: The client's palette crossfade takes about 50 s, and a crossfade started during another back to
+#: the pre-fade palette is dropped, so palette changes must be at least this far apart (I §8.20,
+#: observed 2026-10-16). The client's number.
+CROSSFADE_SECONDS = 50.0
+
+#: Our margin on top of the crossfade, and the least gap between two light changes in a city's
+#: program, wrap included (II §5; the 5 s
+#: margin is ours).
+FADE_MARGIN_S = 5.0
+MIN_LIGHT_GAP_S = CROSSFADE_SECONDS + FADE_MARGIN_S
+
+#: Shortest interval between two spawns of one timer (``sentinel_respawn``, ``muncher_every``), and
+#: shortest total period of a weather program. The timers catch up in a loop, so a typo such as
+#: 0.000001 would run it a million times per tick and freeze every city (DESIGN §3.3). Ours
+#: (DESIGN §5): a bound on a configuration file, not a rule. ``muncher_every`` may also be 0 (off).
+MIN_SPAWN_INTERVAL = 1.0
+MIN_AMBIENT_PERIOD = 5.0
+
+#: Most steps a weather program may have, and the longest delay of a step, in seconds (a week).
+#: Ours (DESIGN §5): bounds on a configuration file, not on any rule.
+MAX_AMBIENT_STEPS = 64
+MAX_AMBIENT_AFTER = 7 * 24 * 3600.0
+
+#: Most resident Sentinels a city may ask for: one per block outside the four home corners' 3x3
+#: tile areas (64 blocks - 4 x 4 tiles on the map). II §16.3 ("one per block").
+MAX_SENTINELS = 48
+
+#: Seconds before a destroyed resident Sentinel is replaced, when a city sets none. Ours (the
+#: shipped B value; II §16). The longest a configuration may set is a day.
+DEFAULT_SENTINEL_RESPAWN = 300.0
+MAX_SPAWN_INTERVAL = 24 * 3600.0
+
+#: A Sentinel's durability, called or resident, on the client's per-shot table; destroyed with
+#: ``'J'`` at 0. The client holds none, so the number is ours: a full pod's power, as towers
+#: (II §16.3, II §10).
+SENTINEL_HP = 3000
+
+#: A resident Sentinel is placed this far into its block, along each axis, at random between the
+#: two. II §16 ("150-450 ft into the block").
+SENTINEL_OFFSET_FEET = (150, 450)
+
+#: Most called Sentinels a city holds; past it the oldest is destroyed. A called one is not replaced
+#: and lasts until shot down (II §16), so without a bound a client sending ``'E'``-``'S'``
+#: at its rate limit would grow the city forever. Ours (DESIGN §5).
+MAX_CALLED_SENTINELS = 16
+
+#: Seconds a Muncher stays latched on a tower before the tower is destroyed. The client times no
+#: meal (its latched state just waits), so the number is ours (II §16.2).
+MUNCHER_EAT_SECONDS = 15.0
+
+#: A Muncher's durability on the client's per-shot table, as towers and Sentinels: "can be
+#: destroyed with weapons" (manual), the number ours (I §9.5.2, II §16.2).
+MUNCHER_HP = 3000
+
+#: How far from itself a Muncher looks for its next tower, in feet, straight-line across the
+#: ground: the manual's "within one block" (II §16.2).
+MUNCHER_HUNT_FEET = 600
+
+#: A Muncher with nothing left to eat flies to the nearest city edge, to a point this many feet
+#: inside it, and is removed on arrival (II §16.2).
+MUNCHER_EDGE_INSET_FEET = 50
+
+#: Most Munchers in a city at once; a Call Muncher past it is ignored. Ours (DESIGN §5): the module
+#: is used up per request, so honest play never nears it, but each Muncher costs legs of traffic.
+MAX_MUNCHERS = 16

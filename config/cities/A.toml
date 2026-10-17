@@ -1,4 +1,4 @@
-# City A (II §5). Weather and NPCs arrive in later milestones.
+# City A (II §5): training, no NPCs and no weather program.
 letter = "A"
 name = "CYBERCITY ONE"
 map = 1                  # the C<n> map file this city is played on

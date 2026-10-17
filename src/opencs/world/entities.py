@@ -62,10 +62,22 @@ class CityState(Protocol):
     def state_messages(self, now: float) -> Sequence[ServerMessage]: ...
 
 
+@runtime_checkable
+class CatchesUp(Protocol):
+    """City-wide state a client may hold an *older value* of, which is brought up to date by what
+    differs (the weather: a rain level back to 0 must be sent, one that did not change must not be
+    sent again) instead of by the whole state."""
+
+    def messages_since(self, told: Hashable, now: float) -> Sequence[ServerMessage]: ...
+
+
 def inform(state: CityState, view: ClientView, now: float) -> list[Event]:
     """The packets that bring ``view``'s client up to date with ``state``, or none if it is.
     The sibling of ``introduce`` for state that is not an entity; a joiner's sync calls both."""
     if view.was_told(state.state_key, state.state_value):
         return []
+    told = view.told.get(state.state_key)
     view.tell(state.state_key, state.state_value)
+    if isinstance(state, CatchesUp) and told is not None:
+        return [Event(m, ToPlayer(view.player_id)) for m in state.messages_since(told, now)]
     return [Event(m, ToPlayer(view.player_id)) for m in state.state_messages(now)]

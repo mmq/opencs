@@ -43,8 +43,9 @@ def build_services(
     router. Accounts are kept in memory until the persistence milestone (M10)."""
     clock = clock or MonotonicClock()
     identity = Identity(store or MemoryAccountStore())
-    lobby = Lobby(config.cities, config.server.default_city, rng or random.Random())
-    cities = {c.letter: City(c) for c in config.cities if c.enabled}
+    rng = rng or random.Random()
+    lobby = Lobby(config.cities, config.server.default_city, rng)
+    cities = {c.letter: City(c, rng) for c in config.cities if c.enabled}
     return Services(identity, lobby, clock, cities, Router())
 
 

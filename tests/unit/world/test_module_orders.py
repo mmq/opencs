@@ -211,6 +211,8 @@ def test_away_from_home_a_guppy_flies_the_module_in_and_it_drops_on_arrival() ->
     assert [m for m in to(out, a) if isinstance(m, server.MobileCreate)]
     # The create leg is reported; the guppy is sent to the drop point.
     out = fly(c, a, 0, 1)
+    assert not [m for m in to(out, b) if isinstance(m, server.MobileCreate)]  # b is held back
+    out = fly(c, b, 0, 1)  # its own report is answered with the destination
     sent = [m for m in to(out, b) if isinstance(m, server.MobileCreate)]
     assert sent and (sent[0].pos.world_x, sent[0].pos.world_z) == (1520, 1500)
     assert drops(out, b) == []

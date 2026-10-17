@@ -13,7 +13,7 @@ and Air Support beside the tower.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -234,7 +234,13 @@ class Logistics:
             guppy.enqueue(job)
         return actions
 
-    def report(self, guppy_id: int, player_id: int, count: LegCount) -> list[Action]:
+    def report(
+        self,
+        guppy_id: int,
+        player_id: int,
+        count: LegCount,
+        others: Iterable[LegCount] = (),
+    ) -> list[Action]:
         """A client reported that its copy of guppy ``guppy_id`` completed a leg (I §9.4.1).
 
         Matched to a leg by that client's own count, with no timing: its n-th report is leg n.
@@ -242,7 +248,12 @@ class Logistics:
         for a leg ahead of the one in force is out of step: counted in ``ignored_reports`` and
         dropped, which a client that follows the protocol never causes. So is a report beyond the
         legs this client has been sent (``LegCount.owed``): a client's count never runs ahead of
-        what it was told, whatever it sends."""
+        what it was told, whatever it sends.
+
+        ``others`` are the other clients' counts for this guppy. When a report acts, each of them
+        that is in step but has not yet reported that leg is made *joining*: the next ``'K'`` would
+        replace the leg its copy is still flying, which it would then never report (I §9.4.1), so
+        it is sent nothing until its own report, which the joining path answers (I §7.3)."""
         guppy = next((g for g in self._guppies.values() if g.entity_id == guppy_id), None)
         if guppy is None or guppy.phase is Phase.ABSENT:
             return []
@@ -250,9 +261,11 @@ class Logistics:
             self.ignored_reports += 1
             return []
         count.owed -= 1
-        return self._counted_report(guppy, player_id, count)
+        return self._counted_report(guppy, player_id, count, others)
 
-    def _counted_report(self, guppy: Guppy, player_id: int, count: LegCount) -> list[Action]:
+    def _counted_report(
+        self, guppy: Guppy, player_id: int, count: LegCount, others: Iterable[LegCount]
+    ) -> list[Action]:
         """A report within the legs the client was sent, matched to a leg by its count."""
         if count.joining:
             # Step 4: while joining, a report drives nothing. The one that brings the client in
@@ -271,6 +284,9 @@ class Logistics:
             self.ignored_reports += 1
             return []
         guppy.acted = leg
+        for other in others:
+            if other is not count and not other.joining and other.reports <= leg:
+                other.joining, other.caught_up = True, None
         return self._leg_done(guppy)
 
     def _join_step(self, guppy: Guppy, player_id: int, count: LegCount) -> CatchUp | None:

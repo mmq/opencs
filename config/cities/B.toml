@@ -1,4 +1,4 @@
-# City B (II §5). Weather and NPCs arrive in later milestones.
+# City B (II §5, II §16.3, II §5): two Sentinels, rain that comes and goes.
 letter = "B"
 name = "CYBERCITY TWO"
 map = 2                  # the C<n> map file this city is played on
@@ -10,6 +10,8 @@ team_policy = "request-or-balance"   # or "balance", "random"
 balance_teams = [0, 1, 2, 3]         # teams the balancer may fill
 banned_modules = []       # catalog indices refused as "no X modules in stock"
 enabled = true
+sentinels = 2             # resident Sentinels (II §16.3)
+sentinel_respawn = 300    # seconds before a destroyed one is replaced
 # Territory (II §5): rows are cell Z 0..7, digits are cell X 0..7, classes 0-3 worth
 # 1/2/5/10. Rings 1/2/5/10 toward the center.
 blocks = [
@@ -22,3 +24,14 @@ blocks = [
   "01111110",
   "00000000",
 ]
+
+# The weather program, looped from the moment the city's game starts (II §5). Each step
+# waits `after` seconds since the previous one, then sets what it names: light (palette 0-4), rain
+# (0-3), lightning. Light changes must be 55 s apart, the wrap included.
+[[ambient]]
+after = 600
+rain = 2
+
+[[ambient]]
+after = 300
+rain = 0

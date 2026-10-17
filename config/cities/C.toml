@@ -1,4 +1,4 @@
-# City C (II §5). Weather and NPCs arrive in later milestones.
+# City C (II §5, II §16.2, II §5): four Sentinels, a free Muncher, dusk and storms.
 letter = "C"
 name = "CYBERCITY THREE"
 map = 3                  # the C<n> map file this city is played on
@@ -10,6 +10,9 @@ team_policy = "request-or-balance"   # or "balance", "random"
 balance_teams = [0, 1, 2, 3]         # teams the balancer may fill
 banned_modules = []       # catalog indices refused as "no X modules in stock"
 enabled = true
+sentinels = 4             # resident Sentinels (II §16.3)
+sentinel_respawn = 180    # seconds before a destroyed one is replaced
+muncher_every = 600       # seconds between free Munchers sent at the leading team
 # Territory (II §5): rows are cell Z 0..7, digits are cell X 0..7, classes 0-3 worth
 # 1/2/5/10. Rings 2/5/10 with a 4x4 center of 10.
 blocks = [
@@ -22,3 +25,22 @@ blocks = [
   "12222221",
   "11111111",
 ]
+
+# The weather program (see city B): dim light (palette 3), a storm, clear, then daylight again.
+[[ambient]]
+after = 300
+light = 3
+
+[[ambient]]
+after = 300
+rain = 3
+lightning = true
+
+[[ambient]]
+after = 240
+rain = 0
+lightning = false
+
+[[ambient]]
+after = 300
+light = 0

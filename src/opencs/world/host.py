@@ -11,7 +11,8 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from opencs.world.entities import Entity
-from opencs.world.events import Event
+from opencs.world.events import Event, ToPlayers
+from opencs.world.ids import IdRange
 from opencs.world.player import Player
 
 
@@ -19,6 +20,14 @@ class WorldHost(Protocol):
     """The city, as its rule modules see it."""
 
     def players(self) -> Sequence[Player]: ...
+
+    def player(self, player_id: int) -> Player | None: ...
+
+    def playing(self, *, team: int | None = None, but: int | None = None) -> ToPlayers:
+        """The clients that have reported (see ``City.playing``)."""
+        ...
+
+    def is_known_npc(self, entity_id: int) -> bool: ...
 
     def spawn(self, entity: Entity, now: float) -> list[Event]: ...
 
@@ -29,3 +38,9 @@ class WorldHost(Protocol):
         ...
 
     def release_structure_id(self, entity_id: int, now: float) -> None: ...
+
+    def allocate_id(self, which: IdRange) -> int | None:
+        """A free id in ``which``, or None if none is safely reusable (I §6.2)."""
+        ...
+
+    def release_id(self, which: IdRange, entity_id: int, now: float) -> None: ...
