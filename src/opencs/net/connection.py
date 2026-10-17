@@ -41,6 +41,8 @@ class ConnectionIO(Protocol):
 
     def send(self, msg: ServerMessage) -> None: ...
 
+    def send_first(self, msg: ServerMessage) -> None: ...
+
     def close(self, reason: str) -> None: ...
 
 
@@ -117,6 +119,11 @@ class Connection:
         """Queue a message; its tag is assigned when it is written."""
         self._enqueue(msg)
 
+    def send_first(self, msg: ServerMessage) -> None:
+        """Queue a message ahead of everything already queued: the latency ping's reply, whose
+        delay the client measures and shows (I §8.7)."""
+        self._enqueue(msg, front=True)
+
     def close(self, reason: str) -> None:
         """Send what is queued, then close. A client that does not read is cut after
         ``CLOSE_FLUSH_TIMEOUT``."""
@@ -143,13 +150,16 @@ class Connection:
         for task in self._tasks:  # a pump stuck in drain() on a dead peer must not hold us up
             task.cancel()
 
-    def _enqueue(self, item: bytes | ServerMessage) -> None:
+    def _enqueue(self, item: bytes | ServerMessage, *, front: bool = False) -> None:
         if self._closing or self._aborted:
             return
         if len(self._outbox) >= self._limit:
             self.abort(f"outbox over {self._limit} items")
             return
-        self._outbox.append(item)
+        if front:
+            self._outbox.appendleft(item)
+        else:
+            self._outbox.append(item)
         self._wake.set()
 
     def encode(self, msg: ServerMessage) -> bytes:

@@ -34,6 +34,9 @@ class FakeIO:
     def send(self, msg: ServerMessage) -> None:
         self.messages.append(msg)
 
+    def send_first(self, msg: ServerMessage) -> None:
+        self.messages.insert(0, msg)
+
     def close(self, reason: str) -> None:
         self.closed_with.append(reason)
 

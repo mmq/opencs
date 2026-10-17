@@ -22,6 +22,10 @@ class SessionIO(Protocol):
         """Queue an in-game message; the connection assigns its tag and frames it (I §4.2)."""
         ...
 
+    def send_first(self, msg: ServerMessage) -> None:
+        """Like ``send`` but ahead of everything already queued: the ping reply (I §8.7)."""
+        ...
+
     def close(self, reason: str) -> None:
         """Flush what is queued, then close the connection."""
         ...
