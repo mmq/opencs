@@ -180,3 +180,41 @@ def test_the_other_team_may_liberate_too() -> None:
     ours = tower(c, 0, at(10))
     out = use(c, b, "L")
     assert to(out, a) == [server.Destroy(ours)]
+
+
+# --- Weather ---
+
+
+def palettes(out: list[tuple[int, ServerMessage]], pid: int) -> list[int]:
+    return [m.arg for m in to(out, pid) if isinstance(m, server.Ambient) and m.sub == 0]
+
+
+def test_weather_cycles_0_to_4_and_back_with_an_r_sub_0_to_every_client() -> None:
+    c, (a, b) = world()
+    seen = []
+    for i in range(6):
+        out = use(c, a, "W", now=10.0 + i)
+        assert palettes(out, a) == palettes(out, b) and len(palettes(out, a)) == 1
+        seen.append(palettes(out, b)[0])
+    assert seen == [1, 2, 3, 4, 0, 1]
+    assert max(seen) <= 4  # the client crashes on a larger palette
+
+
+def test_weather_is_not_sent_to_a_client_still_loading_but_it_gets_it_on_its_first_report() -> None:
+    c, (a, b) = seat([0, 1], reported=False)
+    pos = at(0)
+    c.client_message(
+        a, report(4, cell_x=pos.cell_x, cell_z=pos.cell_z, x_off=pos.x_off, z_off=pos.z_off), 1.0
+    )
+    out = use(c, a, "W")
+    assert palettes(out, a) == [1] and to(out, b) == []
+    later = deliveries(c, c.client_message(b, report(4), 12.0))
+    assert palettes(later, b) == [1]
+
+
+def test_an_emptied_city_starts_again_in_the_default_weather() -> None:
+    c, (a, b) = world()
+    use(c, a, "W")
+    c.leave(a, 20.0)
+    c.leave(b, 21.0)
+    assert c.weather.palette == policy.DEFAULT_PALETTE

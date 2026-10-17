@@ -14,12 +14,14 @@ from collections.abc import Callable, Iterator
 
 from opencs import policy
 from opencs.messages import WirePos
+from opencs.world.entities import inform
 from opencs.world.events import Event
 from opencs.world.host import WorldHost
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
 from opencs.world.structures import Tower
+from opencs.world.weather import Weather
 
 log = logging.getLogger("opencs.world")
 
@@ -37,15 +39,20 @@ def within_one_block(center: WirePos, other: WirePos) -> bool:
 class Effects:
     """One city's effect modules."""
 
-    def __init__(self, host: WorldHost, orders: Orders) -> None:
+    def __init__(self, host: WorldHost, orders: Orders, weather: Weather) -> None:
         self._host = host
         self._orders = orders
+        self._weather = weather
         self._effects: dict[str, _Effect] = {
             "R": self._repair,
             "H": self._harden,
             "L": self._liberate,
             "I": self._immunize,
+            "W": self._weather_change,
         }
+
+    def reset(self) -> None:
+        """The city emptied: nothing carries over (II §17)."""
 
     def request(self, player: Player, effect: str, now: float) -> list[Event]:
         """An ``'E'`` effect request from ``player`` (I §9.3.5, II §16.1). Ignored before the pod's
@@ -98,4 +105,17 @@ class Effects:
         events: list[Event] = []
         for tower in list(self._towers_near(here, own_team=None, enemy_of=player.team)):
             events += self._orders.destroy_tower(tower, now)
+        return events
+
+    # --- the weather -------------------------------------------------------------------------
+
+    def _weather_change(self, player: Player, here: WirePos, now: float) -> list[Event]:
+        """Weather: the next condition, ``'R'`` sub 0 to every client past its load (the others
+        are given the palette by their first-report sync, I §7.3)."""
+        palette = self._weather.cycle()
+        log.info("player %d changed the weather to %d", player.id, palette)
+        events: list[Event] = []
+        for p in self._host.players():
+            if p.pod.has_reported:
+                events += inform(self._weather, p.view, now)
         return events

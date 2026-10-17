@@ -22,6 +22,10 @@ class Weather:
     def __init__(self) -> None:
         self.palette = policy.DEFAULT_PALETTE
 
+    def reset(self) -> None:
+        """The city emptied: the next game starts in the default weather (II §17)."""
+        self.palette = policy.DEFAULT_PALETTE
+
     def cycle(self) -> int:
         """The Weather module: the next condition, 0 -> 1 -> ... -> 4 -> 0 (I §9.3.5)."""
         self.palette = (self.palette + 1) % (limits.AMBIENT_PALETTE_MAX + 1)

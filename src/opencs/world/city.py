@@ -76,7 +76,7 @@ class City:
             self.drops,
         )
         #: The effect modules (I §9.3.5, II §16.1).
-        self.effects = Effects(self, self.orders)
+        self.effects = Effects(self, self.orders, self.weather)
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -200,7 +200,8 @@ class City:
         self._live.clear()
         self.orders.reset()
         self.drops.reset()
-        self.weather = Weather()
+        self.weather.reset()
+        self.effects.reset()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
