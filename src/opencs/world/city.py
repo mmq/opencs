@@ -18,10 +18,11 @@ from dataclasses import dataclass, field
 from opencs import policy
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, ServerMessage, client, server
+from opencs.world import relay
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer
 from opencs.world.ids import IdRange, IdSpace
-from opencs.world.pods import Pod
+from opencs.world.pods import Pod, PodPhase
 from opencs.world.view import ClientView
 
 log = logging.getLogger("opencs.world")
@@ -190,7 +191,8 @@ class City:
         return events
 
     def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
-        """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2)."""
+        """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2),
+        then the relay to the clients that hold it (I §8.24)."""
         first = player.pod.last is None
         events = player.pod.on_report(report, now)
         if first:
@@ -198,6 +200,13 @@ class City:
             # are given theirs by the introduction, after their 'G'.
             events = [Event(e.message, ToPlayer(player.id)) for e in events]
             events += self._go_live(player)
+        if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
+            events.append(
+                Event(
+                    relay.pod_state(player.id, report),
+                    ToHolders(player.id, except_player=player.id),
+                )
+            )
         return events
 
     def _go_live(self, player: Player) -> list[Event]:

@@ -18,8 +18,10 @@ def join(c: City, callsign: str, team: int = 0, now: float = 0.0) -> int:
 
 
 def first_b(c: City, pid: int, now: float = 1.0, **kw: int) -> list[tuple[int, ServerMessage]]:
-    """The player's report (state 4, the first of a session) and what it delivers."""
-    return deliveries(c, c.client_message(pid, report(4, **kw), now))
+    """The player's report (state 4, the first of a session) and what it delivers, less the relay
+    of the 'b' itself (``test_relay`` has that)."""
+    out = deliveries(c, c.client_message(pid, report(4, **kw), now))
+    return [(p, m) for p, m in out if not isinstance(m, server.PodState)]
 
 
 def kinds(msgs: list[ServerMessage]) -> list[tuple[str, int]]:

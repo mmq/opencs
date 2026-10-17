@@ -279,3 +279,7 @@ LATE_QUIT_WINDOW = 10.0
 
 #: The pod state byte of a pod in drop state (I §7.1, I §7.4): it discards positions.
 POD_STATE_DROPPING = 4
+
+#: The pod state byte of a falling pod (I §8.24): its ``v1``/``v2`` are vertical velocity, and it
+#: is the one state besides 0 that a relayed ``'b'`` may carry.
+POD_STATE_FALLING = 1
