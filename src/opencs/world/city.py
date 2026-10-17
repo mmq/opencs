@@ -38,7 +38,13 @@ from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.podreport import pod_state
 from opencs.world.progress import ProgressChanged, SavedProgress
-from opencs.world.resume import Dropped, NoReservations, Reservations, drop_player
+from opencs.world.resume import (
+    Dropped,
+    NoReservations,
+    Reservations,
+    ResumeRecord,
+    drop_player,
+)
 from opencs.world.scoring import multiplier_floor
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
@@ -174,13 +180,16 @@ class City:
         *,
         identity: str | None = None,
         saved: SavedProgress | None = None,
+        resume: ResumeRecord | None = None,
     ) -> JoinResult | JoinRefused:
         """Seat a player: an id, the lowest free index in its team (I §6.3) and the ``'B'``.
 
         ``identity`` is the key its record is kept under (None: nothing is kept) and ``saved`` the
         stored record it starts from (None: a new identity). The client is restored to it when it
         sends its first ``'b'`` (I §9.2.11, II §11.3); starting the game rolls the last SCORE into
-        the career, which is a change to save (``take_progress``)."""
+        the career, which is a change to save (``take_progress``). ``resume`` is the held game being
+        returned to (II §13 item 5): the same game, so SCORE, bay points and multiplier come
+        back as they were; without the stored record there is nothing to resume."""
         held = [t for key, t in self._reservations.slots(self.config.letter) if key != identity]
         if len(self._players) + len(held) >= self.config.capacity:
             return JoinRefused(f"CITY {self.config.letter} IS FULL")
@@ -217,7 +226,10 @@ class City:
             ClientView(player_id, now),
             identity=identity,
             saved=saved,
+            resume=resume if saved is not None else None,
         )
+        if player.resume is not None:
+            player.score.multiplier = min(player.score.multiplier, cfg.max_multiplier)
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
         # A fresh client already shows its own default palette (I §8.20), which is a client fact,
         # not the city's starting condition: it is sent one only once the weather differs from it.
