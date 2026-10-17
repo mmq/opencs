@@ -97,6 +97,7 @@ src/opencs/
     orders.py            tower orders, guppy actions to events, towers placed and destroyed (I §9.4, S3)
     modules.py           what a city stocks, drops, pickup, rest, eject (I §9.3.1, I §9.3.3)
     loadout.py           the installed-module ledger of one pod (I §9.3.4, II §13)
+    dispatch.py          the message-type -> handler entries for orders, drops, effects, score
     host.py              WorldHost: what the rule modules ask of the city
     effects.py           effect-module requests (I §9.3.5, II §16.1)
     structures.py        towers and their durability (S3)

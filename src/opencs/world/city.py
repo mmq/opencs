@@ -12,7 +12,7 @@ nobody left it is reset, so the next game starts fresh (``leave``); M10 keeps it
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from opencs import policy
@@ -20,6 +20,13 @@ from opencs.config import CityConfig
 from opencs.messages import ClientMessage, client, limits, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
+from opencs.world.dispatch import (
+    Handler,
+    check_loadout,
+    module_handlers,
+    score_handlers,
+    start_status,
+)
 from opencs.world.effects import Effects
 from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
@@ -82,45 +89,16 @@ class City:
         #: report naming the reporter's own pod (I §9.1.4 corollary).
         self.unrelayable_damage = 0
         self.own_pod_hit_reports = 0
-        self._handlers: dict[
-            type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
-        ] = {
+        self._handlers: dict[type[ClientMessage], Handler] = {
+            **module_handlers(self.orders, self.drops, self.effects),
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
-            client.Status: lambda p, m, now: self._status(p, _as(client.Status, m), now),
-            client.Bays: lambda p, m, now: self._bays(p, _as(client.Bays, m)),
+            **score_handlers(self.config.max_module_level, self.config.max_multiplier),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.Grenade: lambda p, m, now: [
                 Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
             ],
             client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
             client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
-            client.TowerOrder: lambda p, m, now: self.orders.tower_order(
-                p, _as(client.TowerOrder, m), now
-            ),
-            client.ModuleOrder: lambda p, m, now: self.orders.module_order(
-                p, _as(client.ModuleOrder, m), now
-            ),
-            client.LegArrived: lambda p, m, now: self.orders.leg_arrived(
-                p, _as(client.LegArrived, m), now
-            ),
-            client.PickupRequest: lambda p, m, now: self.drops.pickup(
-                p, _as(client.PickupRequest, m).object, now
-            ),
-            client.ModuleRested: lambda p, m, now: self._module_rested(
-                p, _as(client.ModuleRested, m)
-            ),
-            client.EjectRequest: lambda p, m, now: self.drops.eject(
-                p, _as(client.EjectRequest, m).module, now
-            ),
-            client.ModuleUsedUp: lambda p, m, now: self._module_used_up(
-                p, _as(client.ModuleUsedUp, m)
-            ),
-            client.EffectRequest: lambda p, m, now: self.effects.request(
-                p, _as(client.EffectRequest, m).effect, now
-            ),
-            client.AirSupport: lambda p, m, now: self.orders.air_support(
-                p, _as(client.AirSupport, m), now
-            ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -243,7 +221,7 @@ class City:
         then the relay to the clients that hold it (I §8.24)."""
         first = not player.pod.has_reported
         phase = player.pod.phase
-        self._check_loadout(player, report)
+        check_loadout(player, report)
         events = player.pod.on_report(report, now)
         if first:
             player.grace.arm(now)  # a spawn (I §9.1.5)
@@ -262,7 +240,7 @@ class City:
                 for e in events
             ]
             events += self._go_live(player, now)
-            events += self._start_status(player)
+            events += start_status(player, self.multiplier_floor)
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
             events.append(
                 Event(
@@ -272,46 +250,10 @@ class City:
             )
         return events
 
-    def _check_loadout(self, player: Player, report: client.PodState) -> None:
-        """Cross-check the installed-module ledger with the weight this ``'b'`` reports (I §9.3.4,
-        II §13). A disagreement that outlasts the grace is logged, once per episode, and never acted
-        on."""
-        mismatch = player.loadout.report(report.weight)
-        if mismatch is not None:
-            first = player.loadout.disagreeing == policy.LOADOUT_GRACE_REPORTS + 1
-            level = logging.WARNING if first else logging.DEBUG
-            log.log(level, "LOADOUT MISMATCH player %d: %s", player.id, mismatch)
-
     @property
     def multiplier_floor(self) -> int:
         """The multiplier a spawn is raised to in this city (II §12)."""
         return multiplier_floor(self.config.max_module_level, self.config.max_multiplier)
-
-    def _start_status(self, player: Player) -> list[Event]:
-        """A session's status: ``'D'``-``'B'`` first, then ``'D'``-``'S'``, to the player alone
-        (I §9.2.11, II §11.3, I §7.8). Without ``'D'``-``'B'`` the client's multiplier and SCORE
-        never run (I §9.2.3). It goes with the first ``'b'``, not with the ``'B'``: the client is
-        then past its load (a still-loading client's ring is nearly full of ``'B'`` repeats, I §7.1,
-        II §7), and it is when test servers sent it (I §7.1). ``player.score`` is where M10 puts a
-        saved player's bays, marker and bay points."""
-        return [
-            Event(message, ToPlayer(player.id))
-            for message in player.score.start_message(self.multiplier_floor)
-        ]
-
-    def _status(self, player: Player, report: client.Status, now: float) -> list[Event]:
-        """The client's ``'D'``-``'S'``: mirrored, and answered with the multiplier floor when one
-        is due after a death (II §12)."""
-        pushes = player.score.on_status(
-            report, now, self.multiplier_floor, self.config.max_multiplier
-        )
-        return [Event(m, ToPlayer(player.id)) for m in pushes]
-
-    def _bays(self, player: Player, report: client.Bays) -> list[Event]:
-        """The client's ``'D'``-``'B'``: its bays and battle marker, mirrored (II §11.1)."""
-        if not player.score.on_bays(report):
-            log.warning("player %d reported a bay level the client cannot hold", player.id)
-        return []
 
     def spawn(self, entity: Entity, now: float) -> list[Event]:
         """A new entity (a pod, tower, drop, mine, Sentinel, guppy or Muncher): every client that
@@ -372,14 +314,6 @@ class City:
             if other.pod.has_reported:
                 events += introduce(player, other.view, now)
         return events
-
-    def _module_rested(self, player: Player, rested: client.ModuleRested) -> list[Event]:
-        self.drops.rested(player, rested.object, rested.pos)
-        return []
-
-    def _module_used_up(self, player: Player, used: client.ModuleUsedUp) -> list[Event]:
-        self.drops.used_up(player, used.module)
-        return []
 
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
         """A line the player typed, echoed to its audience (I §8.23)."""
