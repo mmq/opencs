@@ -12,6 +12,7 @@ ROOT = Path(opencs.__file__).parent
 #: package -> the ``opencs`` modules/packages it may import (besides itself).
 ALLOWED: dict[str, set[str]] = {
     "wire": {"policy"},
+    "messages": {"wire", "policy"},
 }
 
 

@@ -7,6 +7,7 @@ message class read like its Appendix A layout. Decoding raises ``WireError`` and
 from __future__ import annotations
 
 from opencs.wire.errors import WireError
+from opencs.wire.frame import TERMINATORS
 
 #: Offset added to every bias10 and enc_num byte; keeps them above every terminator
 #: (I §4.3, I §4.3).
@@ -25,9 +26,16 @@ BIAS10_MIN = BYTE_MIN - BIAS10
 BIAS10_MAX = BYTE_MAX - BIAS10
 
 #: bias88 value range that keeps the wire byte within ``0x10..0xff``: ``-0x78 .. 0x77``
-#: (I §4.1, I §4.3).
+#: (I §4.1, I §4.3). The server sends nothing outside it.
 BIAS88_MIN = BYTE_MIN - BIAS88
 BIAS88_MAX = BYTE_MAX - BIAS88
+
+#: The full bias88 range, ``-0x88 .. 0x77``: a client may send values down to ``-0x88``, whose
+#: bytes fall below 0x10 (I §4.3).
+BIAS88_WIRE_MIN = -BIAS88
+
+#: bias88 values whose byte is a frame terminator: -126, -123 and -122 (I §4.1, I §4.3).
+BIAS88_FORBIDDEN = frozenset(b - BIAS88 for b in TERMINATORS)
 
 #: Longest string: its bias10 length byte must stay a legal byte (I §4.3).
 MAX_STRING_LENGTH = BIAS10_MAX
@@ -64,11 +72,13 @@ def bias10_decode(b: int) -> int:
 
 
 def bias88_encode(v: int) -> int:
-    """Wire byte for a signed motion scalar (I §4.3); range ``BIAS88_MIN..BIAS88_MAX``."""
-    b = v + BIAS88
-    if not BYTE_MIN <= b <= BYTE_MAX:
-        raise WireError(f"bias88 value {v} outside {BIAS88_MIN}..{BIAS88_MAX}")
-    return b
+    """Wire byte for a signed motion scalar (I §4.3); range ``BIAS88_WIRE_MIN..BIAS88_MAX`` less
+    ``BIAS88_FORBIDDEN``."""
+    if not BIAS88_WIRE_MIN <= v <= BIAS88_MAX:
+        raise WireError(f"bias88 value {v} outside {BIAS88_WIRE_MIN}..{BIAS88_MAX}")
+    if v in BIAS88_FORBIDDEN:
+        raise WireError(f"bias88 value {v} encodes as a frame terminator")
+    return v + BIAS88
 
 
 def bias88_decode(b: int) -> int:

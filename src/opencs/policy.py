@@ -81,3 +81,32 @@ DEFAULT_CITY_LETTER = "B"
 #: client's own armed buffer is 512 bytes (I §5.2), and no lobby command comes near it. Ours
 #: (DESIGN §5 "line length in the Chamber").
 MAX_LINE_BYTES = 512
+
+# --- Messages (I §8, I §8, I §8.20) ----------------------------------------------------
+
+#: Longest callsign the server sends in ``'B'``/``'G'``. II §3: 8 is
+#: our choice; test servers have always sent it.
+MAX_CALLSIGN_LENGTH = 8
+
+#: Longest network name in ``'B'`` (the banner reads "City: <city> on <network>"). Ours; the spec
+#: gives none; the real one is 5 characters.
+MAX_NETWORK_NAME_LENGTH = 16
+
+#: Replaces each byte outside ``0x20..0x7e`` in chat text (I §8.23: "replace 0x0a/0x0d/0x0e").
+CHAT_FILL_BYTE = 0x20
+
+#: The sub byte of a single-cell ``'T'``: the client only tests it against ``'I'`` (I §8.22,
+#: A.1); test servers use ``'C'``. Ours.
+BLOCK_CELL_SUB = ord("C")
+
+#: The byte after ``'E'``-``'K'`` for "Kill Recorded" (not earned); any byte but ``'E'`` works
+#: (I §8.7). Ours.
+KILL_NOT_EARNED_BYTE = ord("N")
+
+#: The ``'Q'`` sub the server sends to destroy an object (any sub but 0 and 5 does; I §8).
+#: Ours.
+DESTROY_OBJECT_SUB = 2
+
+#: Highest ``'R'`` lightning argument ("on/off"). Ours: the spec bounds only palette and rain (those
+#: client limits are in ``messages/limits.py``); I §8.20.
+AMBIENT_LIGHTNING_MAX = 1
