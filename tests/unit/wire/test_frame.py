@@ -244,3 +244,8 @@ def test_fuzz_valid_frames_spliced_into_noise_come_out() -> None:
 
 def test_h_helper_ignores_spaces() -> None:
     assert h("43 53") == b"CS"
+
+
+def test_frame_rejects_empty_payload() -> None:
+    with pytest.raises(WireError):
+        Frame(b"")

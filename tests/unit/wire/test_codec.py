@@ -89,6 +89,26 @@ def test_enc_num_decode_errors_are_wire_errors() -> None:
             enc_num_decode(buf, pos)
     with pytest.raises(WireError):
         enc_num_decode(b"\x10", -1)
+    # A byte below 0x10 that is not truncated: only the low-byte rule can reject it.
+    with pytest.raises(WireError, match="below 0x10"):
+        enc_num_decode(b"\x0f\x10\x10\x10\x10\x10\x10\x10")
+
+
+def test_str_decode_rejects_negative_position() -> None:
+    # Python's buf[-1] would read the last byte (a zero length) if the guard were missing.
+    with pytest.raises(WireError):
+        str_decode(b"\x12\x10", -1)
+
+
+def test_reader_rejects_bad_start_and_negative_raw() -> None:
+    for pos in (-1, 3):
+        with pytest.raises(WireError):
+            Reader(b"ab", pos)
+    assert Reader(b"ab", 2).at_end()
+    r = Reader(b"ab", 1)
+    with pytest.raises(WireError):
+        r.raw(-1)
+    assert r.pos == 1
 
 
 def test_str() -> None:
@@ -142,9 +162,12 @@ def test_reader_writer_mirror_a3_state() -> None:
     assert r.num() == 240
     assert r.num() == 5
     assert r.num() == 450
-    assert (r.b88(), r.b88(), r.b10(), r.b10(), r.b10()) == (0, 0, 0, 0, 4)
+    # A.2 'b': fwd:b88, fwd_target:b88, v1:num, v2:num, state:b10, power:num, weight:b10,
+    # armor0:num, armor1:num. v1, v2 and armor are num, not b10 (I §4.3: wrong codec = desync).
+    assert (r.b88(), r.b88(), r.num(), r.num(), r.b10()) == (0, 0, 0, 0, 4)
     assert r.num() == 3000
-    assert r.rest() == b"\x10\x10\x10"
+    assert not r.at_end()
+    assert (r.b10(), r.num(), r.num()) == (0, 0, 0)  # weight, armor0, armor1
     assert r.at_end()
     w = (
         Writer()
@@ -156,11 +179,13 @@ def test_reader_writer_mirror_a3_state() -> None:
         .num(450)
         .b88(0)
         .b88(0)
-        .b10(0)
-        .b10(0)
+        .num(0)
+        .num(0)
         .b10(4)
         .num(3000)
-        .raw(b"\x10\x10\x10")
+        .b10(0)
+        .num(0)
+        .num(0)
     )
     assert w.bytes() == payload
 

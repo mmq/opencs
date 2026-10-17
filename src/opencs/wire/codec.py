@@ -179,6 +179,8 @@ class Reader:
     __slots__ = ("buf", "pos")
 
     def __init__(self, buf: bytes, pos: int = 0) -> None:
+        if not 0 <= pos <= len(buf):
+            raise WireError("start position outside the buffer")
         self.buf = bytes(buf)
         self.pos = pos
 

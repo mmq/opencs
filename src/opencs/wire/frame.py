@@ -60,6 +60,10 @@ class Frame:
     payload: bytes
     raw: bytes = b""
 
+    def __post_init__(self) -> None:
+        if not self.payload:
+            raise WireError("a frame has at least a type byte")
+
     @property
     def type(self) -> str:
         """The message type letter (I §4.1)."""
