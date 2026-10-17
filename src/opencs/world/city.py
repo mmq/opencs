@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, client, limits, server
+from opencs.messages import ClientMessage, client, server
 from opencs.world import chat, death, relay
 from opencs.world.dispatch import (
     Handler,
@@ -38,7 +38,7 @@ from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
-from opencs.world.weather import WEATHER_KEY, Weather
+from opencs.world.weather import CLIENT_CONDITION, WEATHER_KEY, Weather
 
 log = logging.getLogger("opencs.world")
 
@@ -73,7 +73,7 @@ class City:
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
         #: The city's weather condition, sent on a client's first report and on every change.
-        self.weather = Weather()
+        self.weather = Weather(config.ambient)
         #: Tower orders, the team guppies and the standing towers (I §9.4).
         rules = ModuleRules(config.max_module_level, frozenset(config.banned_modules))
         self.drops = Drops(self, rules)
@@ -162,7 +162,9 @@ class City:
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
         # A fresh client already shows its own default palette (I §8.20), which is a client fact,
         # not the city's starting condition: it is sent one only once the weather differs from it.
-        player.view.tell(WEATHER_KEY, limits.CLIENT_DEFAULT_PALETTE)
+        player.view.tell(WEATHER_KEY, CLIENT_CONDITION)
+        if not self._players:
+            self._start_game(now)
         self._players[player_id] = player
         return JoinResult(player_id, team, player.index, hello)
 
@@ -185,6 +187,11 @@ class City:
         if not self._players:
             self._reset()
         return events
+
+    def _start_game(self, now: float) -> None:
+        """The first player is in: the city's game begins, and the clocks of its programs with
+        it (II §17, II §5)."""
+        self.weather.start(now)
 
     def _reset(self) -> None:
         """Nobody is here: the next game starts fresh (S13)."""
@@ -222,13 +229,24 @@ class City:
             player.shots.record(now, fired.shooter)
 
     def tick(self, now: float) -> list[Event]:
-        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7) and the bounty pushes (I
-        §9.2.12, II §11.2)."""
+        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7), the bounty pushes (I §9.2.12,
+        II §11.2) and the weather program (I §8.20)."""
         events: list[Event] = []
+        events += self._tick_weather(now)
         for player in self.players():
             events += player.pod.tick(now)
             events += player.bounty.tick(now)
             player.grace.tick(now)
+        return events
+
+    def _tick_weather(self, now: float) -> list[Event]:
+        """Each program step that is due is sent, as a transition, to the clients past their
+        load; the others are given the condition by their first-report sync (I §7.3)."""
+        events: list[Event] = []
+        views = [p.view for p in self.players() if p.pod.has_reported]
+        for before, after in self.weather.tick(now):
+            log.info("weather program: %s -> %s", before, after)
+            events += self.weather.announce(views, before, now)
         return events
 
     def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:

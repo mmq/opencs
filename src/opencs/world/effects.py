@@ -126,8 +126,12 @@ class Effects:
 
     def _weather_change(self, player: Player, here: WirePos, now: float) -> list[Event]:
         """Weather: the next condition, ``'R'`` sub 0 to every client past its load (the others
-        are given the palette by their first-report sync, I §7.3)."""
-        palette = self._weather.cycle()
+        are given the palette by their first-report sync, I §7.3). Ignored while a program's
+        crossfade runs, so palette changes stay 50 s apart (I §8.20)."""
+        if not self._weather.can_cycle(now):
+            log.info("player %d used Weather during a crossfade; ignored", player.id)
+            return []
+        palette = self._weather.cycle(now)
         log.info("player %d changed the weather to %d", player.id, palette)
         events: list[Event] = []
         for p in self._host.players():

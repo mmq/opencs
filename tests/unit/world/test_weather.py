@@ -15,7 +15,7 @@ def ambient(messages: list[object]) -> list[server.Ambient]:
 
 def test_the_palette_cycles_through_five_conditions_and_wraps() -> None:
     w = Weather()
-    assert [w.cycle() for _ in range(6)] == [1, 2, 3, 4, 0, 1]
+    assert [w.cycle(0.0) for _ in range(6)] == [1, 2, 3, 4, 0, 1]
 
 
 def test_a_client_is_sent_nothing_while_the_weather_is_the_default() -> None:
@@ -27,7 +27,7 @@ def test_a_client_is_sent_nothing_while_the_weather_is_the_default() -> None:
 
 def test_a_client_is_sent_a_changed_palette_once_on_its_first_report() -> None:
     c, (a, b) = seat([0, 1], reported=False)
-    c.weather.cycle()
+    c.weather.cycle(0.0)
     first = deliveries(c, c.client_message(a, report(4), 1.0))
     assert ambient(to(first, a)) == [server.Ambient(0, 1)]
     assert ambient(to(first, b)) == []
@@ -38,8 +38,8 @@ def test_a_client_is_sent_a_changed_palette_once_on_its_first_report() -> None:
 def test_a_joiner_after_a_change_is_sent_the_current_palette() -> None:
     c, (a, b) = seat([0, 1], reported=False)
     c.client_message(a, report(4), 1.0)
-    c.weather.cycle()
-    c.weather.cycle()
+    c.weather.cycle(0.0)
+    c.weather.cycle(0.0)
     out = deliveries(c, c.client_message(b, report(4), 2.0))
     assert ambient(to(out, b)) == [server.Ambient(0, 2)]
 
