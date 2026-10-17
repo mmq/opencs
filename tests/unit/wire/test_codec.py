@@ -7,8 +7,10 @@ import random
 import pytest
 
 from opencs.wire.codec import (
+    BIAS88_FORBIDDEN,
     BIAS88_MAX,
     BIAS88_MIN,
+    BIAS88_WIRE_MIN,
     ENC_NUM_MAX,
     Reader,
     Writer,
@@ -44,9 +46,23 @@ def test_bias88_bounds_keep_clear_of_terminators() -> None:
     assert bias88_encode(BIAS88_MAX) == 0xFF
     assert bias88_decode(0x88) == 0
     assert bias88_decode(0x00) == -0x88  # decoding accepts any byte
-    for bad in (BIAS88_MIN - 1, BIAS88_MAX + 1):
+    for bad in (BIAS88_WIRE_MIN - 1, BIAS88_MAX + 1):
         with pytest.raises(WireError):
             bias88_encode(bad)
+
+
+def test_bias88_full_range_is_minus_136_to_119_less_three() -> None:
+    # Values below -120 encode below 0x10; all are valid but the three terminators (I §4.3).
+    assert BIAS88_WIRE_MIN == -136
+    assert bias88_encode(-136) == 0x00
+    assert bias88_encode(-121) == 0x0F
+    assert sorted(BIAS88_FORBIDDEN) == [-126, -123, -122]
+    for bad in BIAS88_FORBIDDEN:
+        with pytest.raises(WireError):
+            bias88_encode(bad)
+    for v in range(-136, 120):
+        if v not in BIAS88_FORBIDDEN:
+            assert bias88_decode(bias88_encode(v)) == v
 
 
 @pytest.mark.parametrize(

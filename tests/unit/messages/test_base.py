@@ -140,8 +140,20 @@ def test_bytes_below_0x10_are_not_scalars() -> None:
         decode_server(b"A" + bytes([TAG, 0x0F]))
     with pytest.raises(DecodeError):
         decode_client(b"S\x05")
-    with pytest.raises(DecodeError):  # a bias88 byte below 0x10 in a client 'b'
-        decode_client(b"b\x10\x10\x10\x10\x10" + b"\x0f\x88\x10\x10\x14\x10\x10\x10\x10")
+
+
+def test_bias88_bytes_below_0x10_decode_except_terminators() -> None:
+    # bias88 runs down to -136, byte 0x00 (I §4.3): a client 'b' reversing at -121 is a message.
+    pod = decode_client(b"b\x10\x10\x10\x10\x10" + b"\x0f\x00\x10\x10\x14\x10\x10\x10\x10")
+    assert isinstance(pod, client.PodState)
+    assert (pod.fwd, pod.fwd_target) == (-121, -136)
+    for term in (0x0A, 0x0D, 0x0E):  # -126, -123, -122: never a value (I §4.1)
+        with pytest.raises(DecodeError):
+            decode_client(
+                b"b\x10\x10\x10\x10\x10" + bytes([term]) + b"\x88\x10\x10\x14\x10\x10\x10\x10"
+            )
+        with pytest.raises(DecodeError):
+            decode_client(b"DB" + b"\x11" * 9 + bytes([term]))
 
 
 def test_decoding_random_bytes_raises_only_decode_error() -> None:

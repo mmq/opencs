@@ -13,6 +13,7 @@ from opencs import policy
 from opencs.messages.base import DecodeError
 from opencs.wire.codec import (
     BIAS10_MAX,
+    BIAS88_FORBIDDEN,
     BIAS88_MAX,
     BIAS88_MIN,
     GRID_X_MAX,
@@ -46,10 +47,11 @@ def read_b10(r: Reader) -> int:
 
 
 def read_b88(r: Reader) -> int:
-    """A bias88 scalar; a byte below 0x10 is not one."""
+    """A bias88 scalar. Bytes below 0x10 are valid (down to -136, I §4.3), except the three frame
+    terminators."""
     v = r.b88()
-    if v < BIAS88_MIN:
-        raise DecodeError("bias88 byte below 0x10")
+    if v in BIAS88_FORBIDDEN:
+        raise DecodeError("bias88 byte is a frame terminator")
     return v
 
 
@@ -65,7 +67,8 @@ def check_pod_id(name: str, value: int) -> None:
 
 
 def check_b88(name: str, value: int) -> None:
-    """A bias88 value whose byte stays within 0x10..0xff (I §4.1, I §4.3)."""
+    """A bias88 value whose byte stays within 0x10..0xff (I §4.1, I §4.3). Narrower than what
+    ``read_b88`` accepts: the server keeps its own bytes clear of the terminators."""
     check_range(name, value, BIAS88_MIN, BIAS88_MAX)
 
 

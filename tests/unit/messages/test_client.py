@@ -160,6 +160,8 @@ def test_edge_values_round_trip() -> None:
         client.Chat(239, b"x" * 239),
         client.Bays((0,) * 9, -120),
         client.Bays((5,) * 9, 119),
+        client.Bays((0,) * 9, -136),
+        client.PodState(far, 0, -136, -121, 0, 0, 0, 0, 0, 0, 0),
         client.LegArrived(0),
         client.AirSupport(239, WireXZ(14, 15, -5, 5)),
     ]
