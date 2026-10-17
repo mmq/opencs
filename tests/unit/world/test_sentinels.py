@@ -198,6 +198,18 @@ def test_a_destroyed_resident_is_replaced_after_the_respawn_time_with_a_new_id()
     assert len([s for s in c.sentinels.alive.values() if s.resident]) == 2
 
 
+def test_a_replacement_stands_in_the_only_block_no_resident_holds() -> None:
+    c, (a, b) = city(sentinels=policy.MAX_SENTINELS)  # every eligible block taken
+    report_all(c, [a, b])
+    gone = c.sentinels.alive[RESIDENT_LOW]
+    block = (gone.pos.world_x // 600, gone.pos.world_z // 600)
+    for _ in range(6):
+        hit(c, a, RESIDENT_LOW, now=100.0)
+    (new,) = spawns(deliveries(c, c.tick(400.0)), a)
+    placed = c.sentinels.alive[new.id]
+    assert (placed.pos.world_x // 600, placed.pos.world_z // 600) == block
+
+
 def test_a_replacement_is_not_made_twice() -> None:
     c, (a, b) = city(sentinels=1)
     report_all(c, [a, b])

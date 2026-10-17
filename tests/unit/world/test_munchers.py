@@ -12,6 +12,7 @@ from fixtures.munchers import (
     call,
     destroys,
     hit,
+    join_late,
     ks,
     latches,
     tick,
@@ -22,6 +23,7 @@ from fixtures.munchers import (
 from fixtures.pods import report
 from opencs import policy
 from opencs.messages import WirePos, client, server
+from opencs.world.ids import IdRange
 from opencs.world.npcs.munchers import nearest_edge
 
 # --- the call -----------------------------------------------------------------------------------
@@ -251,6 +253,37 @@ def test_a_destroyed_muncher_eats_nothing() -> None:
     for _ in range(6):
         hit(c, b, FIRST, now=17.0)
     assert tick(c, 31.0) == [] and t in c.orders.towers
+
+
+def test_a_removed_muncher_is_not_announced_to_a_client_still_loading() -> None:
+    c, (a, b) = world(count=2)
+    tower(c, 1500, 1800)
+    call(c, a)
+    late = c.join("LATE", 3, 5.0)  # holds nothing: it has not reported
+    assert hasattr(late, "player_id")
+    out = []
+    for _ in range(6):
+        out += hit(c, b, FIRST)
+    assert destroys(out, b) == [FIRST]
+    assert to(out, late.player_id) == []  # type: ignore[union-attr]
+
+
+def test_a_removed_munchers_id_is_reused_once_every_client_started_after_the_removal() -> None:
+    c, (a, b) = world(count=2)
+    c._ids._allocators[IdRange.MUNCHER]._next = policy.MUNCHER_IDS[1]  # one fresh id left
+    call(c, a)
+    (last,) = c.munchers.alive
+    assert last == policy.MUNCHER_IDS[1]
+    for _ in range(6):
+        hit(c, b, last, now=20.0)
+    assert not c.munchers.alive
+    call(c, a, now=21.0)
+    assert not c.munchers.alive  # the range is spent and a and b may still hold the id
+    late, _ = join_late(c, 25.0)  # joins while a and b are still there, so the city is not reset
+    c.leave(a, 30.0)
+    c.leave(b, 30.0)
+    call(c, late, now=51.0)
+    assert list(c.munchers.alive) == [last]  # released at 20, everyone now started after it
 
 
 def test_a_weapon_class_past_the_table_does_not_hurt_it() -> None:
