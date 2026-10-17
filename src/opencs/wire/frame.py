@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from opencs import policy
 from opencs.wire.errors import WireError
 
 #: Frame magic (I §4.1).
@@ -31,6 +30,13 @@ TERMINATORS = frozenset({TERM_LF, TERM_CR, TERM_SO})
 
 #: Smallest legal LEN: a one-byte payload.
 _MIN_LEN = LEN_BIAS + HEADER_SIZE + 1
+
+#: CK is ``(x & 0x7f) + 0x10`` by construction, so only these values can be a checksum (I §4.1).
+_CK_MIN = 0x10
+_CK_MAX = 0x8F
+
+#: The most a reader holds back: a frame one byte short of its LEN, ``0xff - 0x10 - 1`` (I §4.1).
+MAX_PENDING = 0xFF - LEN_BIAS - 1
 
 
 def checksum(length_byte: int, payload: bytes) -> int:
@@ -76,7 +82,16 @@ class Frame:
 
 
 class FrameReader:
-    """Incremental frame parser. ``feed`` takes any chunking and returns the frames completed."""
+    """Incremental frame parser. ``feed`` takes any chunking and returns the frames completed.
+
+    Frames are delimited by LEN (I §4.1), so the buffer never holds more than ``MAX_PENDING``
+    bytes. The cost of that: a stray ``CS`` followed by a header that passes the CK, ~CK and LEN
+    checks makes the reader wait for the span LEN claims before the payload checksum rejects it,
+    and real frames inside the span are held back until then (at most 238 bytes). A CK outside
+    ``0x10..0x8f`` is rejected at once, which halves the odds; ASCII text can never form a valid
+    header (~CK of an ASCII byte is 0x80 or more). A caller that needs bounded latency for a
+    pending partial frame must time it out itself (M3).
+    """
 
     def __init__(self) -> None:
         self._buf = bytearray()
@@ -111,7 +126,7 @@ class FrameReader:
                 break
             ck, nck, length = buf[pos + 2], buf[pos + 3], buf[pos + 4]
             total = length - LEN_BIAS
-            if nck != ck ^ 0xFF or length < _MIN_LEN:
+            if nck != ck ^ 0xFF or not _CK_MIN <= ck <= _CK_MAX or length < _MIN_LEN:
                 self._reject()
                 pos += 1
                 continue
@@ -131,12 +146,6 @@ class FrameReader:
             else:
                 self._skip_term = True
         del buf[:pos]
-        if len(buf) > policy.MAX_FRAME_BUFFER:
-            # Unreachable while LEN bounds a frame; kept so memory stays bounded regardless.
-            cut = buf.rfind(MAGIC[0])
-            cut = len(buf) if cut < 0 else cut
-            self.skipped_bytes += cut
-            del buf[:cut]
         return out
 
     def _reject(self) -> None:

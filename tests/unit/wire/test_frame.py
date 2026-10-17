@@ -8,10 +8,9 @@ import random
 import pytest
 
 from fixtures.spec_vectors import FULL_FRAMES, PAYLOADS, h
-from opencs import policy
 from opencs.wire.codec import Reader
 from opencs.wire.errors import WireError
-from opencs.wire.frame import MAX_PAYLOAD, Frame, FrameReader, build_frame
+from opencs.wire.frame import MAX_PAYLOAD, MAX_PENDING, Frame, FrameReader, build_frame
 
 
 def parse_one(data: bytes) -> Frame:
@@ -158,37 +157,27 @@ def test_trailing_terminator_in_next_chunk_not_counted_as_noise() -> None:
     assert reader.skipped_bytes == 0
 
 
-def test_corrupt_checksum_dropped_and_next_frame_kept() -> None:
+def test_bad_payload_checksum_dropped_and_next_frame_kept() -> None:
     good = FULL_FRAMES["A3_S"][1]
     bad = bytearray(FULL_FRAMES["A3_b"][1])
-    bad[2] ^= 0x01
+    bad[8] ^= 0x04  # a payload byte: CK, ~CK and LEN stay valid, so the whole span is read
     reader = FrameReader()
     frames = reader.feed(bytes(bad) + good)
     assert [f.raw for f in frames] == [good]
     assert reader.bad_frames == 1
-
-
-def test_corrupt_payload_byte_dropped() -> None:
-    bad = bytearray(FULL_FRAMES["A3_b"][1])
-    bad[8] ^= 0x04
-    reader = FrameReader()
-    assert reader.feed(bytes(bad)) == []
-    assert reader.bad_frames >= 1
+    assert reader.skipped_bytes == len(bad)
 
 
 def test_frame_starting_inside_a_bad_frame_is_recovered() -> None:
-    inner = FULL_FRAMES["A3_S"][1]
-    # A header claiming a long frame, whose span swallows a real frame.
-    liar = bytearray(build_frame(b"X" * 40))
-    liar[3] ^= 0xFF  # break ~CK
+    # Header valid, LEN long, payload checksum wrong, and a real frame inside the span: only
+    # "drop the 'C' and rescan from the next byte" (not "skip LEN") finds it.
+    inner = build_frame(b"S\x10", terminator=b"")
+    outer = bytearray(build_frame(b"Y" * 40, terminator=b""))
+    outer[10] ^= 0x01
     reader = FrameReader()
-    frames = reader.feed(bytes(liar[:10]) + inner + b"tail")
+    frames = reader.feed(bytes(outer[:12]) + inner + bytes(outer[12:]))
     assert [f.raw for f in frames] == [inner]
-    # Also with a good header/ck for the outer frame but a bad payload checksum.
-    outer = bytearray(build_frame(b"Y" * 40))
-    outer[2] ^= 0x02
-    frames = FrameReader().feed(bytes(outer[:12]) + inner + bytes(outer[12:]))
-    assert inner in [f.raw for f in frames]
+    assert reader.bad_frames == 1
 
 
 def test_invalid_len_counted() -> None:
@@ -197,24 +186,91 @@ def test_invalid_len_counted() -> None:
     assert reader.bad_frames == 1
 
 
-def test_buffer_stays_bounded() -> None:
+def test_len_for_an_empty_payload_is_rejected() -> None:
+    # LEN 0x15 = header only. CK for an empty payload is (0x15 & 0x7f) + 0x10 = 0x25.
+    reader = FrameReader()
+    assert reader.feed(b"CS\x25\xda\x15") == []
+    assert reader.bad_frames == 1
+    assert reader.skipped_bytes == 5
+
+
+def test_ck_outside_checksum_range_rejected_at_once() -> None:
+    # CK 0x90 can never be produced; the header is complementary and LEN claims 200 bytes. The
+    # real frame behind it must not wait for the span.
+    ping = build_frame(b"EN", terminator=b"")
+    reader = FrameReader()
+    frames = reader.feed(b"CS\x90\x6f\xd8" + ping)
+    assert [f.raw for f in frames] == [ping]
+    assert reader.bad_frames == 1
+
+
+def test_client_lf_terminator_consumed_not_counted() -> None:
+    raw = FULL_FRAMES["A3_S"][1]
+    reader = FrameReader()
+    assert [f.raw for f in reader.feed(raw + b"\x0a")] == [raw]
+    assert reader.skipped_bytes == 0
+    # And with the LF in the next chunk.
+    reader = FrameReader()
+    assert len(reader.feed(raw)) == 1
+    assert reader.feed(b"\x0a") == []
+    assert reader.skipped_bytes == 0
+
+
+def test_skipped_bytes_account_for_everything_outside_good_frames() -> None:
+    good = build_frame(b"S\x10", terminator=b"")
+    bad = bytearray(build_frame(b"b" * 10, terminator=b""))
+    bad[7] ^= 0x01
+    noise = b"\x05\x05xyz"
+    reader = FrameReader()
+    frames = reader.feed(noise + bytes(bad) + good + b"\x0a" + b"\x05")
+    assert len(frames) == 1
+    # Skipped: the noise, the bad frame, the trailing 0x05. The one terminator is free.
+    assert reader.skipped_bytes == len(noise) + len(bad) + 1
+    assert reader.bad_frames == 1
+
+
+def test_is_upper_bounds() -> None:
+    def upper(letter: bytes) -> bool:
+        return Frame(letter + b"\x10").is_upper
+
+    assert upper(b"A") and upper(b"Z")
+    assert not upper(b"@") and not upper(b"[") and not upper(b"a")
+
+
+def _check_accounting(reader: FrameReader, fed: int) -> None:
+    pending = len(reader._buf)
+    assert pending <= MAX_PENDING  # the LEN bound: the buffer holds at most one partial frame
+    # A fed byte is in a good frame, a terminator, skipped, or pending: never counted twice.
+    assert reader.skipped_bytes + pending <= fed
+
+
+def test_buffer_stays_bounded_by_len() -> None:
     reader = FrameReader()
     rng = random.Random(4)
+    fed = 0
     for _ in range(200):
-        reader.feed(bytes(rng.randrange(256) for _ in range(500)))
-        assert len(reader._buf) <= policy.MAX_FRAME_BUFFER
-    reader.feed(b"CS" + b"\x10\xef\xff" + b"A" * 100)
-    assert len(reader._buf) <= policy.MAX_FRAME_BUFFER
+        chunk = bytes(rng.randrange(256) for _ in range(500))
+        reader.feed(chunk)
+        fed += len(chunk)
+        _check_accounting(reader, fed)
+    # A valid header claiming the largest span, then fewer bytes than it claims.
+    reader = FrameReader()
+    reader.feed(b"CS\x20\xdf\xff" + b"A" * 100)
+    assert len(reader._buf) == 105
+    reader.feed(b"A" * 200)
+    assert len(reader._buf) <= MAX_PENDING
 
 
 def test_fuzz_random_bytes_never_raise() -> None:
     rng = random.Random(5)
     reader = FrameReader()
+    fed = 0
     for _ in range(3000):
         n = rng.randrange(0, 80)
         chunk = bytes(rng.choice([0x43, 0x53, 0x05, rng.randrange(256)]) for _ in range(n))
         reader.feed(chunk)
-    assert reader.skipped_bytes + reader.bad_frames >= 0
+        fed += len(chunk)
+        _check_accounting(reader, fed)
 
 
 def test_fuzz_valid_frames_spliced_into_noise_come_out() -> None:

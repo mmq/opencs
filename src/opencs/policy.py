@@ -77,11 +77,6 @@ DEFAULT_CITY_LETTER = "B"
 
 # --- Wire (I §5.2, I §4.1; DESIGN §5) ------------------------------------------------------------
 
-#: Most bytes the frame reader holds while waiting for a frame to complete. A whole frame is at
-#: most 239 bytes (I §4.1: LEN is one byte); 1024 leaves margin and is far below anything that
-#: matters. Ours.
-MAX_FRAME_BUFFER = 1024
-
 #: Longest inbound Chamber line kept, in bytes; longer lines are discarded and counted. The
 #: client's own armed buffer is 512 bytes (I §5.2), and no lobby command comes near it. Ours
 #: (DESIGN §5 "line length in the Chamber").
