@@ -1,0 +1,12 @@
+# City C (II §5). Weather, block map and NPCs arrive in later milestones.
+letter = "C"
+name = "CYBERCITY THREE"
+map = 3                  # the C<n> map file this city is played on
+max_multiplier = 40       # the multiplier ceiling, at most 51 (I §9.2.6)
+tower_output = 0         # 0 Low, 1 Normal, 2 High
+max_module_level = 5     # highest module level in stock, 0-5
+capacity = 16             # players per city (II §6)
+team_policy = "request-or-balance"   # or "balance", "random"
+balance_teams = [0, 1, 2, 3]         # teams the balancer may fill
+banned_modules = []       # catalog indices refused as "no X modules in stock"
+enabled = true
