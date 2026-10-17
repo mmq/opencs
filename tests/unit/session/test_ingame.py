@@ -11,6 +11,7 @@ from opencs.messages import (
     ClientMessage,
     DecodeError,
     WirePos,
+    WireXZ,
     client,
     client_payload,
     decode_client,
@@ -212,6 +213,18 @@ def test_pickups_and_ejects_beyond_their_burst_are_dropped_and_counted() -> None
     eject = frame(client_payload(client.EjectRequest(6)))
     h.feed(pickup * (burst + 2))
     h.feed(eject * (burst + 2))
+    assert len(seen) == 2 * burst
+    assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
+
+
+def test_effect_requests_and_air_support_beyond_their_burst_are_dropped_and_counted() -> None:
+    # Each can broadcast ('J', 'F', 'R') or queue a guppy job, so they are budgeted (M5 convention).
+    h, seen = relayed_in_game()
+    burst, _ = policy.RELAY_LIMIT_EFFECT
+    effect = frame(client_payload(client.EffectRequest("R")))
+    strike = frame(client_payload(client.AirSupport(0, WireXZ(2, 2, 100, 100))))
+    h.feed(effect * (burst + 2))
+    h.feed(strike * (burst + 2))
     assert len(seen) == 2 * burst
     assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
 

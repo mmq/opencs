@@ -366,3 +366,14 @@ def test_a_banned_effect_is_ignored_and_logged(caplog: pytest.LogCaptureFixture)
     assert "does not stock" in caplog.text
     use(c, a, "H")  # an effect that is not banned still works
     assert hp(c, t)[1] == 2 * before[1]
+
+
+def test_immunize_again_restarts_the_thirty_minutes_and_does_not_add_to_them() -> None:
+    c, (a, _b) = world()
+    t = tower(c, 0, at(100))
+    use(c, a, "I", now=100.0)
+    use(c, a, "I", now=700.0)
+    tw = c.orders.towers[t]
+    assert tw.immune_until == 700.0 + policy.IMMUNIZE_SECONDS
+    assert tw.immune(700.0 + policy.IMMUNIZE_SECONDS - 0.1)
+    assert not tw.immune(700.0 + policy.IMMUNIZE_SECONDS)
