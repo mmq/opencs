@@ -448,6 +448,15 @@ class City:
         events = [Event(server.OrderReply(policy.ORDER_ACCEPTED), ToPlayer(player.id))]
         return events + self._perform(self._logistics.order(job), now)
 
+    def refuse_order(self, player_id: int) -> list[Event]:
+        """A tower order the session would not pass on (over the order budget): answered ``'O'`` 2
+        so the client refunds the point it spent on sending it (I §8.17, I §8.7); nothing is
+        queued."""
+        player = self._players.get(player_id)
+        if player is None or not player.pod.has_reported:
+            return []
+        return [Event(server.OrderReply(policy.ORDER_QUEUE_FULL), ToPlayer(player.id))]
+
     def _leg_arrived(self, player: Player, arrival: client.LegArrived, now: float) -> list[Event]:
         """A client's copy of a guppy completed a leg (I §9.4.1). Only guppies this client holds
         are counted: a Muncher's report (M9) or a made-up id is ignored."""
