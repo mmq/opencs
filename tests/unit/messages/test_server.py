@@ -20,6 +20,7 @@ from opencs.messages import (
 )
 from opencs.messages.base import _SERVER, ServerMessage
 from opencs.messages.catalog import CATALOG
+from opencs.wire.codec import ENC_NUM_MAX
 from opencs.wire.frame import MAX_PAYLOAD, build_frame
 
 TAG = 0x2A
@@ -163,6 +164,8 @@ def test_edge_values_round_trip() -> None:
         server.SetBounty(0, 10**9),
         server.Destroy(0),
         server.Destroy(32767),
+        server.Destroy(ENC_NUM_MAX),
+        server.Destroy(-ENC_NUM_MAX),
         server.Chat(0, 0, b""),
         server.Chat(239, 239, b" ~" * 115),
         server.PodState(0, far, -3599, -120, 119, -1, 1, 0, 239),
@@ -565,3 +568,14 @@ def test_messages_are_frozen() -> None:
         msg.id = 4  # type: ignore[misc]
     with pytest.raises((AttributeError, TypeError)):
         msg.extra = 1  # type: ignore[attr-defined]
+
+
+def test_enc_num_limit_holds_in_a_whole_frame() -> None:
+    bad(lambda: server.Destroy(ENC_NUM_MAX + 1))
+    bad(lambda: server.Destroy(-ENC_NUM_MAX - 1))
+    assert len(server_payload(server.Destroy(ENC_NUM_MAX), TAG)) <= MAX_PAYLOAD
+
+
+def test_damage_decodes_after_its_ignored_num_tag_field() -> None:
+    # I App. A.2 leaves the tag as ``tt``; 0x2A stands in. Attacker 0, damage 0.
+    assert decode_server(b"I" + bytes([0x2A]) + b"\x10\x10") == (server.Damage(0, 0), 0x2A)

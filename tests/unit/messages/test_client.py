@@ -7,6 +7,7 @@ import pytest
 from fixtures.wire_bytes import b10, b88, grid, num, string
 from opencs.messages import DecodeError, WirePos, WireXZ, client, client_payload, decode_client
 from opencs.messages.base import _CLIENT, ClientMessage
+from opencs.wire.codec import ENC_NUM_MAX
 
 POS = WirePos(2, 3, 100, 72, -300)
 POS_BYTES = grid(2, 3) + num(100) + num(72) + num(-300)
@@ -152,6 +153,7 @@ def test_edge_values_round_trip() -> None:
     far = WirePos(14, 15, -2000, -1, 99999)
     cases: list[ClientMessage] = [
         client.PodState(far, -3599, -120, 119, 10**6, -(10**6), 4, 0, 239, 0, 0),
+        client.PodState(far, 0, 0, 0, 0, 0, 0, ENC_NUM_MAX, 0, 0, 0),
         client.Status(-(10**9), 239, 10**9),
         client.Shot(32767, far, 0, 0, 239),
         client.Chat(0, b""),
