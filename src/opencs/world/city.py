@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, client, server
+from opencs.messages import ClientMessage, client, limits, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
 from opencs.world.effects import Effects
@@ -171,9 +171,9 @@ class City:
             raise
         player = Player(player_id, callsign, team, index, ClientView(player_id, now))
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
-        # A fresh client already shows the default palette (I §8.20), so it is sent one only
-        # once the weather differs from it.
-        player.view.tell(WEATHER_KEY, policy.DEFAULT_PALETTE)
+        # A fresh client already shows its own default palette (I §8.20), which is a client fact,
+        # not the city's starting condition: it is sent one only once the weather differs from it.
+        player.view.tell(WEATHER_KEY, limits.CLIENT_DEFAULT_PALETTE)
         self._players[player_id] = player
         return JoinResult(player_id, team, player.index, hello)
 

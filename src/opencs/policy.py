@@ -394,8 +394,10 @@ RELAY_LIMIT_ORDER = (4, 1.0)
 # --- Modules and effects (I §9.4, I §9.3.1, I §9.3.5, II §16.1, II §13, II §15, II §5; DESIGN §3.1)
 # -----------
 
-#: A city starts in the client's default palette 0, "bright daylight". I §8.20, I §9.3.5, II §16.1
-#: (test servers take the starting condition as 0).
+#: The palette a city starts in and resets to when it empties: our choice, 0 "bright daylight" as
+#: on test servers. It need not equal the client's own default
+#: (``limits.CLIENT_DEFAULT_PALETTE``), which decides what a joiner already shows. I §8.20, I §8.7,
+#: I §9.3.5.
 DEFAULT_PALETTE = 0
 
 #: The ``'E'``-``'P'`` ok byte: 1 = "Rgr, module drop", 0 = "no X modules in stock" and nothing is

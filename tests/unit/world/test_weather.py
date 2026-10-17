@@ -42,3 +42,11 @@ def test_a_joiner_after_a_change_is_sent_the_current_palette() -> None:
     c.weather.cycle()
     out = deliveries(c, c.client_message(b, report(4), 2.0))
     assert ambient(to(out, b)) == [server.Ambient(0, 2)]
+
+
+def test_a_city_that_starts_in_another_palette_tells_its_first_joiner() -> None:
+    # What a joiner already shows is the client's default (palette 0), not the city's choice.
+    c, (a,) = seat([0], reported=False)
+    c.weather.palette = 3
+    first = deliveries(c, c.client_message(a, report(4), 1.0))
+    assert ambient(to(first, a)) == [server.Ambient(0, 3)]
