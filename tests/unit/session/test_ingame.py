@@ -7,7 +7,14 @@ import pytest
 from fixtures.captures import load_capture
 from fixtures.sessions import Harness, make_world, play
 from opencs import policy
-from opencs.messages import ClientMessage, DecodeError, client, client_payload, decode_client
+from opencs.messages import (
+    ClientMessage,
+    DecodeError,
+    WirePos,
+    client,
+    client_payload,
+    decode_client,
+)
 from opencs.session.ingame import InGamePhase
 from opencs.wire.frame import FrameReader, build_frame
 
@@ -183,6 +190,18 @@ def test_hit_reports_beyond_their_burst_are_dropped_and_counted_not_relayed() ->
     h.feed(hit * (burst + 3))
     assert len(seen) == burst
     assert h.session.phase._bad.total == 3  # type: ignore[attr-defined]
+
+
+def test_orders_beyond_their_burst_are_dropped_and_counted_not_queued() -> None:
+    # Each accepted order queues work for the team's guppy, so a flood is bounded here too.
+    h, seen = relayed_in_game()
+    burst, _ = policy.RELAY_LIMIT_ORDER
+    tower = frame(client_payload(client.TowerOrder(WirePos(2, 2, 100, 20, 100), 0, 0)))
+    module = frame(client_payload(client.ModuleOrder(21, 1, 0)))
+    h.feed(tower * (burst + 2))
+    h.feed(module * (burst + 2))
+    assert len(seen) == 2 * burst
+    assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
 
 
 def test_the_budget_refills_with_time() -> None:

@@ -75,6 +75,8 @@ class InGamePhase(Phase):
             client.HitReport: TokenBucket(*policy.RELAY_LIMIT_HIT, now),
             client.Chat: TokenBucket(*policy.RELAY_LIMIT_CHAT, now),
             client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
+            client.TowerOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
+            client.ModuleOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
         }
         self._over_budget = 0
         self._stalled_since: float | None = None

@@ -23,6 +23,14 @@ from opencs.world.combat import damage_to_victim
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
+from opencs.world.logistics import (
+    Action,
+    Create,
+    Dispatch,
+    Logistics,
+    TowerJob,
+    in_enemy_no_drop_zone,
+)
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
@@ -64,6 +72,8 @@ class City:
         self._live: dict[int, Entity] = {}
         #: Every tower standing, by id (a subset of ``_live``): what hit reports reduce (II §10).
         self._towers: dict[int, Tower] = {}
+        #: The team guppies and their job queues (II §14).
+        self._logistics = Logistics()
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -85,6 +95,10 @@ class City:
             ],
             client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
             client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
+            client.TowerOrder: lambda p, m, now: self._tower_order(
+                p, _as(client.TowerOrder, m), now
+            ),
+            client.ModuleOrder: lambda p, m, now: self._module_order(p, _as(client.ModuleOrder, m)),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -159,6 +173,7 @@ class City:
         self._ids = IdSpace()
         self._live.clear()
         self._towers.clear()
+        self._logistics = Logistics()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -412,6 +427,45 @@ class City:
         if not tower.take_damage(hit.damage):
             return []
         return self._destroy_tower(tower, now)
+
+    def _tower_order(self, player: Player, order: client.TowerOrder, now: float) -> list[Event]:
+        """A tower order (I §9.4.3, I §9.4.3): refused with ``'O'`` 1 inside the 3x3 tiles around an
+        enemy home corner and 2 when the team's queue is full (the client refunds its point on
+        either); otherwise ``'O'`` 0 to the orderer alone (I App. B) and a job for the team's
+        guppy."""
+        if not player.pod.has_reported:
+            return []
+        if in_enemy_no_drop_zone(player.team, order.pos):
+            return [Event(server.OrderReply(policy.ORDER_BAD_DROP_POINT), ToPlayer(player.id))]
+        if self._logistics.queue_full(player.team):
+            return [Event(server.OrderReply(policy.ORDER_QUEUE_FULL), ToPlayer(player.id))]
+        job = TowerJob(player.team, order.pos, order.mega == 1, order.priority != 0, player.id)
+        events = [Event(server.OrderReply(policy.ORDER_ACCEPTED), ToPlayer(player.id))]
+        return events + self._perform(self._logistics.order(job), now)
+
+    def _module_order(self, player: Player, order: client.ModuleOrder) -> list[Event]:
+        """Module orders are M8's; until then the client is answered "no stock" so it is not left
+        waiting (I §8.7)."""
+        try:
+            reply = server.ModuleReply(order.module, policy.MODULE_ORDER_UNAVAILABLE)
+        except ValueError:  # not a catalog index: a modified client
+            return []
+        return [Event(reply, ToPlayer(player.id))]
+
+    def _perform(self, actions: Sequence[Action], now: float) -> list[Event]:
+        """Turn the guppy's decisions into events for the clients that should hear them."""
+        events: list[Event] = []
+        for action in actions:
+            match action:
+                case Create(guppy):
+                    events += self.spawn(guppy, now)
+                case Dispatch(guppy, dest):
+                    events += [
+                        Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id))
+                        for p in self.players()
+                        if p.view.holds(guppy.entity_id)
+                    ]
+        return events
 
     def place_tower(self, team: int, pos: WirePos, mega: bool, now: float) -> list[Event]:
         """A tower lands for ``team`` at its ordered point: every playing client is sent its ``'M'``
