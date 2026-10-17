@@ -79,4 +79,4 @@ The "never captured" list above was checked against the whole corpus (363 logs),
 
 | file | what it is for |
 |---|---|
-| `2026-10-15-140934_002-persist-p1`, `2026-10-15-140934_004-persist-p1` | the run the third persistence check was written for: 986 saved with a newly bought bay while the client had 286 |
+| `2026-10-15-140934_002-persist-p1` | the run the third persistence check was written for: 986 saved with a newly bought bay while the client had 286 |
