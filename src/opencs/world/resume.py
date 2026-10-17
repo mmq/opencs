@@ -114,6 +114,11 @@ def drop_player(city: City, player: Player, now: float, *, fight_at: float, hold
         died = death.player_died(city, player, now, as_of=fight_at)
         events = _name_holders(city, died, player.id)
     record = None
+    multiplier = player.score.live_multiplier
+    if player.score.floor_pending_since is not None:
+        # Dead and not yet raised to the city floor: the player was owed it, and a resume skips it
+        # (II §12), so the record carries the floor instead of the client's reset to 1.
+        multiplier = max(multiplier, city.multiplier_floor)
     if player.identity is not None:
         record = ResumeRecord(
             identity=player.identity,
@@ -121,7 +126,7 @@ def drop_player(city: City, player: Player, now: float, *, fight_at: float, hold
             city=city.config.letter,
             team=player.team,
             score=player.progress.record.score,
-            multiplier=player.score.live_multiplier,
+            multiplier=multiplier,
             bay_points=player.progress.record.bay_points,
             modules=modules_highest_first(player.loadout.for_resume),
             dropped_at=now,

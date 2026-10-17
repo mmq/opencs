@@ -217,6 +217,23 @@ def test_an_attack_after_the_respawn_is_still_a_fight() -> None:
     assert record is not None and not record.eligible
 
 
+def test_a_drop_while_dead_resumes_at_the_floor_the_player_was_owed() -> None:
+    c, (a, _) = game([0, 1])
+    c.client_message(a, client.Status(500, 5, 0), 3.0)
+    c.client_message(a, client.Died(), 21.0)  # the client's reset: multiplier 1, floor pending
+    _, record = drop(c, a, 25.0)
+    assert record is not None and record.eligible
+    assert record.multiplier == c.multiplier_floor == 2
+
+
+def test_a_drop_while_dead_keeps_a_higher_multiplier_than_the_floor() -> None:
+    c, (a, _) = game([0, 1])
+    c.client_message(a, client.Died(), 21.0)
+    player(c, a).score.multiplier = 5  # e.g. a report after the floor settled but before respawn
+    _, record = drop(c, a, 25.0)
+    assert record is not None and record.multiplier == 5
+
+
 def test_a_pod_that_never_reported_is_eligible() -> None:
     c = City(city("A"))
     r = c.join("P0", 0, 0.0, identity="acct:P0")
