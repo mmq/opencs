@@ -8,6 +8,7 @@ judges every implementation by the same rules.
 
     uv run python tools/judge.py --server                   # start OpenCS, grade all 11 core checks
     uv run python tools/judge.py --server --checks 1,2      # only login and city selection
+    uv run python tools/judge.py --server --stage 2 --checks 1-14,17-19   # ranges are allowed
     uv run python tools/judge.py --port 2399 --stage 2      # an already running server, 19 checks
 
 ``--stage 2`` adds eight meta-game checks (a tower and a module order, status, bounty, territory).
@@ -126,12 +127,22 @@ CHECKS: list[Check] = [
 
 
 def parse_checks(text: str) -> list[int]:
-    """``"1,2,5"`` -> ``[1, 2, 5]``, each within 1..19."""
-    numbers = sorted({int(part) for part in text.split(",") if part.strip()})
+    """``"1,2,5"`` or ``"1-14,17-19"`` -> the sorted check numbers, each within 1..19."""
+    numbers: set[int] = set()
+    try:
+        for part in (p.strip() for p in text.split(",") if p.strip()):
+            low, dash, high = part.partition("-")
+            first = int(low)
+            last = int(high) if dash else first
+            if last < first:
+                raise ValueError(part)
+            numbers.update(range(first, last + 1))
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"cannot read checks from {text!r}") from None
     bad = [n for n in numbers if not 1 <= n <= ALL_CHECKS]
     if bad or not numbers:
         raise argparse.ArgumentTypeError(f"checks are numbered 1..{ALL_CHECKS}, got {text!r}")
-    return numbers
+    return sorted(numbers)
 
 
 def run_client(
@@ -262,7 +273,9 @@ def main() -> int:
         help="2 adds the meta-game: a tower order and a module order by BRAVO",
     )
     ap.add_argument(
-        "--checks", type=parse_checks, help="grade only these checks, e.g. 1,2 (default: all)"
+        "--checks",
+        type=parse_checks,
+        help="grade only these checks, e.g. 1,2 or 1-14,17-19 (default: all)",
     )
     a = ap.parse_args()
     if a.server == (a.port is not None):
