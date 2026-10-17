@@ -254,6 +254,7 @@ class InGamePhase(Phase):
         for _ in range(found):
             if self._quits < 2:
                 self._quits += 1
+                self.host.log.info("QUIT line %d of 2", self._quits)
                 self._last_quit_at = now
                 if self._quits == 1:
                     self._first_quit_at = now

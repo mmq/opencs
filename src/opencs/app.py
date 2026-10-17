@@ -81,19 +81,23 @@ async def serve(
     store: AccountStore | None = None,
     clock: Clock | None = None,
     rng: random.Random | None = None,
+    services: Services | None = None,
+    tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> None:
     """Listen on the configured address until ``stop`` is set, then close every connection.
 
     ``ready`` receives the first bound socket's port once listening (port 0 binds an ephemeral
     one). A host naming several addresses binds several sockets; each is logged. ``store``,
-    ``clock`` and ``rng`` are for tests.
+    ``clock`` and ``rng`` are for tests, as are ``services`` (built by the caller, so it can look
+    inside; ``store`` and ``rng`` are then unused) and ``tick_sleep``, the pacing of the city and
+    session tickers (a test pulses it by hand instead of waiting).
     """
-    clock = clock or MonotonicClock()
-    services = build_services(config, store=store, clock=clock, rng=rng)
-    listener = Listener(build_session_factory(services), clock)
+    clock = clock or (services.clock if services else MonotonicClock())
+    services = services or build_services(config, store=store, clock=clock, rng=rng)
+    listener = Listener(build_session_factory(services), clock, sleep=tick_sleep)
     server = await listener.start(config.server.host, config.server.port)
     tickers = [
-        asyncio.create_task(run_city(city, services.router, clock))
+        asyncio.create_task(run_city(city, services.router, clock, tick_sleep))
         for city in services.cities.values()
     ]
     bound = [sock.getsockname()[:2] for sock in server.sockets]

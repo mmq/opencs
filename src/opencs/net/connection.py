@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from opencs import policy
@@ -90,6 +90,7 @@ class Connection:
         *,
         outbox_limit: int = policy.OUTBOX_LIMIT,
         flush_timeout: float = policy.CLOSE_FLUSH_TIMEOUT,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.context = context
         self._reader = reader
@@ -98,6 +99,7 @@ class Connection:
         self._clock = clock
         self._limit = outbox_limit
         self._flush_timeout = flush_timeout
+        self._sleep = sleep  # the session tick's pacing; tests pulse it by hand
         self._log = ConnectionLog(logging.getLogger("opencs.net"), context)
         self._outbox: deque[Outbound] = deque()
         self._wake = asyncio.Event()
@@ -225,7 +227,7 @@ class Connection:
 
     async def _tick_pump(self) -> None:
         while True:
-            await asyncio.sleep(1 / policy.SESSION_TICK_HZ)
+            await self._sleep(1 / policy.SESSION_TICK_HZ)
             if self._session is not None and not (self._closing or self._aborted):
                 self._guard(self._session.tick, self._clock.now())
 
