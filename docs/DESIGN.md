@@ -77,6 +77,7 @@ src/opencs/
     chamber.py           lobby text session (I §5.2-§5.5, II §4)
     ingame.py            binary session: decode → city calls; quit handshake (I §5.5)
     persistence.py       loads a record before a join, writes what a city reports changed (II §11.3)
+    held.py              the games held for dropped players: windows, reserved slots (II §13)
   lobby/
     lobby.py             Lobby: members, locations, city choice, teams (S9)
     commands.py          parsing /PLAY, /CITY, … (pure)
@@ -94,6 +95,8 @@ src/opencs/
     grace.py             the spawn-grace mirror of the client's rule (I §9.1.5)
     scoring.py           bounty, multiplier floor, the client's score mirror (I §9.2, II §11.1)
     progress.py          a player's persistent record and the rules for saving it (II §11.3)
+    attacks.py           when a pod was last under attack: the /RESUME fight test (II §13 item 3)
+    resume.py            a line drop: death in a fight, the ResumeRecord, the slots held (II §13)
     territory.py         block classes (I §8.22, S4)
     weather.py           a city's weather condition, program and transitions (I §8.20)
     logistics.py         guppies and orders (I §9.4, I §9.4.3)

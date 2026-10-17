@@ -100,7 +100,8 @@ def test_a_silent_line_is_a_line_drop_that_can_be_resumed() -> None:
                 hello = await play_and_report(c)
                 await c.send(frame(client.Status(260, 3, 710)))
                 await c.send(frame(client.Ping()))  # answered only after the frames before it
-                assert isinstance(await c.expect_frame("E"), server.PingReply)
+                while not isinstance(await c.expect_frame("E"), server.PingReply):
+                    pass  # other 'E' messages (the bounty) may come first
                 clock.advance(policy.SILENCE_SECONDS)
                 gate.pulse()  # the session ticker notices
                 await dropped.reached(1)
