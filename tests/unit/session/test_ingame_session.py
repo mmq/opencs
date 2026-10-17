@@ -152,7 +152,7 @@ def test_a_death_and_respawn_through_the_session() -> None:
     h.feed(frame(report(0)))
     sent(h)
     h.feed(frame(client.Died()))
-    assert sent(h) == [server.Destroy(0)]  # 'J' reaches the victim too
+    assert sent(h) == [server.Destroy(0), server.SetBounty(0, 0)]  # 'J' reaches the victim too
     h.feed(frame(report(4)))  # the fly-over
     tick_city(world, h)
     assert sent(h) == []

@@ -95,7 +95,10 @@ def test_the_drop_handshake_through_the_city() -> None:
     assert c.tick(1.2) == [release]
     assert handshake(c, pid, report(1), 1.5) == []
     assert c.tick(1.6) == []
-    assert handshake(c, pid, client.Died(), 30.0) == [Event(server.Destroy(pid), ToAll())]
+    assert handshake(c, pid, client.Died(), 30.0) == [
+        Event(server.Destroy(pid), ToAll()),
+        Event(server.SetBounty(pid, 0), ToHolders(pid)),  # after the 'J' (I §9.2.9 step 3)
+    ]
     assert handshake(c, pid, report(4), 31.0) == []  # the fly-over: no answer, and no relay
     assert c.client_message(pid, report(4), 31.5) == []
     assert c.tick(31.2) == []

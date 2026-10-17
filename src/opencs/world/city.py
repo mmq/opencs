@@ -76,6 +76,7 @@ class Player:
             team=self.team,
             pos=placed.pos,
             orient=placed.orient,
+            bounty_div10=self.bounty.shown,
         )
         if self.pod.phase is PodPhase.DEAD:
             return (introduce,)
@@ -223,17 +224,22 @@ class City:
         return handler(player, msg, now)
 
     def tick(self, now: float) -> list[Event]:
-        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7)."""
+        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7) and the bounty pushes (I
+        §9.2.12, II §11.2)."""
         events: list[Event] = []
         for player in self.players():
             events += player.pod.tick(now)
+            events += player.bounty.tick(now)
         return events
 
     def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
         """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2),
         then the relay to the clients that hold it (I §8.24)."""
         first = not player.pod.has_reported
+        phase = player.pod.phase
         events = player.pod.on_report(report, now)
+        if phase is not PodPhase.IN_PLAY and player.pod.phase is PodPhase.IN_PLAY:
+            player.bounty.start(now)  # it left drop state: alive and accruing (I §9.2.12, II §11.2)
         if first:
             # Nobody else holds this pod yet, so its drop 'A' is for its owner alone; the others
             # are given theirs by the introduction, after their 'G'. ``ToHolders`` resolves after
@@ -416,8 +422,15 @@ class City:
         return entity_id in self._live and entity_id not in self._players
 
     def _died(self, player: Player, now: float) -> list[Event]:
-        """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""
-        return player.pod.on_death(now)
+        """The client's bare ``'J'``: its pod died. ``'J'`` goes to every client first, and only
+        then is the bounty zeroed and pushed, because nothing on the client clears the field and
+        the payees' clients credit themselves from their copy when the ``'J'`` lands (I §9.2.8, II
+        §11.2, I §9.2.9 step 2, I §9.2.9 step 3). A second ``'J'`` before the respawn changes
+        nothing."""
+        events = player.pod.on_death(now)
+        if events:
+            events += player.bounty.zero()
+        return events
 
 
 def _as[M: ClientMessage](kind: type[M], msg: ClientMessage) -> M:
