@@ -101,9 +101,13 @@ class Progress:
             if not shows_restore and now - guard.since < policy.RESTORE_SETTLE:
                 return
             self._guard = None
-        if score < self._record.score or bay_points < 0:
+        if self._below_floor(score) or bay_points < 0:
             return
         self._set(replace(self._record, score=score, bay_points=bay_points))
+
+    def _below_floor(self, score: int) -> bool:
+        """True if ``score`` is under the last SCORE saved this game (the SCORE floor)."""
+        return score < self._record.score
 
     def on_bays(self, levels: tuple[int, ...], marker: int) -> None:
         """The client's ``'D'``-``'B'``: saved as reported, except that a points-driven upgrade
