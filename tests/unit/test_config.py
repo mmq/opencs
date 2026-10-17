@@ -178,3 +178,15 @@ def test_values_on_a_bound_are_accepted(
 ) -> None:
     city = load_config(write_config(tmp_path, {"A": with_line(line)})).cities[0]
     assert getattr(city, attr) == expected
+
+
+def test_code_defaults_match_the_shipped_file(tmp_path: Path) -> None:
+    """Leaving keys out of server.toml must not move the state directory."""
+    shipped = load_config(SHIPPED).server
+    bare = load_config(write_config(tmp_path, {"A": CITY})).server
+    assert bare.data_dir.relative_to(tmp_path) == shipped.data_dir.relative_to(SHIPPED.parent)
+    assert (bare.host, bare.port, bare.log_level) == (
+        shipped.host,
+        shipped.port,
+        shipped.log_level,
+    )

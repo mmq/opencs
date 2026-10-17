@@ -135,11 +135,11 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
     table = _Table(path, data)
     base = path.parent
     config = ServerConfig(
-        host=table.string("host", "0.0.0.0"),
+        host=table.string("host", policy.DEFAULT_HOST),
         port=table.integer("port", policy.DEFAULT_PORT, low=0, high=65535),
-        data_dir=base / table.string("data_dir", "data"),
-        cities_dir=base / table.string("cities_dir", "cities"),
-        log_level=table.string("log_level", "INFO").upper(),
+        data_dir=base / table.string("data_dir", policy.DEFAULT_DATA_DIR),
+        cities_dir=base / table.string("cities_dir", policy.DEFAULT_CITIES_DIR),
+        log_level=table.string("log_level", policy.DEFAULT_LOG_LEVEL).upper(),
         default_city=table.string("default_city", policy.DEFAULT_CITY_LETTER),
     )
     table.done()

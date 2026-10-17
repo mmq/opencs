@@ -10,6 +10,19 @@ files (``opencs.config``); the rest are fixed.
 #: TCP port the listener binds by default (I §3: transport is TCP). Ours.
 DEFAULT_PORT = 2399
 
+#: Address the listener binds by default: every interface, so a LAN or bridged client can reach it.
+#: Ours; set ``host`` in server.toml to narrow it.
+DEFAULT_HOST = "0.0.0.0"
+
+#: State directory, relative to the config file (the repo's ``data/`` beside ``config/``). Ours.
+DEFAULT_DATA_DIR = "../data"
+
+#: Directory of per-city files, relative to the config file. Ours.
+DEFAULT_CITIES_DIR = "cities"
+
+#: Log level when none is configured. Ours.
+DEFAULT_LOG_LEVEL = "INFO"
+
 #: City ticks per second. I §7.1, II §7: 5 per second.
 TICK_HZ = 5
 
