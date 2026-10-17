@@ -327,11 +327,10 @@ def test_a_hit_on_a_mine_is_ignored() -> None:
 # --- not this milestone's ---
 
 
-def test_call_muncher_call_sentinel_and_the_drone_are_logged_and_ignored() -> None:
+def test_call_muncher_and_the_drone_are_logged_and_ignored() -> None:
     c, (a, _b) = world()
     t = tower(c, 1, at(10))
-    for letter in "CS":
-        assert use(c, a, letter) == []
+    assert use(c, a, "C") == []
     assert c.client_message(a, client.Drone(None), 10.0) == []
     assert t in c.orders.towers and not c.effects.mines
 

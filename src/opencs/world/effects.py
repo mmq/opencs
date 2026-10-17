@@ -3,8 +3,8 @@
 Each one-shot effect module sends one ``'E'`` sub and nothing else happens: the client changes
 nothing locally. The effect applies at the sender's last reported position; "within one block" is
 ``ONE_BLOCK_FEET`` straight-line across the ground, measured to each tower's or mine's ordered point
-(I §9.3.5, II §16.1). Call Muncher and Call Sentinel are M9's.
-Air Support is a guppy job and lives with the other orders.
+(I §9.3.5, II §16.1). Call Sentinel and Call Muncher ask the NPC
+populations in ``npcs``. Air Support is a guppy job and lives with the other orders.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from opencs.world.entities import inform
 from opencs.world.events import Event, ToPlayer
 from opencs.world.host import WorldHost
 from opencs.world.modules import ModuleRules
+from opencs.world.npcs.sentinels import Sentinels
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
@@ -42,12 +43,18 @@ class Effects:
     """One city's effect modules."""
 
     def __init__(
-        self, host: WorldHost, orders: Orders, weather: Weather, rules: ModuleRules
+        self,
+        host: WorldHost,
+        orders: Orders,
+        weather: Weather,
+        rules: ModuleRules,
+        sentinels: Sentinels,
     ) -> None:
         self._host = host
         self._rules = rules
         self._orders = orders
         self._weather = weather
+        self._sentinels = sentinels
         self._effects: dict[str, _Effect] = {
             "R": self._repair,
             "H": self._harden,
@@ -56,6 +63,7 @@ class Effects:
             "W": self._weather_change,
             "M": self._lay_mine,
             "D": self._sweep_mines,
+            "S": self._call_sentinel,
         }
         #: Every mine laid, by id, oldest first. Hits on a mine are ignored: a mine has no
         #: durability (ours).
@@ -138,6 +146,13 @@ class Effects:
             if p.pod.has_reported:
                 events += inform(self._weather, p.view, now)
         return events
+
+    # --- Sentinels ---------------------------------------------------------------------------
+
+    def _call_sentinel(self, player: Player, here: WirePos, now: float) -> list[Event]:
+        """Call Sentinel: one Sentinel at the sender's last position (I §9.3.5, II §16.1, II
+        §16.3)."""
+        return self._sentinels.call(here, now)
 
     # --- mines -------------------------------------------------------------------------------
 

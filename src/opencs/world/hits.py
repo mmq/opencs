@@ -11,6 +11,8 @@ through ``WorldHost``, for the roster and for which entities exist.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
+from typing import Protocol
 
 from opencs.messages import client
 from opencs.world import relay
@@ -25,13 +27,23 @@ from opencs.world.pods import PodPhase
 log = logging.getLogger("opencs.world")
 
 
+class Damageable(Protocol):
+    """An NPC population that takes hit reports (Sentinels, Munchers): ``hit`` returns None when
+    the target is not one of its own, else the events the hit caused (usually none)."""
+
+    def hit(self, target: int, damage_byte: int, now: float) -> list[Event] | None: ...
+
+
 class Hits:
     """One city's shot relay and hit rules, with the counters of what it refused."""
 
-    def __init__(self, host: WorldHost, orders: Orders, effects: Effects) -> None:
+    def __init__(
+        self, host: WorldHost, orders: Orders, effects: Effects, npcs: Sequence[Damageable]
+    ) -> None:
         self._host = host
         self._orders = orders
         self._effects = effects
+        self._npcs = npcs
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -110,15 +122,20 @@ class Hits:
         self, reporter: Player, hit: client.HitReport, credited: bool, now: float
     ) -> list[Event]:
         """A hit on something that is not a player's pod. A tower loses hit points (II §10); a mine
-        is ignored; a Sentinel or Muncher is M9's, and until then it is ignored too."""
+        is ignored; a Sentinel or Muncher loses hit points and is destroyed at 0 (II §16.2). The
+        damage is the same whoever fired and whoever is credited."""
         tower = self._orders.towers.get(hit.target)
         if tower is not None:
             return self._orders.hit_tower(reporter, tower, hit, now)
         if hit.target in self._effects.mines:
             log.debug("player %d hit mine %d; mines have no durability", reporter.id, hit.target)
             return []  # mines have no durability (ours)
+        for npcs in self._npcs:
+            events = npcs.hit(hit.target, hit.damage, now)
+            if events is not None:
+                return events
         log.debug(
-            "player %d hit entity %d (credited=%s); not ruled yet",
+            "player %d hit entity %d (credited=%s); not a thing with durability",
             reporter.id,
             hit.target,
             credited,

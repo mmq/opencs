@@ -494,3 +494,17 @@ MAX_SENTINELS = 48
 #: shipped B value; II §16). The longest a configuration may set is a day.
 DEFAULT_SENTINEL_RESPAWN = 300.0
 MAX_SPAWN_INTERVAL = 24 * 3600.0
+
+#: A Sentinel's durability, called or resident, on the client's per-shot table; destroyed with
+#: ``'J'`` at 0. The client holds none, so the number is ours: a full pod's power, as towers
+#: (II §16.3, II §10).
+SENTINEL_HP = 3000
+
+#: A resident Sentinel is placed this far into its block, along each axis, at random between the
+#: two. II §16 ("150-450 ft into the block").
+SENTINEL_OFFSET_FEET = (150, 450)
+
+#: Most called Sentinels a city holds; past it the oldest is destroyed. A called one is not replaced
+#: and lasts until shot down (II §16), so without a bound a client sending ``'E'``-``'S'``
+#: at its rate limit would grow the city forever. Ours (DESIGN §5).
+MAX_CALLED_SENTINELS = 16

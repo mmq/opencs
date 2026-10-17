@@ -12,6 +12,7 @@ from typing import Protocol
 
 from opencs.world.entities import Entity
 from opencs.world.events import Event, ToPlayers
+from opencs.world.ids import IdRange
 from opencs.world.player import Player
 
 
@@ -37,3 +38,9 @@ class WorldHost(Protocol):
         ...
 
     def release_structure_id(self, entity_id: int, now: float) -> None: ...
+
+    def allocate_id(self, which: IdRange) -> int | None:
+        """A free id in ``which``, or None if none is safely reusable (I §6.2)."""
+        ...
+
+    def release_id(self, which: IdRange, entity_id: int, now: float) -> None: ...

@@ -12,6 +12,7 @@ nobody left it is reset, so the next game starts fresh (``leave``); M10 keeps it
 from __future__ import annotations
 
 import logging
+import random
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -32,6 +33,7 @@ from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.hits import Hits
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.modules import Drops, ModuleRules
+from opencs.world.npcs.sentinels import Sentinels
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
@@ -63,8 +65,11 @@ class JoinRefused:
 class City:
     """The world of one city letter."""
 
-    def __init__(self, config: CityConfig) -> None:
+    def __init__(self, config: CityConfig, rng: random.Random | None = None) -> None:
         self.config = config
+        #: Where the city's random choices come from (Sentinel spots, free Muncher targets), so a
+        #: test can seed them.
+        self._rng = rng or random.Random()
         #: The block-class map every client is sent once, on its first report (I §7.3).
         self._territory = Territory(config.blocks)
         self._players: dict[int, Player] = {}
@@ -78,10 +83,12 @@ class City:
         rules = ModuleRules(config.max_module_level, frozenset(config.banned_modules))
         self.drops = Drops(self, rules)
         self.orders = Orders(self, self._territory, rules, self.drops)
+        #: Resident and called Sentinels (II §16.3).
+        self.sentinels = Sentinels(self, config.sentinels, config.sentinel_respawn, self._rng)
         #: The effect modules (I §9.3.5, II §16.1).
-        self.effects = Effects(self, self.orders, self.weather, rules)
+        self.effects = Effects(self, self.orders, self.weather, rules, self.sentinels)
         #: Shots and hit reports (I §9.1.2, II §9.3).
-        self.hits = Hits(self, self.orders, self.effects)
+        self.hits = Hits(self, self.orders, self.effects, [self.sentinels])
         self._handlers: dict[type[ClientMessage], Handler] = {
             **module_handlers(self.orders, self.drops, self.effects),
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
@@ -192,6 +199,7 @@ class City:
         """The first player is in: the city's game begins, and the clocks of its programs with
         it (II §17, II §5)."""
         self.weather.start(now)
+        self.sentinels.start(now)  # nobody has reported yet, so nobody is sent anything
 
     def _reset(self) -> None:
         """Nobody is here: the next game starts fresh (S13)."""
@@ -200,6 +208,7 @@ class City:
         self.orders.reset()
         self.drops.reset()
         self.weather.reset()
+        self.sentinels.reset()
         self.effects.reset()
 
     def _earliest_start(self) -> float | None:
@@ -233,6 +242,7 @@ class City:
         II §11.2) and the weather program (I §8.20)."""
         events: list[Event] = []
         events += self._tick_weather(now)
+        events += self.sentinels.tick(now)
         for player in self.players():
             events += player.pod.tick(now)
             events += player.bounty.tick(now)
@@ -305,6 +315,13 @@ class City:
 
     def release_structure_id(self, entity_id: int, now: float) -> None:
         self._ids.release(IdRange.STRUCTURE, entity_id, now)
+
+    def allocate_id(self, which: IdRange) -> int | None:
+        """A free id in any range (II §8): an NPC's."""
+        return self._ids.allocate(which, self._earliest_start())
+
+    def release_id(self, which: IdRange, entity_id: int, now: float) -> None:
+        self._ids.release(which, entity_id, now)
 
     def refuse_order(self, player_id: int, message: ClientMessage) -> list[Event]:
         """A tower or module order the session did not pass on (over the order budget): see
