@@ -481,6 +481,13 @@ CROSSFADE_SECONDS = 50.0
 FADE_MARGIN_S = 5.0
 MIN_LIGHT_GAP_S = CROSSFADE_SECONDS + FADE_MARGIN_S
 
+#: Shortest interval between two spawns of one timer (``sentinel_respawn``, ``muncher_every``), and
+#: shortest total period of a weather program. The timers catch up in a loop, so a typo such as
+#: 0.000001 would run it a million times per tick and freeze every city (DESIGN §3.3). Ours
+#: (DESIGN §5): a bound on a configuration file, not a rule. ``muncher_every`` may also be 0 (off).
+MIN_SPAWN_INTERVAL = 1.0
+MIN_AMBIENT_PERIOD = 5.0
+
 #: Most steps a weather program may have, and the longest delay of a step, in seconds (a week).
 #: Ours (DESIGN §5): bounds on a configuration file, not on any rule.
 MAX_AMBIENT_STEPS = 64

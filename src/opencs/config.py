@@ -203,7 +203,8 @@ def _read_toml(path: Path) -> dict[str, Any]:
 
 def _parse_ambient(path: Path, table: _Table) -> tuple[AmbientStep, ...]:
     """The weather program: each step's values in range, light changes at least
-    ``MIN_LIGHT_GAP_S`` apart round the loop (II §5), a period above zero."""
+    ``MIN_LIGHT_GAP_S`` apart round the loop (II §5), a period of at least
+    ``MIN_AMBIENT_PERIOD``."""
     rows = table.tables("ambient")
     if len(rows) > policy.MAX_AMBIENT_STEPS:
         raise table.fail("ambient", f"more than {policy.MAX_AMBIENT_STEPS} steps")
@@ -222,8 +223,11 @@ def _parse_ambient(path: Path, table: _Table) -> tuple[AmbientStep, ...]:
     if not steps:
         return ()
     period = sum(s.after for s in steps)
-    if period <= 0:
-        raise table.fail("ambient", "the program's total period must be above zero")
+    if period < policy.MIN_AMBIENT_PERIOD:
+        raise table.fail(
+            "ambient",
+            f"the program's total period must be at least {policy.MIN_AMBIENT_PERIOD:g} s",
+        )
     at = 0.0
     light_times: list[float] = []
     for s in steps:
@@ -302,10 +306,10 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
         sentinel_respawn=table.number(
             "sentinel_respawn",
             policy.DEFAULT_SENTINEL_RESPAWN,
-            low=1,
+            low=policy.MIN_SPAWN_INTERVAL,
             high=policy.MAX_SPAWN_INTERVAL,
         ),
-        muncher_every=table.number("muncher_every", 0, low=0, high=policy.MAX_SPAWN_INTERVAL),
+        muncher_every=_muncher_every(table),
         ambient=_parse_ambient(path, table),
     )
     table.done()
@@ -322,6 +326,17 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
                 f"{limits.SCORE_PRODUCT_LIMIT}, which overflows the client's income",
             )
     return config
+
+
+def _muncher_every(table: _Table) -> float:
+    """0 (no free Munchers) or at least ``MIN_SPAWN_INTERVAL`` seconds, so a typo cannot make the
+    city's tick send one per microsecond."""
+    every = table.number("muncher_every", 0, low=0, high=policy.MAX_SPAWN_INTERVAL)
+    if 0 < every < policy.MIN_SPAWN_INTERVAL:
+        raise table.fail(
+            "muncher_every", f"must be 0 or at least {policy.MIN_SPAWN_INTERVAL:g} seconds"
+        )
+    return every
 
 
 def load_config(path: Path | str) -> AppConfig:

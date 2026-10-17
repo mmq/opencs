@@ -305,6 +305,9 @@ def test_a_city_without_npcs_or_a_program_has_none(tmp_path: Path) -> None:
         "sentinels = -1",
         "sentinel_respawn = 0",
         "sentinel_respawn = 86401",
+        "sentinel_respawn = 0.999",
+        "muncher_every = 0.999",
+        "muncher_every = 0.000001",
         "muncher_every = -1",
         "muncher_every = true",
         'muncher_every = "600"',
@@ -313,6 +316,12 @@ def test_a_city_without_npcs_or_a_program_has_none(tmp_path: Path) -> None:
 def test_bad_population_values_name_the_key(tmp_path: Path, line: str) -> None:
     with pytest.raises(ConfigError, match=line.split(" ", maxsplit=1)[0]):
         load_config(write_config(tmp_path, {"A": with_line(line)}))
+
+
+def test_muncher_every_may_be_off_or_at_the_floor(tmp_path: Path) -> None:
+    assert load_city(tmp_path, "muncher_every = 0\n").muncher_every == 0
+    floor = policy.MIN_SPAWN_INTERVAL
+    assert load_city(tmp_path, f"muncher_every = {floor}\n").muncher_every == floor
 
 
 def test_population_values_on_a_bound_are_accepted(tmp_path: Path) -> None:
@@ -331,6 +340,8 @@ def test_population_values_on_a_bound_are_accepted(tmp_path: Path) -> None:
         (step(-1, rain=1), "after"),
         (step(604801, rain=1), "after"),
         (step(0, rain=1), "period"),
+        (step(policy.MIN_AMBIENT_PERIOD - 0.01, rain=1), "period"),
+        (step(0.000001, rain=1), "period"),
         (step(10, light=1) + step(10, light=2) + step(100, rain=1), "55"),
         (step(54, light=1), "55"),
         (step(30, light=1) + step(54, light=2), "55"),
@@ -350,8 +361,10 @@ def test_light_changes_may_be_exactly_55_seconds_apart_and_the_wrap_counts(tmp_p
 
 
 def test_a_rain_only_program_has_no_light_spacing_to_check(tmp_path: Path) -> None:
-    city = load_city(tmp_path, step(1, rain=1) + step(1, rain=0, lightning=True))
-    assert city.ambient == (AmbientStep(1, rain=1), AmbientStep(1, rain=0, lightning=True))
+    city = load_city(tmp_path, step(3, rain=1) + step(2, rain=0, lightning=True))
+    assert city.ambient == (AmbientStep(3, rain=1), AmbientStep(2, rain=0, lightning=True))
+    # Exactly the floor is accepted (the refusals just under it are in the table above).
+    assert sum(s.after for s in city.ambient) == policy.MIN_AMBIENT_PERIOD
 
 
 def test_an_unknown_key_in_a_step_is_refused(tmp_path: Path) -> None:
