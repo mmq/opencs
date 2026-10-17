@@ -72,6 +72,9 @@ MAX_CITY_CAPACITY = TEAM_COUNT * MAX_PLAYERS_PER_TEAM
 TEAM_POLICIES = ("request-or-balance", "balance", "random")
 DEFAULT_TEAM_POLICY = "request-or-balance"
 
+#: The team names, indexed by team number 0-3. II §6.
+TEAM_NAMES = ("RED", "BLUE", "GREEN", "BLACK")
+
 #: The city a bare ``/PLAY`` picks when every city is empty. II §5.
 DEFAULT_CITY_LETTER = "B"
 
