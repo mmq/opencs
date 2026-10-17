@@ -8,8 +8,8 @@ IN_PLAY -(bare J)-> DEAD -(bare A, or DROP_REQUEST_TIMEOUT)-> DROPPING
 While a pod reports state 4 (``POD_STATE_DROPPING``) we answer with ``'A' <id>`` on every report and
 every tick; ``'A'`` is a no-op once it has left drop state (I §7.5). After a death the client flies
 over and its pod reports state 4 *during the fly-over*; answering those would re-drop the pod
-mid-animation, so a dead pod answers only the client's bare ``'A'``. DEAD and
-AWAITING_DROP are one wait on the wire, so they are one state here.
+mid-animation, so a dead pod answers only the client's bare ``'A'``. The wait after a death is
+one state (``DEAD``): the client's fly-over and its pending drop request look the same on the wire.
 """
 
 from __future__ import annotations
