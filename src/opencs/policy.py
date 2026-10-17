@@ -23,6 +23,10 @@ DEFAULT_CITIES_DIR = "cities"
 #: Log level when none is configured. Ours.
 DEFAULT_LOG_LEVEL = "INFO"
 
+#: Valid TCP port numbers (0 asks the OS for a free one). I §3: transport is TCP.
+MIN_PORT = 0
+MAX_PORT = 65535
+
 #: City ticks per second. I §7.1, II §7: 5 per second.
 TICK_HZ = 5
 

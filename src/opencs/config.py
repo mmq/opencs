@@ -136,7 +136,7 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
     base = path.parent
     config = ServerConfig(
         host=table.string("host", policy.DEFAULT_HOST),
-        port=table.integer("port", policy.DEFAULT_PORT, low=0, high=65535),
+        port=table.integer("port", policy.DEFAULT_PORT, low=policy.MIN_PORT, high=policy.MAX_PORT),
         data_dir=base / table.string("data_dir", policy.DEFAULT_DATA_DIR),
         cities_dir=base / table.string("cities_dir", policy.DEFAULT_CITIES_DIR),
         log_level=table.string("log_level", policy.DEFAULT_LOG_LEVEL).upper(),

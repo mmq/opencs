@@ -12,6 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from opencs import policy
 from opencs.config import AppConfig, ConfigError, load_config
 
 log = logging.getLogger("opencs.app")
@@ -31,11 +32,14 @@ async def serve(
 ) -> None:
     """Listen on the configured address until ``stop`` is set, then close the listener.
 
-    ``ready`` receives the bound port once listening (port 0 binds an ephemeral one).
+    ``ready`` receives the first bound socket's port once listening (port 0 binds an ephemeral
+    one). A host naming several addresses binds several sockets; each is logged.
     """
     server = await asyncio.start_server(_refuse, config.server.host, config.server.port)
-    port: int = server.sockets[0].getsockname()[1]
-    log.info("listening on %s:%d", config.server.host, port)
+    bound = [sock.getsockname()[:2] for sock in server.sockets]
+    for address, bound_port in bound:
+        log.info("listening on %s:%d", address, bound_port)
+    port: int = bound[0][1]
     if ready is not None:
         ready(port)
     try:
@@ -54,10 +58,21 @@ async def _run(config: AppConfig) -> None:
     await serve(config, stop=stop)
 
 
+def _port(text: str) -> int:
+    """argparse type: a TCP port number, validated like the TOML ``port``."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an integer") from None
+    if not policy.MIN_PORT <= value <= policy.MAX_PORT:
+        raise argparse.ArgumentTypeError(f"{value} is outside {policy.MIN_PORT}..{policy.MAX_PORT}")
+    return value
+
+
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="opencs", description="OpenCS game server")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH, help="server.toml path")
-    parser.add_argument("--port", type=int, help="override the configured port (0 = ephemeral)")
+    parser.add_argument("--port", type=_port, help="override the configured port (0 = ephemeral)")
     parser.add_argument("--host", help="override the configured host")
     return parser.parse_args(argv)
 
@@ -76,5 +91,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=config.server.log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    asyncio.run(_run(config))
+    try:
+        asyncio.run(_run(config))
+    except OSError as exc:
+        server = config.server
+        print(
+            f"opencs: cannot listen on {server.host}:{server.port}: {exc.strerror or exc}",
+            file=sys.stderr,
+        )
+        return 1
     return 0

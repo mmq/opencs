@@ -1,6 +1,9 @@
 import asyncio
+import socket
 from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from opencs.app import main, serve
 from opencs.config import AppConfig, load_config
@@ -33,3 +36,21 @@ def test_serve_accepts_a_connection_and_stops_on_event() -> None:
 
 def test_main_reports_bad_config(tmp_path: Path) -> None:
     assert main(["--config", str(tmp_path / "missing.toml")]) == 2
+
+
+def test_main_rejects_an_out_of_range_port() -> None:
+    with pytest.raises(SystemExit) as info:
+        main(["--config", str(SHIPPED), "--port", "70000"])
+    assert info.value.code == 2
+
+
+def test_main_reports_a_port_in_use(capsys: pytest.CaptureFixture[str]) -> None:
+    with socket.socket() as taken:
+        taken.bind(("127.0.0.1", 0))
+        taken.listen()
+        port = taken.getsockname()[1]
+        code = main(["--config", str(SHIPPED), "--host", "127.0.0.1", "--port", str(port)])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert f"cannot listen on 127.0.0.1:{port}" in err
+    assert "Traceback" not in err
