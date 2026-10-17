@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import socket
 from dataclasses import replace
@@ -6,9 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from opencs.app import main, serve
+from fixtures.pods import report
+from opencs import policy
+from opencs.app import main, run_city, serve
+from opencs.clock import ManualClock
 from opencs.config import AppConfig, load_config
-from opencs.wire.frame import build_frame
+from opencs.messages import ServerMessage, client, client_payload, decode_server, server
+from opencs.routing import Router
+from opencs.wire.frame import Frame, FrameReader, build_frame
+from opencs.world.city import City, JoinResult
 
 SHIPPED = Path(__file__).parents[2] / "config" / "server.toml"
 TIMEOUT = 5.0
@@ -26,26 +33,59 @@ class Client:
         self.reader = reader
         self.writer = writer
         self.buffer = b""
+        self._frames = FrameReader()
+        self._parsed: list[Frame] = []
 
     async def send(self, data: bytes | str) -> None:
         self.writer.write(data.encode("latin-1") if isinstance(data, str) else data)
         await asyncio.wait_for(self.writer.drain(), TIMEOUT)
 
+    async def _receive(self) -> None:
+        """Read once; keep the bytes for ``expect`` and any frames in them for ``expect_frame``."""
+        data = await asyncio.wait_for(self.reader.read(4096), TIMEOUT)
+        assert data, f"server closed; had {self.buffer!r}"
+        self.buffer += data
+        self._parsed += self._frames.feed(data)
+
+    async def expect_frame(self, letter: str) -> ServerMessage:
+        """Read until a server frame of this type letter has arrived; return it decoded."""
+        want = letter.encode()
+        while True:
+            for i, frame in enumerate(self._parsed):
+                if frame.payload[:1] == want:
+                    del self._parsed[: i + 1]
+                    return decode_server(frame.payload)[0]
+            await self._receive()
+
+    async def expect_after_clock_advances(
+        self, needle: bytes, clock: ManualClock, step: float
+    ) -> bytes:
+        """``expect``, for something the server does once its clock has moved on. The server reads
+        our bytes at some moment we cannot see, so move the clock a step at a time between reads
+        until the needle comes; a read that waits on the socket for a moment is not a sleep."""
+        for _ in range(50):
+            if needle in self.buffer:
+                break
+            clock.advance(step)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._receive(), 0.2)
+        return await self.expect(needle)
+
     async def expect(self, needle: bytes) -> bytes:
         """Read until ``needle`` has arrived; return everything up to and including it."""
         while needle not in self.buffer:
-            data = await asyncio.wait_for(self.reader.read(4096), TIMEOUT)
-            assert data, f"server closed while waiting for {needle!r}; had {self.buffer!r}"
-            self.buffer += data
+            await self._receive()
         end = self.buffer.index(needle) + len(needle)
         got, self.buffer = self.buffer[:end], self.buffer[end:]
         return got
 
 
-async def start(config: AppConfig) -> tuple[asyncio.Event, asyncio.Task[None], int]:
+async def start(
+    config: AppConfig, *, clock: ManualClock | None = None
+) -> tuple[asyncio.Event, asyncio.Task[None], int]:
     stop = asyncio.Event()
     port_future: asyncio.Future[int] = asyncio.get_running_loop().create_future()
-    task = asyncio.create_task(serve(config, stop=stop, ready=port_future.set_result))
+    task = asyncio.create_task(serve(config, stop=stop, ready=port_future.set_result, clock=clock))
     return stop, task, await asyncio.wait_for(port_future, TIMEOUT)
 
 
@@ -91,13 +131,86 @@ def test_a_client_logs_in_enters_the_chamber_chooses_a_city_and_launches() -> No
         await c.expect(b"\x05E 2 2\r")
         await c.send("/GO 0\r")
         await c.expect(b"\x05C\r")
-        # In game now: binary frames are accepted (and, until M4, ignored).
+        # In game now: the session answers at once.
+        assert isinstance(await c.expect_frame("B"), server.Session)
         await c.send(build_frame(b"EN", terminator=b"\x0a"))
+        assert await c.expect_frame("E") == server.PingReply()
         c.writer.close()
         stop.set()
         await asyncio.wait_for(task, TIMEOUT)
 
     asyncio.run(scenario())
+
+
+def test_a_player_drops_dies_quits_and_plays_again_on_one_connection() -> None:
+    async def scenario() -> None:
+        clock = ManualClock(1000.0)
+        stop, task, port = await start(local_config(), clock=clock)
+        c = await connect(port)
+        await c.send("HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r")
+        await c.expect(b"\x05PRESS RETURN\r")
+        await c.send("\r")
+        await c.expect(b"\x05A\r")
+        for game in range(2):
+            await c.send("/PLAY B\r")
+            await c.expect(b"\x05E 2 2\r")
+            await c.send("/GO 0\r")
+            await c.expect(b"\x05C\r")
+            hello = await c.expect_frame("B")
+            assert isinstance(hello, server.Session) and hello.self_id == 0, game
+            # The first drop: the pod reports state 4, the server releases it (I §7.1).
+            await c.send(build_frame(client_payload(report(4)), terminator=b"\x0a"))
+            assert await c.expect_frame("A") == server.ReleaseDrop(0)
+            await c.send(build_frame(b"EN", terminator=b"\x0a"))
+            assert await c.expect_frame("E") == server.PingReply()
+            await c.send(build_frame(client_payload(report(0)), terminator=b"\x0a"))
+            await c.send(build_frame(client_payload(client.Died()), terminator=b"\x0a"))
+            assert await c.expect_frame("J") == server.Destroy(0)
+            await c.send(build_frame(client_payload(client.DropMe()), terminator=b"\x0a"))
+            assert await c.expect_frame("A") == server.ReleaseDrop(0)
+            # Shift-Q: 'C' answered with a tagged 'C'; QUIT twice; the buttons come back.
+            await c.send(build_frame(client_payload(client.Quit()), terminator=b"\x0a"))
+            assert await c.expect_frame("C") == server.QuitAck()
+            await c.send(b"QUIT\rQUIT\r")
+            await c.expect_after_clock_advances(b"\x05A\r", clock, policy.RETURN_SETTLE)
+        c.writer.close()
+        stop.set()
+        await asyncio.wait_for(task, TIMEOUT)
+
+    asyncio.run(scenario())
+
+
+def test_a_city_ticker_ticks_the_city_and_delivers_its_events() -> None:
+    class Sink:
+        def __init__(self) -> None:
+            self.got: list[ServerMessage] = []
+
+        def send(self, msg: ServerMessage) -> None:
+            self.got.append(msg)
+
+    class Stop(BaseException):
+        pass
+
+    city = City(load_config(SHIPPED).cities[0])
+    result = city.join("PILOT", 0, 0.0)
+    assert isinstance(result, JoinResult)
+    city.client_message(result.player_id, report(4), 0.0)
+    router, sink, clock = Router(), Sink(), ManualClock(10.0)
+    router.register(city.config.letter, result.player_id, sink)
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) > 3:
+            raise Stop
+
+    async def scenario() -> None:
+        with contextlib.suppress(Stop):
+            await run_city(city, router, clock, fake_sleep)
+
+    asyncio.run(scenario())
+    assert sleeps == [1 / policy.TICK_HZ] * 4
+    assert sink.got == [server.ReleaseDrop(result.player_id)] * 3  # one per tick while dropping
 
 
 def test_two_clients_chat_in_the_chamber_and_the_second_gets_a_new_callsign() -> None:

@@ -8,7 +8,7 @@ import logging
 import random
 import signal
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -57,11 +57,16 @@ def build_session_factory(services: Services) -> SessionFactory:
     return factory
 
 
-async def run_city(city: City, router: Router, clock: Clock) -> None:
+async def run_city(
+    city: City,
+    router: Router,
+    clock: Clock,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
     """Tick one city ``TICK_HZ`` times a second and deliver what it says (DESIGN §3.3). A bug in
-    the city's rules is logged and the next tick runs (DESIGN §5)."""
+    the city's rules is logged and the next tick runs (DESIGN §5). ``sleep`` is for tests."""
     while True:
-        await asyncio.sleep(1 / policy.TICK_HZ)
+        await sleep(1 / policy.TICK_HZ)
         try:
             router.deliver(city, city.tick(clock.now()))
         except Exception:
