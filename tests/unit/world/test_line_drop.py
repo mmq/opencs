@@ -3,65 +3,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import replace
-
 import pytest
 
-from fixtures.delivery import deliveries, to
+from fixtures.delivery import to
+from fixtures.drops import at, drop, game, player
 from fixtures.lobbies import city
-from fixtures.pods import report
-from opencs.messages import ServerMessage, WirePos, client, server
+from opencs.messages import WirePos, client, server
 from opencs.world.city import City, JoinResult
 from opencs.world.orders import Strike
-from opencs.world.player import Player
 from opencs.world.resume import ResumeRecord
 
 SPOT = WirePos.from_world(2000, 20, 3000)
-
-
-class Held:
-    """A stand-in for the session layer's held slots."""
-
-    def __init__(self) -> None:
-        self.held: list[tuple[str, int]] = []
-
-    def slots(self, letter: str) -> Sequence[tuple[str, int]]:
-        return list(self.held)
-
-
-def at(x: int, z: int = 3000) -> client.PodState:
-    return replace(report(0), pos=WirePos.from_world(x, 20, z))
-
-
-def game(
-    teams: list[int], *, identities: bool = True, reservations: Held | None = None
-) -> tuple[City, list[int]]:
-    """Players of these teams, all in play at x = 2000 + 100 * i, with account identities."""
-    c = City(city("A", max_module_level=2, max_multiplier=8), reservations=reservations)
-    ids = []
-    for i, team in enumerate(teams):
-        r = c.join(f"P{i}", team, 0.0, identity=f"acct:P{i}" if identities else None)
-        assert isinstance(r, JoinResult)
-        ids.append(r.player_id)
-    for pid in ids:
-        c.client_message(pid, report(4), 0.5)
-    for i, pid in enumerate(ids):
-        c.client_message(pid, at(2000 + 100 * i), 1.0)
-    return c, ids
-
-
-def player(c: City, pid: int) -> Player:
-    p = c.player(pid)
-    assert p is not None
-    return p
-
-
-def drop(
-    c: City, pid: int, now: float, **kw: object
-) -> tuple[list[tuple[int, ServerMessage]], ResumeRecord | None]:
-    dropped = c.line_drop(pid, now, **kw)  # type: ignore[arg-type]
-    return deliveries(c, dropped.events), dropped.record
 
 
 # --- the record -------------------------------------------------------------------------------
