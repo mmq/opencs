@@ -17,12 +17,13 @@ ALLOWED: dict[str, set[str]] = {
     "lobby": {"wire", "policy", "config", "store"},
     "session": {"wire", "messages", "lobby", "store", "policy", "config", "clock", "connlog"},
     "net": {"wire", "messages", "policy", "clock", "connlog"},
+    "world": {"wire", "messages", "policy", "config"},
 }
 
 
 #: Packages that must be sans-IO (DESIGN §3, §3.4) and the standard-library modules they may not
-#: import: no sockets, no event loop, no threads, no wall clock. Extend to ``world`` in M4.
-SANS_IO = ("session", "lobby")
+#: import: no sockets, no event loop, no threads, no wall clock.
+SANS_IO = ("session", "lobby", "world")
 FORBIDDEN_STDLIB = {"asyncio", "socket", "selectors", "threading", "time", "select", "ssl"}
 
 
@@ -56,6 +57,7 @@ def test_the_guard_covers_the_layers_the_design_forbids() -> None:
     assert not {"session", "lobby", "world"} & ALLOWED["net"]
     assert "net" not in ALLOWED["session"]
     assert not {"net", "session"} & ALLOWED["lobby"]
+    assert not {"net", "session", "lobby", "routing", "asyncio"} & ALLOWED["world"]
     assert not {"net", "session", "lobby", "world"} & ALLOWED["wire"]
     assert not {"net", "session", "lobby", "world"} & ALLOWED["messages"]
 

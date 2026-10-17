@@ -1,0 +1,164 @@
+"""One city: the state and rules of one joinable game (I §2.2, I §7, II §17).
+
+Pure rules: calls in, events out (DESIGN §3.2, ADR 2). A ``City`` never sends, awaits, reads a clock
+or touches a socket; time arrives as a ``now`` argument and everything it says is returned as
+``Event`` values for the router. It is changed only from the event loop (DESIGN §3.3).
+
+A city's game never ends (S13): players come and go, and the world lives while anyone is in it. With
+nobody left it is reset, so the next game starts fresh (``leave``); M10 keeps it alive while a
+``/RESUME`` slot is held.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+
+from opencs import policy
+from opencs.config import CityConfig
+from opencs.messages import ClientMessage, client, server
+from opencs.world.events import Event, ToHolders
+from opencs.world.ids import IdRange, IdSpace
+from opencs.world.pods import Pod
+from opencs.world.view import ClientView
+
+log = logging.getLogger("opencs.world")
+
+
+@dataclass(slots=True)
+class Player:
+    """A player in a city: identity, slot, what its client holds and its pod's life."""
+
+    id: int
+    callsign: str
+    team: int
+    index: int  # 0-3 within the team; unique per (team, index), I §6.3
+    view: ClientView
+    pod: Pod = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.pod = Pod(self.id)
+
+
+@dataclass(frozen=True, slots=True)
+class JoinResult:
+    """A player joined. ``hello`` is the ``'B'`` to send it (I §7.1)."""
+
+    player_id: int
+    team: int
+    index: int
+    hello: server.Session
+
+
+@dataclass(frozen=True, slots=True)
+class JoinRefused:
+    """A join that cannot be honored."""
+
+    reason: str
+
+
+class City:
+    """The world of one city letter."""
+
+    def __init__(self, config: CityConfig) -> None:
+        self.config = config
+        self._players: dict[int, Player] = {}
+        self._ids = IdSpace()
+        self._handlers: dict[
+            type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
+        ] = {
+            client.PodState: lambda p, m, now: p.pod.on_report(_as(client.PodState, m), now),
+            client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
+            client.Died: lambda p, m, now: self._died(p, now),
+        }
+
+    # --- who is here -------------------------------------------------------------------------
+
+    def players(self) -> Sequence[Player]:
+        """Everyone in the city, by id."""
+        return sorted(self._players.values(), key=lambda p: p.id)
+
+    def player(self, player_id: int) -> Player | None:
+        return self._players.get(player_id)
+
+    # --- joining and leaving -----------------------------------------------------------------
+
+    def join(self, callsign: str, team: int, now: float) -> JoinResult | JoinRefused:
+        """Seat a player: an id, the lowest free index in its team (I §6.3) and the ``'B'``."""
+        if len(self._players) >= self.config.capacity:
+            return JoinRefused(f"CITY {self.config.letter} IS FULL")
+        taken = {p.index for p in self._players.values() if p.team == team}
+        free = [i for i in range(policy.MAX_PLAYERS_PER_TEAM) if i not in taken]
+        if not free:
+            return JoinRefused(f"{policy.TEAM_NAMES[team]} IS FULL")
+        player_id = self._ids.allocate(IdRange.PLAYER, self._earliest_start())
+        if player_id is None:
+            return JoinRefused("NO FREE PLAYER ID")
+        player = Player(player_id, callsign, team, free[0], ClientView(player_id, now))
+        player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
+        self._players[player_id] = player
+        cfg = self.config
+        hello = server.Session(
+            self_id=player_id,
+            index=player.index,
+            team=team,
+            callsign=callsign.encode("ascii"),
+            network=policy.NETWORK_NAME.encode("ascii"),
+            city=cfg.name.encode("ascii"),
+            max_mult=cfg.max_multiplier,
+            tower_output=cfg.tower_output,
+            max_module_level=cfg.max_module_level,
+        )
+        return JoinResult(player_id, team, player.index, hello)
+
+    def leave(self, player_id: int, now: float) -> list[Event]:
+        """A player left (quit or line drop): free its id and delete its pod on the clients that
+        hold it, never ``'J'`` which would respawn it there (I §7.6)."""
+        player = self._players.pop(player_id, None)
+        if player is None:
+            return []
+        self._ids.release(IdRange.PLAYER, player_id, now)
+        # The leaver is out of the roster, so ``ToHolders`` cannot reach its own client.
+        events = [Event(server.Delete(player_id), ToHolders(player_id))]
+        if not self._players:
+            self._reset()
+        return events
+
+    def _reset(self) -> None:
+        """Nobody is here: the next game starts fresh (S13)."""
+        self._ids = IdSpace()
+
+    def _earliest_start(self) -> float | None:
+        """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
+        return min((p.view.joined_at for p in self._players.values()), default=None)
+
+    # --- the client's messages and time ------------------------------------------------------
+
+    def client_message(self, player_id: int, msg: ClientMessage, now: float) -> list[Event]:
+        """One decoded message from a player. Unknown players and messages not yet ruled are
+        ignored."""
+        player = self._players.get(player_id)
+        if player is None:
+            return []
+        handler = self._handlers.get(type(msg))
+        if handler is None:
+            log.debug("ignoring %s from player %d", type(msg).__name__, player_id)
+            return []
+        return handler(player, msg, now)
+
+    def tick(self, now: float) -> list[Event]:
+        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7)."""
+        events: list[Event] = []
+        for player in self.players():
+            events += player.pod.tick(now)
+        return events
+
+    def _died(self, player: Player, now: float) -> list[Event]:
+        """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""
+        return player.pod.on_death(now)
+
+
+def _as[M: ClientMessage](kind: type[M], msg: ClientMessage) -> M:
+    assert isinstance(msg, kind)
+    return msg
