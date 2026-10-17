@@ -29,8 +29,10 @@ def playing() -> tuple[City, int, int]:
     return c, a, b
 
 
-def order(c: City, pid: int, n: int, now: float = 5.0) -> None:
-    c.client_message(pid, client.TowerOrder(WirePos(2, 2, 100 + n, 20, 200 + n), 0, 0), now)
+def order(c: City, pid: int, n: int, now: float = 5.0) -> list[tuple[int, ServerMessage]]:
+    """A tower order to point ``n``; what it sent, to whom."""
+    msg = client.TowerOrder(WirePos(2, 2, 100 + n, 20, 200 + n), 0, 0)
+    return deliveries(c, c.client_message(pid, msg, now))
 
 
 def arrive(c: City, pid: int, now: float = 6.0) -> list[tuple[int, ServerMessage]]:
@@ -156,15 +158,30 @@ def test_a_joiner_at_home_is_counted_in_by_its_create_report_and_flies_the_next_
     j, got = join(c)
     assert [m for m in got if isinstance(m, server.MobileCreate)] == [CREATE]
     assert arrive(c, j) == []  # in step: counted in, silent
-    order(c, a, 2)
-    out = deliveries(
-        c, c.client_message(a, client.TowerOrder(WirePos(2, 2, 102, 20, 202), 0, 0), 30.0)
-    )
-    # (the guppy was idle at home, so the order dispatched at once, to every counting client)
-    assert ks(out, j) == [server.MobileCreate(GUPPY, dest(2))] or True
+    # The guppy was idle at home, so the order dispatches at once, to J as to everyone.
+    assert ks(order(c, a, 2, 30.0), j) == [server.MobileCreate(GUPPY, dest(2))]
     # J's next report is the next leg's arrival, not a duplicate of an older one.
     out = arrive(c, j)
     assert towers(out, a)
+
+
+def test_a_joiner_caught_up_to_a_drop_point_is_sent_home_once_the_guppy_is_home_again() -> None:
+    # Step 3's "you already sent a catch-up" branch: the guppy is home now (not in flight), but J's
+    # copy is still parked at the point it was caught up to.
+    c, a, _b = playing()
+    order(c, a, 1)
+    arrive(c, a)  # create reported: outbound
+    j, _ = join(c)
+    assert arrive(c, j) == [(j, server.MobileCreate(GUPPY, dest(1)))]  # caught up to the point
+    arrive(c, a)  # arrival: delivered, returning
+    arrive(c, a)  # home leg: the guppy is HOME, nothing in flight
+    out = arrive(c, j)  # J's copy reports its arrival at the point
+    assert out == [(j, server.MobileCreate(GUPPY, HOME))]  # to J alone
+    assert arrive(c, j) == []  # J's copy is home: counted in, silent
+    assert c._logistics.ignored_reports == 0
+    # And it is counted in at the right leg: the next order is flown and reported by everyone.
+    assert ks(order(c, a, 2, 40.0), j) == [server.MobileCreate(GUPPY, dest(2))]
+    assert towers(arrive(c, j), j)
 
 
 # --- step 4: while joining its reports drive nothing ---
