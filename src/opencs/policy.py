@@ -392,3 +392,8 @@ MODULE_ORDER_UNAVAILABLE = 0
 #: per second, II §14); each accepted order queues work, so an unlimited sender is bounded here
 #: as well as by the queue. Ours.
 RELAY_LIMIT_ORDER = (4, 1.0)
+
+#: Per-session limit on guppy leg reports, a token bucket ``(burst, per second)``. A client reports
+#: one per leg of each guppy it holds, and a leg takes ~20 s (I §9.4.1), so four guppies give a
+#: few a minute; a report that arrives at once for a create adds a burst. Ours.
+RELAY_LIMIT_LEG_REPORT = (8, 2.0)

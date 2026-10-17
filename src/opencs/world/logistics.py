@@ -20,6 +20,7 @@ from enum import Enum, auto
 from opencs import policy
 from opencs.messages import ServerMessage, WirePos, WireXZ, server
 from opencs.wire.codec import CELL_SIZE
+from opencs.world.view import ClientView, LegCount
 
 #: A tile of the 3x3 around an enemy corner is within this many tiles of it. I §9.4.
 NO_DROP_RADIUS_TILES = 1
@@ -94,7 +95,14 @@ class Dispatch:
     dest: WireXZ
 
 
-type Action = Create | Dispatch
+@dataclass(frozen=True, slots=True)
+class Deliver:
+    """The guppy reached the job's point: hand over what it carries."""
+
+    job: Job
+
+
+type Action = Create | Dispatch | Deliver
 
 
 class Guppy:
@@ -110,6 +118,8 @@ class Guppy:
         #: leg in force is ``legs - 1`` (I §9.4.1, I §7.3).
         self.legs = 0
         self.dest = home_point(team)
+        #: The highest leg already acted on; -1 before the create leg is reported.
+        self.acted = -1
 
     @property
     def entity_id(self) -> int:
@@ -118,6 +128,11 @@ class Guppy:
     def creating_messages(self, now: float) -> Sequence[ServerMessage]:
         """``'K'`` with a new id creates the guppy at its home corner (I §9.4.3)."""
         return (server.MobileCreate(self.entity_id, home_point(self.team)),)
+
+    def client_introduced(self, view: ClientView) -> None:
+        """A client was sent the create. While the guppy is still on its create leg the client
+        counts from leg 0 like everyone (I §7.3 step 1)."""
+        view.legs[self.entity_id] = LegCount()
 
     def enqueue(self, job: Job) -> None:
         """Queue behind the waiting jobs, or, for a priority job, behind the earlier priority ones
@@ -133,6 +148,9 @@ class Logistics:
 
     def __init__(self) -> None:
         self._guppies: dict[int, Guppy] = {}
+        #: Leg reports that were for a leg the guppy is not on (I §9.4.1): a protocol violation
+        #: or a lost leg, counted so the replay tests can assert none happens.
+        self.ignored_reports = 0
 
     def guppy(self, team: int) -> Guppy | None:
         return self._guppies.get(team)
@@ -158,6 +176,47 @@ class Logistics:
             actions.append(self._start(guppy, job))
         else:
             guppy.enqueue(job)
+        return actions
+
+    def report(self, guppy_id: int, count: LegCount) -> list[Action]:
+        """A client reported that its copy of guppy ``guppy_id`` completed a leg (I §9.4.1).
+
+        Matched to a leg by that client's own count, with no timing: its n-th report is leg n.
+        The first report of a leg acts; the other clients' reports of it are duplicates. A report
+        for a leg ahead of the one in force is out of step: counted in ``ignored_reports`` and
+        dropped, which a client that follows the protocol never causes."""
+        guppy = next((g for g in self._guppies.values() if g.entity_id == guppy_id), None)
+        if guppy is None or guppy.phase is Phase.ABSENT:
+            return []
+        leg = count.reports
+        count.reports += 1
+        if leg <= guppy.acted:
+            return []  # someone else got there first
+        if leg != guppy.legs - 1:
+            self.ignored_reports += 1
+            return []
+        guppy.acted = leg
+        return self._leg_done(guppy)
+
+    def _leg_done(self, guppy: Guppy) -> list[Action]:
+        """The guppy's current leg is reported. A job's leg delivers it. Then the guppy takes the
+        next waiting job, or, after a delivery with none waiting, flies home; reaching home (or
+        finishing its create leg) with none waiting leaves it idle (I §9.4.1, I §9.4.3)."""
+        actions: list[Action] = []
+        delivered = guppy.phase is Phase.OUTBOUND
+        if delivered:
+            assert guppy.job is not None
+            actions.append(Deliver(guppy.job))
+            guppy.job = None
+        if guppy.queue:
+            actions.append(self._start(guppy, guppy.queue.pop(0)))
+        elif delivered:
+            guppy.phase = Phase.RETURNING
+            guppy.legs += 1
+            guppy.dest = home_point(guppy.team)
+            actions.append(Dispatch(guppy, guppy.dest))
+        else:
+            guppy.phase = Phase.HOME
         return actions
 
     def _start(self, guppy: Guppy, job: Job) -> Dispatch:

@@ -26,6 +26,7 @@ from opencs.world.ids import IdRange, IdSpace
 from opencs.world.logistics import (
     Action,
     Create,
+    Deliver,
     Dispatch,
     Logistics,
     TowerJob,
@@ -99,6 +100,9 @@ class City:
                 p, _as(client.TowerOrder, m), now
             ),
             client.ModuleOrder: lambda p, m, now: self._module_order(p, _as(client.ModuleOrder, m)),
+            client.LegArrived: lambda p, m, now: self._leg_arrived(
+                p, _as(client.LegArrived, m), now
+            ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -443,6 +447,14 @@ class City:
         events = [Event(server.OrderReply(policy.ORDER_ACCEPTED), ToPlayer(player.id))]
         return events + self._perform(self._logistics.order(job), now)
 
+    def _leg_arrived(self, player: Player, arrival: client.LegArrived, now: float) -> list[Event]:
+        """A client's copy of a guppy completed a leg (I §9.4.1). Only guppies this client holds
+        are counted: a Muncher's report (M9) or a made-up id is ignored."""
+        count = player.view.legs.get(arrival.id)
+        if count is None:
+            return []
+        return self._perform(self._logistics.report(arrival.id, count), now)
+
     def _module_order(self, player: Player, order: client.ModuleOrder) -> list[Event]:
         """Module orders are M8's; until then the client is answered "no stock" so it is not left
         waiting (I §8.7)."""
@@ -459,6 +471,8 @@ class City:
             match action:
                 case Create(guppy):
                     events += self.spawn(guppy, now)
+                case Deliver(job):
+                    events += self.place_tower(job.team, job.pos, job.mega, now)
                 case Dispatch(guppy, dest):
                     events += [
                         Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id))

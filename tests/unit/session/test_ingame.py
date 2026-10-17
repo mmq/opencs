@@ -204,6 +204,15 @@ def test_orders_beyond_their_burst_are_dropped_and_counted_not_queued() -> None:
     assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
 
 
+def test_leg_reports_beyond_their_burst_are_dropped_and_counted() -> None:
+    h, seen = relayed_in_game()
+    burst, _ = policy.RELAY_LIMIT_LEG_REPORT
+    leg = frame(client_payload(client.LegArrived(250)))
+    h.feed(leg * (burst + 3))
+    assert len(seen) == burst
+    assert h.session.phase._bad.total == 3  # type: ignore[attr-defined]
+
+
 def test_the_budget_refills_with_time() -> None:
     h, seen = relayed_in_game()
     h.feed(CHAT * (policy.RELAY_LIMIT_CHAT[0] + 1))
