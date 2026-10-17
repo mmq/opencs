@@ -157,7 +157,9 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
         max_multiplier=table.integer("max_multiplier", low=1, high=policy.MAX_MULTIPLIER_CEILING),
         tower_output=table.integer("tower_output", low=0, high=policy.MAX_TOWER_OUTPUT),
         max_module_level=table.integer("max_module_level", low=0, high=policy.MAX_MODULE_LEVEL),
-        capacity=table.integer("capacity", policy.DEFAULT_CITY_CAPACITY, low=1, high=255),
+        capacity=table.integer(
+            "capacity", policy.DEFAULT_CITY_CAPACITY, low=1, high=policy.MAX_CITY_CAPACITY
+        ),
         team_policy=team_policy,
         balance_teams=table.int_list(
             "balance_teams", tuple(range(policy.TEAM_COUNT)), low=0, high=policy.TEAM_COUNT - 1

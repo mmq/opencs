@@ -33,6 +33,13 @@ DEFAULT_CITY_CAPACITY = 16
 #: Teams a city has (0-3: RED, BLUE, GREEN, BLACK). II §6.
 TEAM_COUNT = 4
 
+#: Most pods one team may field; the client's limit. II §6.
+MAX_PLAYERS_PER_TEAM = 4
+
+#: Most players a city can hold: every team full. II §6, I §6.3
+#: (each player needs a unique team/index pair in the roster).
+MAX_CITY_CAPACITY = TEAM_COUNT * MAX_PLAYERS_PER_TEAM
+
 #: How a requested team is honored when it has no room. II §6.
 TEAM_POLICIES = ("request-or-balance", "balance", "random")
 DEFAULT_TEAM_POLICY = "request-or-balance"

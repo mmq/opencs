@@ -124,3 +124,10 @@ def test_cities_sorted_by_letter(tmp_path: Path) -> None:
     b = CITY.replace('"A"', '"B"')
     config = load_config(write_config(tmp_path, {"1": b, "2": CITY}))
     assert [c.letter for c in config.cities] == ["A", "B"]
+
+
+def test_capacity_ceiling_is_sixteen(tmp_path: Path) -> None:
+    city = load_config(write_config(tmp_path, {"A": with_line("capacity = 16")})).cities[0]
+    assert city.capacity == 16
+    with pytest.raises(ConfigError, match=": capacity:"):
+        load_config(write_config(tmp_path, {"A": with_line("capacity = 17")}))
