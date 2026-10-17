@@ -1,4 +1,4 @@
-"""The in-game placeholder: frames in, bad input counted over a window (DESIGN §5)."""
+"""The in-game phase's input side: frames in, bad input counted over a window (DESIGN §5)."""
 
 from __future__ import annotations
 
