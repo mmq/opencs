@@ -36,7 +36,9 @@ def settle(victim: Player, payees: list[Player], destroy: list[Event], now: floa
         earned = scoring.is_earned_kill(victim.score, payee.score)
         payee.score.server_credit += paid.points
         if earned:
-            payee.score.marker += 1  # the client does this itself on the notice
+            payee.score.marker = scoring.clamp_marker(
+                payee.score.marker + 1
+            )  # the client does this itself
         log.info(
             "player %d paid %d (bounty %d x %d) for the death of %d; %s kill",
             payee.id,

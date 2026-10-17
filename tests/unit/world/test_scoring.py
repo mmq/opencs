@@ -7,10 +7,12 @@ import pytest
 
 from opencs import policy
 from opencs.messages import client, server
+from opencs.wire.codec import BIAS88_MAX, BIAS88_MIN
 from opencs.world.events import Event, ToHolders
 from opencs.world.scoring import (
     Bounty,
     PlayerScore,
+    clamp_marker,
     is_earned_kill,
     multiplier_floor,
     payout,
@@ -156,6 +158,35 @@ def test_a_death_resets_the_multiplier_and_lowers_the_marker() -> None:
     assert (s.multiplier, s.marker) == (1, 1)
     s.on_own_death(80.0)
     assert s.marker == 0
+
+
+def test_the_marker_stops_at_the_b88_floor_however_often_the_pod_dies() -> None:
+    s = PlayerScore(marker=BIAS88_MIN + 1)
+    s.on_own_death(1.0)
+    assert s.marker == BIAS88_MIN
+    s.on_own_death(2.0)
+    assert s.marker == BIAS88_MIN  # one more death does not run off the field's end
+
+
+def test_the_session_start_message_clamps_a_marker_the_field_cannot_carry() -> None:
+    low, high = PlayerScore(marker=-500), PlayerScore(marker=500)
+    sent_low, sent_high = low.start_message(1)[0], high.start_message(1)[0]
+    assert isinstance(sent_low, server.SetBays) and isinstance(sent_high, server.SetBays)
+    assert (sent_low.marker, sent_high.marker) == (BIAS88_MIN, BIAS88_MAX)
+    assert (low.marker, high.marker) == (BIAS88_MIN, BIAS88_MAX)
+
+
+def test_clamp_marker_keeps_in_range_values_and_bounds_the_rest() -> None:
+    assert [
+        clamp_marker(v) for v in (BIAS88_MIN - 1, BIAS88_MIN, -1, 0, BIAS88_MAX, BIAS88_MAX + 1)
+    ] == [
+        BIAS88_MIN,
+        BIAS88_MIN,
+        -1,
+        0,
+        BIAS88_MAX,
+        BIAS88_MAX,
+    ]
 
 
 # --- bays and earned kills ----------------------------------------------------------------------

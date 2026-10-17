@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from opencs import policy
 from opencs.config import CityConfig
 from opencs.lobby import replies
+from opencs.lobby.identity import identity_key
 from opencs.wire.text import sanitize_relay
 
 
@@ -26,6 +27,11 @@ class Member:
     deliver: Callable[[bytes], None] = field(repr=False)
     city: str | None = None
     team: int | None = None
+
+    @property
+    def key(self) -> str:
+        """Where this player's progress is stored (II §3)."""
+        return identity_key(self.callsign, self.account)
 
     @property
     def in_chamber(self) -> bool:

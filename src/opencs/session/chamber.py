@@ -31,6 +31,9 @@ GO_PROBLEMS = {
 }
 
 
+#: What to show when the store cannot be read: the player is told, the server carries on.
+_UNREADABLE = replies.denied("THE RECORD CANNOT BE READ RIGHT NOW")
+
 #: The client's version reply (II §4.1): ``CSTTBT <n> <n>``.
 _VERSION_REPLY = re.compile(r"CSTTBT \d+ \d+")
 
@@ -172,8 +175,8 @@ class ChamberPhase(TextPhase):
             commands.CityList: self._city_list,
             commands.CityInfo: self._city_info,
             commands.Status: lambda c: self._say(replies.status(lobby)),
-            commands.WhoIs: lambda c: self._say(replies.who_is(lobby.find(c.callsign), c.callsign)),
-            commands.Score: lambda c: self._say(replies.score()),
+            commands.WhoIs: self._who_is,
+            commands.Score: self._score,
             commands.Play: lambda c: self._play(c.letter, c.team),
             commands.Resume: lambda c: self._say(
                 replies.resume_refused(guest=self.member.account is None)
@@ -186,6 +189,30 @@ class ChamberPhase(TextPhase):
             commands.Unknown: lambda c: self._say(replies.unknown(c.word)),
             commands.Usage: lambda c: self._say(replies.usage(c.text)),
         }
+
+    def _who_is(self, command: commands.WhoIs) -> None:
+        """``/WHO <callsign>``: where the pilot is, and its record (II §4.2)."""
+        found = self.host.services.lobby.find(command.callsign)
+        if found is None:
+            self._say(replies.who_is(None, command.callsign, None))
+            return
+        try:
+            record = self.host.services.persistence.record(found.key)
+        except Exception:
+            self.host.log.exception("could not read the record of %s", found.key)
+            self._say([replies.body(f"{found.callsign}: {replies.where(found)}"), *_UNREADABLE])
+            return
+        self._say(replies.who_is(found, command.callsign, record))
+
+    def _score(self, command: commands.Score) -> None:
+        """``/SCORE``: the player's own record (II §4.2)."""
+        try:
+            record = self.host.services.persistence.record(self.member.key)
+        except Exception:
+            self.host.log.exception("could not read the record of %s", self.member.key)
+            self._say(_UNREADABLE)
+            return
+        self._say(replies.score(self.member.callsign, record))
 
     def _chat(self, command: commands.Say) -> None:
         self.host.services.lobby.relay_chat(self.member, command.text)

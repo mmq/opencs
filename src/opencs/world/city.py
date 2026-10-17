@@ -22,22 +22,22 @@ from opencs.messages import ClientMessage, client, server
 from opencs.world import chat, death, relay
 from opencs.world.dispatch import (
     Handler,
-    check_loadout,
     module_handlers,
     score_handlers,
-    start_status,
 )
 from opencs.world.effects import Effects
-from opencs.world.entities import Entity, inform, introduce
-from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
+from opencs.world.entities import Entity, introduce
+from opencs.world.events import Event, ToPlayer, ToPlayers
 from opencs.world.hits import Hits
 from opencs.world.ids import IdRange, IdSpace
+from opencs.world.ledger import ProgressLedger
 from opencs.world.modules import Drops, ModuleRules
 from opencs.world.npcs.munchers import Munchers
 from opencs.world.npcs.sentinels import Sentinels
 from opencs.world.orders import Orders
 from opencs.world.player import Player
-from opencs.world.pods import PodPhase
+from opencs.world.podreport import pod_state
+from opencs.world.progress import ProgressChanged, SavedProgress
 from opencs.world.scoring import multiplier_floor
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
@@ -75,6 +75,9 @@ class City:
         self._territory = Territory(config.blocks)
         self._players: dict[int, Player] = {}
         self._ids = IdSpace()
+        #: Records that changed since ``take_progress``: the world cannot write them, so it says
+        #: what to write (ADR 2) and the session layer persists it.
+        self._ledger = ProgressLedger()
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
@@ -98,7 +101,7 @@ class City:
         self.hits = Hits(self, self.orders, self.effects, [self.sentinels, self.munchers])
         self._handlers: dict[type[ClientMessage], Handler] = {
             **module_handlers(self.orders, self.drops, self.effects, self.munchers),
-            client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
+            client.PodState: lambda p, m, now: pod_state(self, p, _as(client.PodState, m), now),
             **score_handlers(self.config.max_module_level, self.config.max_multiplier),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.Grenade: lambda p, m, now: [
@@ -115,6 +118,17 @@ class City:
     def players(self) -> Sequence[Player]:
         """Everyone in the city, by id."""
         return sorted(self._players.values(), key=lambda p: p.id)
+
+    @property
+    def territory(self) -> Territory:
+        """The block-class map a client is sent on its first report (I §7.3)."""
+        return self._territory
+
+    @property
+    def live(self) -> dict[int, Entity]:
+        """The entities every playing client should hold (I §7.2 step 1), by id. A late joiner
+        is synced from it; the first-report path adds to it."""
+        return self._live
 
     # The shot and hit counters live in ``Hits``; the city exposes them for the tests and the admin
     # channel (M12).
@@ -143,8 +157,21 @@ class City:
 
     # --- joining and leaving -----------------------------------------------------------------
 
-    def join(self, callsign: str, team: int, now: float) -> JoinResult | JoinRefused:
-        """Seat a player: an id, the lowest free index in its team (I §6.3) and the ``'B'``."""
+    def join(
+        self,
+        callsign: str,
+        team: int,
+        now: float,
+        *,
+        identity: str | None = None,
+        saved: SavedProgress | None = None,
+    ) -> JoinResult | JoinRefused:
+        """Seat a player: an id, the lowest free index in its team (I §6.3) and the ``'B'``.
+
+        ``identity`` is the key its record is kept under (None: nothing is kept) and ``saved`` the
+        stored record it starts from (None: a new identity). The client is restored to it when it
+        sends its first ``'b'`` (I §9.2.11, II §11.3); starting the game rolls the last SCORE into
+        the career, which is a change to save (``take_progress``)."""
         if len(self._players) >= self.config.capacity:
             return JoinRefused(f"CITY {self.config.letter} IS FULL")
         taken = {p.index for p in self._players.values() if p.team == team}
@@ -172,7 +199,15 @@ class City:
         except Exception:
             self._ids.release(IdRange.PLAYER, player_id, now)
             raise
-        player = Player(player_id, callsign, team, index, ClientView(player_id, now))
+        player = Player(
+            player_id,
+            callsign,
+            team,
+            index,
+            ClientView(player_id, now),
+            identity=identity,
+            saved=saved,
+        )
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
         # A fresh client already shows its own default palette (I §8.20), which is a client fact,
         # not the city's starting condition: it is sent one only once the weather differs from it.
@@ -180,6 +215,7 @@ class City:
         if not self._players:
             self._start_game(now)
         self._players[player_id] = player
+        self._ledger.note(player)
         return JoinResult(player_id, team, player.index, hello)
 
     def leave(self, player_id: int, now: float) -> list[Event]:
@@ -236,7 +272,22 @@ class City:
         if handler is None:
             log.debug("ignoring %s from player %d", type(msg).__name__, player_id)
             return []
-        return handler(player, msg, now)
+        try:
+            return handler(player, msg, now)
+        finally:
+            # Also when the handler raised: the record changes only through ``Progress``'s guarded
+            # methods, each a whole valid state, so what it changed before failing is worth saving.
+            self._ledger.note(player)
+
+    def take_progress(self) -> list[ProgressChanged]:
+        """The records that changed since the last call, newest per identity, for the session layer
+        to persist (II §11.3). Cleared by the call."""
+        return self._ledger.take()
+
+    def all_progress(self) -> list[ProgressChanged]:
+        """Every kept player's record as it stands, whether it changed or not: a graceful shutdown
+        saves them all (M12)."""
+        return ProgressLedger.snapshot(self.players())
 
     def note_shot(self, player_id: int, fired: client.Shot, now: float) -> None:
         """Log a shot the session declined to pass on (it was over the shot budget): the shot log
@@ -268,40 +319,6 @@ class City:
         for before, after in self.weather.tick(now):
             log.info("weather program: %s -> %s", before, after)
             events += self.weather.announce(views, before, now)
-        return events
-
-    def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
-        """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2),
-        then the relay to the clients that hold it (I §8.24)."""
-        first = not player.pod.has_reported
-        phase = player.pod.phase
-        check_loadout(player, report)
-        events = player.pod.on_report(report, now)
-        if first:
-            player.grace.arm(now)  # a spawn (I §9.1.5)
-        if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is the camera, not the pod
-            player.grace.observe(report.pos, now)
-        if phase is not PodPhase.IN_PLAY and player.pod.phase is PodPhase.IN_PLAY:
-            events += player.bounty.start(now)  # left drop state: accruing (I §9.2.12, II §11.2)
-        if first:
-            # Nobody else holds this pod yet, so its drop 'A' is for its owner alone; the others
-            # are given theirs by the introduction, after their 'G'. ``ToHolders`` resolves after
-            # this call, when the introductions below have made them holders, so it is named.
-            events = [
-                Event(e.message, ToPlayer(player.id))
-                if isinstance(e.message, server.ReleaseDrop)
-                else e
-                for e in events
-            ]
-            events += self._go_live(player, now)
-            events += start_status(player, self.multiplier_floor)
-        if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
-            events.append(
-                Event(
-                    relay.pod_state(player.id, report),
-                    ToHolders(player.id, except_player=player.id),
-                )
-            )
         return events
 
     @property
@@ -361,21 +378,6 @@ class City:
             )
         )
 
-    def _go_live(self, player: Player, now: float) -> list[Event]:
-        """The player's first ``'b'`` is in: it is given the territory grid and every entity already
-        live (pods, towers, guppies), and the pods are told about it, once per pair (I §7.2,
-        I §7.3). Players that have not reported yet are introduced when they do."""
-        events: list[Event] = []
-        events += inform(self._territory, player.view, now)
-        events += inform(self.weather, player.view, now)
-        for entity in self._live.values():
-            events += introduce(entity, player.view, now)
-        self._live[player.id] = player
-        for other in self.players():
-            if other.pod.has_reported:
-                events += introduce(player, other.view, now)
-        return events
-
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
         """A line the player typed, echoed to its audience (I §8.23)."""
         event = chat.chat_line(
@@ -396,7 +398,10 @@ class City:
         if not died:
             return []
         player.loadout.clear()  # the client empties every bay on its death (I §9.3.4, II §13)
-        return death.settle(player, self._payees(player, now), died, now)
+        events = death.settle(player, self._payees(player, now), died, now)
+        # The client lowered its marker silently, so the record takes the mirror's (II §11.3).
+        player.progress.on_own_death(player.score.marker)
+        return events
 
     def _payees(self, victim: Player, now: float) -> list[Player]:
         """The players to pay for a death: those in the victim's hit set within the window, still

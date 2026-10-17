@@ -6,7 +6,10 @@ import pytest
 
 from fixtures.lobbies import add, city, fill, make
 from opencs.lobby import replies
+from opencs.store.base import ProgressRecord
 from opencs.wire.text import ARMED_LINE_LIMIT
+
+RECORD = ProgressRecord((3, 2, 1, 1, 5, 4, 0, 1, 2), -2, 957, 1670, 90_000)
 
 
 def text(lines: list[replies.Line]) -> str:
@@ -40,9 +43,11 @@ def test_every_reply_is_printable_ascii_with_cr_and_short_armed_lines() -> None:
         replies.city_hint("B"),
         replies.city_info(lobby, lobby.cities()[1]),
         replies.status(lobby),
-        replies.who_is(me, "BRAVO"),
-        replies.who_is(None, "NOBODY"),
-        replies.score(),
+        replies.who_is(me, "BRAVO", RECORD),
+        replies.who_is(me, "BRAVO", None),
+        replies.who_is(None, "NOBODY", None),
+        replies.score("BRAVO", RECORD),
+        replies.score("BRAVO", None),
         replies.resume_refused(guest=True),
         replies.resume_refused(guest=False),
         replies.colors(),
@@ -111,16 +116,30 @@ def test_status_lists_every_pilot_and_where() -> None:
     assert "CHARLIE   A RED" in rows
 
 
-def test_who_is_gives_location_and_no_record_or_an_error() -> None:
+def test_who_is_gives_location_and_the_record_or_an_error() -> None:
     lobby = make()
     add(lobby, "ALPHA", "B", 2)
     found = lobby.find("ALPHA")
-    out = text(replies.who_is(found, "ALPHA"))
+    out = text(replies.who_is(found, "ALPHA", RECORD))
     assert "ALPHA: B GREEN" in out
-    assert "RECORD: NONE KEPT YET" in out
-    missing = replies.render(replies.who_is(None, "GHOST"))
-    assert b"NO SUCH PILOT: GHOST" in missing
+    assert "LAST GAME SCORE: 1670" in out and "BATTLE MARKER: -2" in out
+    assert "NO RECORD YET" in text(replies.who_is(found, "ALPHA", None))
+    missing = replies.render(replies.who_is(None, "GHOST", RECORD))
+    assert b"NO SUCH PILOT: GHOST" in missing and b"1670" not in missing
     assert missing.startswith(b"\x05D3\r")
+
+
+def test_score_shows_every_field_of_the_record_in_the_manuals_terms() -> None:
+    rows = [r for r in text(replies.score("BRAVO", RECORD)).split("\r") if not r.startswith("\x05")]
+    assert rows[:6] == [
+        "RECORD OF BRAVO",
+        "LAST GAME SCORE: 1670",
+        "CAREER TOTAL: 90000",
+        "BAY POINTS: 957",
+        "BAYS: 3 2 1 1 5 4 0 1 2",
+        "BATTLE MARKER: -2",
+    ]
+    assert "NO RECORD YET" in text(replies.score("BRAVO", None))
 
 
 def test_resume_replies_distinguish_guests() -> None:

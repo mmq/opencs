@@ -74,3 +74,9 @@ The kill and payout runs `2026-10-01-170222` and `2026-10-01-172859` are not in 
 (3 frames) and in the resume and high-id fixtures; M6-M7 should replay those.
 
 The "never captured" list above was checked against the whole corpus (363 logs), not only the chosen runs.
+
+### Fixtures added for M10a (the persistence replay)
+
+| file | what it is for |
+|---|---|
+| `2026-10-15-140934_002-persist-p1` | the run the third persistence check was written for: 986 saved with a newly bought bay while the client had 286 |

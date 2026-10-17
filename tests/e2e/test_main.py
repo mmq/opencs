@@ -18,7 +18,9 @@ LISTENING = re.compile(r"listening on (\S+):(\d+)")
 
 @pytest.mark.e2e
 @pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
-def test_main_listens_on_the_given_address_then_exits_zero(sig: signal.Signals) -> None:
+def test_main_listens_on_the_given_address_then_exits_zero(
+    sig: signal.Signals, tmp_path: Path
+) -> None:
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -30,6 +32,8 @@ def test_main_listens_on_the_given_address_then_exits_zero(sig: signal.Signals) 
             "0",
             "--config",
             str(CONFIG),
+            "--data-dir",
+            str(tmp_path),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -61,3 +65,4 @@ def test_main_listens_on_the_given_address_then_exits_zero(sig: signal.Signals) 
         if proc.poll() is None:
             proc.kill()
     assert "Traceback" not in "".join(lines)
+    assert (tmp_path / policy.DATABASE_FILE_NAME).exists()  # the flag took effect, not ../data

@@ -106,8 +106,17 @@ class InGamePhase(Phase):
         assert member is not None and member.city is not None and member.team is not None
         city = self.host.services.cities[member.city]
         now = self.host.now()
+        persistence = self.host.services.persistence
         try:
-            joined = city.join(member.callsign, member.team, now)
+            saved = persistence.load(member.key)
+            key: str | None = member.key
+        except Exception:
+            # Without the stored record the player would start from the defaults and then overwrite
+            # it: keep nothing for this session instead (I §9.2.11, II §11.3).
+            self.host.log.exception("could not read the record of %s; none is kept", member.key)
+            saved, key = None, None
+        try:
+            joined = city.join(member.callsign, member.team, now, identity=key, saved=saved)
         except Exception:
             # A bug in the world: log it with the request and close; nobody is seated (DESIGN §5).
             self.host.log.exception("city %s failed on a join", city.config.letter)
@@ -122,6 +131,7 @@ class InGamePhase(Phase):
             self.host.close(f"city refused the join: {joined.reason}")
             return
         self._city, self._player_id = city, joined.player_id
+        persistence.flush(city)  # the new game rolled the last SCORE into the career
         self.host.services.router.register(city.config.letter, joined.player_id, _Sink(self))
         self.host.log.info(
             "seated as player %d, team %d index %d", joined.player_id, joined.team, joined.index
@@ -147,6 +157,7 @@ class InGamePhase(Phase):
         router.unregister(city.config.letter, self._player_id)
         try:
             router.deliver(city, city.leave(self._player_id, self.host.now()))
+            self.host.services.persistence.flush(city)
         except Exception:
             # The player is out of this session either way; the others' notice is lost (DESIGN §5).
             self.host.log.exception(
@@ -154,7 +165,8 @@ class InGamePhase(Phase):
             )
 
     def closed(self) -> None:
-        """A line drop mid-game (``/RESUME`` records are M10's)."""
+        """A line drop mid-game. The record is already saved from the reports so far; the held game
+        for ``/RESUME`` is M10b's."""
         self._leave_city()
         self.stage = Stage.GONE
 
@@ -253,6 +265,9 @@ class InGamePhase(Phase):
             self.host.log.exception(
                 "city %s failed on %r; request dropped", city.config.letter, message
             )
+        # Whatever the call changed in the player's record, even if the handler then
+        # raised (the city notes progress in a ``finally``).
+        self.host.services.persistence.flush(city)
 
     # --- time --------------------------------------------------------------------------------
 

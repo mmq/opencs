@@ -198,6 +198,22 @@ MAX_PASSWORD_LENGTH = 64
 PBKDF2_ITERATIONS = 100_000
 PBKDF2_SALT_BYTES = 16
 
+#: The SQLite file inside ``data_dir``. Ours (DESIGN §2 "Persistence"; one file, no server).
+DATABASE_FILE_NAME = "opencs.db"
+
+#: How long a database call waits for another connection's lock before it fails. Ours (DESIGN
+#: §3.3: a save runs on the event loop, which must not stall; SQLite's default is 5 s).
+DATABASE_BUSY_TIMEOUT = 0.2
+
+#: After a failed save, no further save is tried for this many seconds (a failed one can cost up to
+#: ``DATABASE_BUSY_TIMEOUT``, so retrying on every client message would stall the loop). The
+#: waiting records are written then, newest first. Ours (DESIGN §3.3, §5).
+SAVE_RETRY_INTERVAL = 5.0
+
+#: Prefix of a real account's progress key: ``acct:NAME``. A guest's key is its bare callsign,
+#: which is upper case, so the two can never collide. II §3.
+ACCOUNT_KEY_PREFIX = "acct:"
+
 #: The first and last single-digit suffix of a duplicate callsign (``JOINGEN2`` .. ``JOINGEN9``;
 #: II §3: the 8th character is replaced by a digit), then two-digit suffixes
 #: (``JOINGE10`` .. ``JOINGE99``) when those run out. The 9th duplicate and beyond are ours, see
@@ -339,6 +355,16 @@ FLOOR_SETTLE = 2.0
 #: ``X``). I §8.6, II §11.3 (persistence, which replaces this, is M10's).
 NEW_PLAYER_BAYS = (1, 1, 1, 1, 0, 0, 0, 0, 0)
 NEW_PLAYER_MARKER = 0
+
+#: After a restore, a client ``'D'``-``'S'`` is not saved until one shows at least the restored
+#: SCORE and bay points, or this many seconds have passed. A report built before the restore
+#: landed arrives within a frame or two, so 10 s is generous. II §11.3
+#: (a guess).
+RESTORE_SETTLE = 10.0
+
+#: Bay points a bay's upgrade spends, indexed by the bay's level BEFORE the upgrade (0 = an empty
+#: bay). I §9.2.7 and II §11.3: 1 000 / 10^4 / 10^5 / 10^6 / 10^7 / 10^8.
+BAY_UPGRADE_POINTS = (1_000, 10**4, 10**5, 10**6, 10**7, 10**8)
 
 #: A spawn's grace period ends after this many seconds even if the pod never leaves its home box.
 #: I §9.1.5 ("the two-minute deadline").

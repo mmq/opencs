@@ -21,10 +21,12 @@ from opencs.lobby.lobby import Lobby
 from opencs.net.connection import ConnectionIO, SessionFactory
 from opencs.net.listener import Listener
 from opencs.routing import Router
+from opencs.session.persistence import Persistence
 from opencs.session.phases import Services
 from opencs.session.session import Session
-from opencs.store.base import AccountStore
-from opencs.store.memory import MemoryAccountStore
+from opencs.store.base import Stores
+from opencs.store.memory import memory_stores
+from opencs.store.sqlite import SqliteStore, open_stores
 from opencs.world.city import City
 
 log = logging.getLogger("opencs.app")
@@ -35,18 +37,19 @@ DEFAULT_CONFIG_PATH = Path("config") / "server.toml"
 def build_services(
     config: AppConfig,
     *,
-    store: AccountStore | None = None,
+    stores: Stores | None = None,
     clock: Clock | None = None,
     rng: random.Random | None = None,
 ) -> Services:
     """Build what every session shares: identity, the lobby, one ``City`` per enabled city and the
-    router. Accounts are kept in memory until the persistence milestone (M10)."""
+    router. Without ``stores`` accounts and progress are kept in memory (tests)."""
     clock = clock or MonotonicClock()
-    identity = Identity(store or MemoryAccountStore())
+    stores = stores or memory_stores()
+    identity = Identity(stores.accounts)
     rng = rng or random.Random()
     lobby = Lobby(config.cities, config.server.default_city, rng)
     cities = {c.letter: City(c, rng) for c in config.cities if c.enabled}
-    return Services(identity, lobby, clock, cities, Router())
+    return Services(identity, lobby, clock, cities, Router(), Persistence(stores.progress, clock))
 
 
 def build_session_factory(services: Services) -> SessionFactory:
@@ -79,7 +82,7 @@ async def serve(
     *,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None = None,
-    store: AccountStore | None = None,
+    stores: Stores | None = None,
     clock: Clock | None = None,
     rng: random.Random | None = None,
     services: Services | None = None,
@@ -88,13 +91,39 @@ async def serve(
     """Listen on the configured address until ``stop`` is set, then close every connection.
 
     ``ready`` receives the first bound socket's port once listening (port 0 binds an ephemeral
-    one). A host naming several addresses binds several sockets; each is logged. ``store``,
+    one). A host naming several addresses binds several sockets; each is logged. Accounts and
+    progress go to the SQLite file in ``data_dir`` unless ``stores`` says otherwise. ``stores``,
     ``clock`` and ``rng`` are for tests, as are ``services`` (built by the caller, so it can look
-    inside; ``store`` and ``rng`` are then unused) and ``tick_sleep``, the pacing of the city and
-    session tickers (a test pulses it by hand instead of waiting).
+    inside, and owns its stores; ``stores`` and ``rng`` are then unused) and ``tick_sleep``, the
+    pacing of the city and session tickers (a test pulses it by hand instead of waiting).
     """
     clock = clock or (services.clock if services else MonotonicClock())
-    services = services or build_services(config, store=store, clock=clock, rng=rng)
+    database: SqliteStore | None = None
+    if services is None:
+        if stores is None:  # the real thing: accounts and progress in data_dir (DESIGN §2)
+            stores, database = open_stores(config.server.data_dir)
+            log.info("database %s", config.server.data_dir / policy.DATABASE_FILE_NAME)
+        services = build_services(config, stores=stores, clock=clock, rng=rng)
+    try:
+        await _listen(config, services, clock, stop, ready, tick_sleep)
+    finally:
+        # Connections are closed by now, and each saved its player as it left; this saves anyone
+        # still seated (M12 makes shutdown graceful on top of it).
+        services.persistence.save_all(services.cities.values())
+        if database is not None:
+            database.close()
+    log.info("stopped")
+
+
+async def _listen(
+    config: AppConfig,
+    services: Services,
+    clock: Clock,
+    stop: asyncio.Event,
+    ready: Callable[[int], None] | None,
+    tick_sleep: Callable[[float], Awaitable[None]],
+) -> None:
+    """Listen until ``stop`` is set, ticking the cities, then close every connection."""
     listener = Listener(build_session_factory(services), clock, sleep=tick_sleep)
     server = await listener.start(config.server.host, config.server.port)
     tickers = [
@@ -114,7 +143,6 @@ async def serve(
             ticker.cancel()
         await asyncio.gather(*tickers, return_exceptions=True)
         await listener.stop()
-    log.info("stopped")
 
 
 async def _run(config: AppConfig) -> None:
@@ -141,6 +169,9 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH, help="server.toml path")
     parser.add_argument("--port", type=_port, help="override the configured port (0 = ephemeral)")
     parser.add_argument("--host", help="override the configured host")
+    parser.add_argument(
+        "--data-dir", type=Path, help="override the configured data directory (the SQLite file)"
+    )
     return parser.parse_args(argv)
 
 
@@ -152,7 +183,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"opencs: {exc}", file=sys.stderr)
         return 2
-    overrides = {k: v for k, v in (("host", args.host), ("port", args.port)) if v is not None}
+    overrides = {
+        k: v
+        for k, v in (("host", args.host), ("port", args.port), ("data_dir", args.data_dir))
+        if v is not None
+    }
     config = replace(config, server=replace(config.server, **overrides))
     logging.basicConfig(
         level=config.server.log_level,

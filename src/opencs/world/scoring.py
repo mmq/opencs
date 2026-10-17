@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from opencs import policy
 from opencs.messages import client, server
+from opencs.wire.codec import BIAS88_MAX, BIAS88_MIN
 from opencs.world.events import Event, ToHolders
 
 
@@ -21,6 +22,13 @@ def multiplier_floor(max_module_level: int, max_multiplier: int) -> int:
     """The multiplier a spawn is raised to: the city's maximum module level, at least 1 and at
     most the city's maximum multiplier (II §12, II §11.3)."""
     return min(max(max_module_level, 1), max_multiplier)
+
+
+def clamp_marker(marker: int) -> int:
+    """The battle marker held within ``'D'``-``'B'``'s b88 field, which is what the client can
+    hold, store or be sent (I §4.3, I §8). The mirror counts deaths and earned kills without
+    bound, so every place it is stored or sent clamps it."""
+    return max(BIAS88_MIN, min(BIAS88_MAX, marker))
 
 
 class Bounty:
@@ -107,8 +115,10 @@ class PlayerScore:
     def start_message(self, floor: int) -> list[server.SetBays | server.SetStatus]:
         """What a session starts with: ``'D'``-``'B'`` first, then ``'D'``-``'S'`` (II §11.3, I
         §7.8). Without the first the client's multiplier and SCORE never run (II §11.1). Sets the
-        mirror to match: the multiplier is at least the floor."""
+        mirror to match: the multiplier is at least the floor and the marker is clamped to what
+        ``'D'``-``'B'`` can carry."""
         self.multiplier = max(self.multiplier, floor)
+        self.marker = clamp_marker(self.marker)
         return [
             server.SetBays(self.bays, self.marker),
             server.SetStatus(self.score, self.multiplier, self.bay_points),
@@ -148,7 +158,7 @@ class PlayerScore:
         multiplier back to 1 and the battle marker down by one. The floor is due once the client
         reports again."""
         self.multiplier = 1
-        self.marker -= 1
+        self.marker = clamp_marker(self.marker - 1)
         self.floor_pending_since = now
 
 

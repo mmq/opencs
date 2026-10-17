@@ -10,7 +10,8 @@ from opencs.world.combat import HitSet, ShotLog
 from opencs.world.grace import Grace
 from opencs.world.loadout import Loadout
 from opencs.world.pods import Pod, PodPhase
-from opencs.world.scoring import Bounty, PlayerScore
+from opencs.world.progress import Progress, SavedProgress
+from opencs.world.scoring import Bounty, PlayerScore, clamp_marker
 from opencs.world.view import ClientView
 
 
@@ -23,6 +24,10 @@ class Player:
     team: int
     index: int  # 0-3 within the team; unique per (team, index), I §6.3
     view: ClientView
+    #: The key this player's record is stored under, None for a player nothing is kept for.
+    identity: str | None = None
+    #: The stored record this player starts from, None for a new identity (II §11.3).
+    saved: SavedProgress | None = None
     pod: Pod = field(init=False)
     #: The shots this player's connection reported, for attributing its hit reports (II §9.3).
     shots: ShotLog = field(init=False)
@@ -30,6 +35,8 @@ class Player:
     hits: HitSet = field(init=False)
     #: The server's mirror of this client's SCORE, multiplier, bays and marker (II §11.1, I §10).
     score: PlayerScore = field(init=False)
+    #: What of this player's progress is kept, and when it may change (II §11.3).
+    progress: Progress = field(init=False)
     #: This pod's bounty (I §9.2).
     bounty: Bounty = field(init=False)
     #: The spawn grace period as the client keeps it (I §9.1.5); mirrored, rules unchanged.
@@ -41,7 +48,16 @@ class Player:
         self.pod = Pod(self.id)
         self.shots = ShotLog(self.id)
         self.hits = HitSet()
-        self.score = PlayerScore()
+        self.progress = Progress(self.saved)
+        # The client is restored to the record: its bays and marker, its bay points and a SCORE of
+        # 0 for the new game (I §9.2.11, II §11.3).
+        record = self.progress.record
+        self.score = PlayerScore(
+            score=record.score,
+            bay_points=record.bay_points,
+            bays=record.bays,
+            marker=clamp_marker(record.marker),
+        )
         self.bounty = Bounty(self.id)
         self.grace = Grace(self.id, self.team)
         self.loadout = Loadout()

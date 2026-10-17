@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from opencs.lobby.identity import Identity, Pilot, Refused, hash_password
+from opencs.lobby.identity import Identity, Pilot, Refused, hash_password, identity_key
 from opencs.store.memory import MemoryAccountStore
 
 FAST = 1000  # PBKDF2 rounds: the algorithm is the point, not the cost
@@ -177,3 +177,40 @@ def test_release_of_an_unknown_pilot_is_harmless(line: str) -> None:
     identity, _ = make()
     identity.release(Pilot("NOBODY", None))
     assert isinstance(identity.login(line), Pilot)
+
+
+# --- progress keys (II §3) ---------------------------------------------------
+
+
+def test_a_real_account_is_keyed_by_the_account_not_the_callsign() -> None:
+    identity, _ = make()
+    first, second = pilot(identity.login("ALPHAXYZ1,pw")), pilot(identity.login("ALPHAXYZ2,pw"))
+    assert (first.callsign, second.callsign) == ("ALPHAXYZ", "ALPHAXY2")
+    assert (first.key, second.key) == ("acct:ALPHAXYZ1", "acct:ALPHAXYZ2")
+
+
+def test_a_real_account_keeps_its_key_when_a_guest_holds_its_callsign() -> None:
+    identity, _ = make()
+    identity.release(pilot(identity.login("ZED,pw")))  # registered
+    guest = pilot(identity.login("JOINGENIE"))
+    squatter = pilot(identity.login("ZED,pw"))
+    assert squatter.key == "acct:ZED" and guest.key == "JOINGENI"
+    identity.release(squatter)
+    identity.release(guest)
+    other = pilot(identity.login("ZEDZEDZED,pw"))  # callsign ZEDZEDZE, a different account
+    assert pilot(identity.login("ZED,pw")).key == "acct:ZED" and other.key == "acct:ZEDZEDZED"
+
+
+def test_joingenie_is_keyed_by_the_assigned_callsign_in_connection_order() -> None:
+    identity, _ = make()
+    first, second, third = (pilot(identity.login("JOINGENIE")) for _ in range(3))
+    assert [first.key, second.key, third.key] == ["JOINGENI", "JOINGEN2", "JOINGEN3"]
+    identity.release(second)
+    assert pilot(identity.login("JOINGENIE")).key == "JOINGEN2"  # a freed callsign is a free key
+
+
+def test_a_guest_key_cannot_equal_an_account_key() -> None:
+    identity, _ = make()
+    guest = pilot(identity.login("acct:zed"))  # upper-cased, so never the lower-case prefix
+    assert guest.key == "ACCT:ZED"
+    assert identity_key("ZED", "ZED") == "acct:ZED" and identity_key("ZED", None) == "ZED"

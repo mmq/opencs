@@ -16,6 +16,12 @@ from opencs import policy
 from opencs.store.base import Account, AccountStore
 
 
+def identity_key(callsign: str, account: str | None) -> str:
+    """The key a player's record is stored under (II §3): ``acct:NAME`` for a
+    real account, else the callsign the lobby assigned (``JOINGENI``, ``JOINGEN2``, ...)."""
+    return callsign if account is None else policy.ACCOUNT_KEY_PREFIX + account
+
+
 @dataclass(frozen=True, slots=True)
 class Pilot:
     """A logged-in player. ``account`` is the upper-cased account name, None for a guest, whose
@@ -27,6 +33,11 @@ class Pilot:
     @property
     def is_guest(self) -> bool:
         return self.account is None
+
+    @property
+    def key(self) -> str:
+        """Where this pilot's progress is stored."""
+        return identity_key(self.callsign, self.account)
 
 
 @dataclass(frozen=True, slots=True)
