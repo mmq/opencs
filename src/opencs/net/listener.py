@@ -12,6 +12,7 @@ import itertools
 import logging
 import socket
 from collections import Counter
+from collections.abc import Awaitable, Callable
 
 from opencs import policy
 from opencs.clock import Clock
@@ -49,9 +50,11 @@ class Listener:
         *,
         max_connections: int = policy.MAX_CONNECTIONS,
         max_per_address: int = policy.MAX_CONNECTIONS_PER_ADDRESS,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._factory = factory
         self._clock = clock
+        self._sleep = sleep
         self._max = max_connections
         self._max_per_address = max_per_address
         self._ids = itertools.count(1)
@@ -99,7 +102,12 @@ class Listener:
         enable_keepalive(writer.get_extra_info("socket"))
         conn_id = next(self._ids)
         connection = Connection(
-            reader, writer, self._factory, self._clock, ConnectionContext(conn_id)
+            reader,
+            writer,
+            self._factory,
+            self._clock,
+            ConnectionContext(conn_id),
+            sleep=self._sleep,
         )
         self._connections[conn_id] = connection
         self._per_address[address] += 1

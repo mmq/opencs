@@ -97,6 +97,14 @@ class Session:
     def to_chamber(self) -> None:
         self._switch(ChamberPhase(self))
 
+    def return_to_chamber(self, late_quits: int = 0) -> None:
+        """Back from a game on the same connection: the member is in the Chamber again and the
+        buttons come back (I §5.5 step 5). ``late_quits`` is how many of the client's two
+        ``QUIT`` lines have not arrived yet; the Chamber swallows them."""
+        assert self.member is not None
+        self.services.lobby.return_to_chamber(self.member)
+        self._switch(ChamberPhase(self, returning=True, late_quits=late_quits))
+
     def to_login_prompt(self) -> None:
         self._switch(LoginPhase(self, at_prompt=True))
 

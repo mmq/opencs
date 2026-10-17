@@ -107,7 +107,7 @@ class QuitScanner:
     def feed(self, data: bytes) -> list[int]:
         """Return, for each ``QUIT\\r`` this chunk completed, the offset in ``data`` just after it.
 
-        The session passes ``data[offset:]`` to the Chamber once the second one arrives.
+        The caller decides what to do with the bytes after each one.
         """
         buf = self._tail + data
         shift = len(self._tail)

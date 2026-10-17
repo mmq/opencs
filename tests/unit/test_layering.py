@@ -15,15 +15,34 @@ ALLOWED: dict[str, set[str]] = {
     "messages": {"wire", "policy"},
     "store": {"policy"},
     "lobby": {"wire", "policy", "config", "store"},
-    "session": {"wire", "messages", "lobby", "store", "policy", "config", "clock", "connlog"},
+    "session": {
+        "wire",
+        "messages",
+        "lobby",
+        "store",
+        "policy",
+        "config",
+        "clock",
+        "connlog",
+        "world",
+        "routing",
+    },
     "net": {"wire", "messages", "policy", "clock", "connlog"},
+    "world": {"wire", "messages", "policy", "config"},
+    "routing": {"messages", "world"},
 }
 
 
 #: Packages that must be sans-IO (DESIGN §3, §3.4) and the standard-library modules they may not
-#: import: no sockets, no event loop, no threads, no wall clock. Extend to ``world`` in M4.
-SANS_IO = ("session", "lobby")
+#: import: no sockets, no event loop, no threads, no wall clock.
+SANS_IO = ("session", "lobby", "world", "routing")
 FORBIDDEN_STDLIB = {"asyncio", "socket", "selectors", "threading", "time", "select", "ssl"}
+
+
+def _sources(package: str) -> list[Path]:
+    """The modules of a package, or the module itself for ``routing.py``."""
+    folder = ROOT / package
+    return sorted(folder.rglob("*.py")) if folder.is_dir() else [folder.with_suffix(".py")]
 
 
 def _imports(path: Path) -> set[str]:
@@ -42,7 +61,7 @@ def _imports(path: Path) -> set[str]:
 
 def test_packages_import_only_allowed_layers() -> None:
     for package, allowed in ALLOWED.items():
-        for path in (ROOT / package).rglob("*.py"):
+        for path in _sources(package):
             for name in _imports(path):
                 parts = name.split(".")
                 if parts[0] != "opencs" or len(parts) == 1:
@@ -56,12 +75,13 @@ def test_the_guard_covers_the_layers_the_design_forbids() -> None:
     assert not {"session", "lobby", "world"} & ALLOWED["net"]
     assert "net" not in ALLOWED["session"]
     assert not {"net", "session"} & ALLOWED["lobby"]
+    assert not {"net", "session", "lobby", "routing", "asyncio"} & ALLOWED["world"]
     assert not {"net", "session", "lobby", "world"} & ALLOWED["wire"]
     assert not {"net", "session", "lobby", "world"} & ALLOWED["messages"]
 
 
 def test_sans_io_packages_import_no_io_modules() -> None:
     for package in SANS_IO:
-        for path in (ROOT / package).rglob("*.py"):
+        for path in _sources(package):
             for name in _imports(path):
                 assert name.split(".")[0] not in FORBIDDEN_STDLIB, f"{path.name} imports {name}"

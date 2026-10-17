@@ -240,3 +240,42 @@ DESTROY_OBJECT_SUB = 2
 #: Highest ``'R'`` lightning argument ("on/off"). Ours: the spec bounds only palette and rain (those
 #: client limits are in ``messages/limits.py``); I §8.20.
 AMBIENT_LIGHTNING_MAX = 1
+
+# --- Entity ids (I §6.2) ----------------------------------------------------------------------
+
+#: Id ranges, inclusive ``(low, high)``. II §8, all ours. Pod messages
+#: carry the id in one bias10 byte, so only pods need the 0-239 space; everything else stays above.
+PLAYER_IDS = (0, 31)
+RIVAL_POD_IDS = (32, 239)
+GUPPY_IDS = (250, 259)
+MUNCHER_IDS = (260, 4095)
+SENTINEL_IDS = (4096, 8191)
+STRUCTURE_IDS = (8192, 32767)  # towers, module drops, mines, called Sentinels
+
+# --- In-game session and pods (I §7.1, I §5.5) -------------------------------------------------
+
+#: The network name in ``'B'``; the banner reads "City: <city> on <network>". I App. A.1: the
+#: worked session sends "GENIE".
+NETWORK_NAME = "GENIE"
+
+#: The ``'B'`` is repeated every 0.2 s until the client's first frame, capped at 3500 bytes so the
+#: client's 4096-byte ring cannot overrun while its engine loads. I §7.1, II §7 (our timing).
+B_REPEAT_INTERVAL = 0.2
+B_REPEAT_CAP_BYTES = 3500
+
+#: After a death, seconds to wait for the client's bare ``'A'`` before answering state-4 reports
+#: again. I §7.1, II §7: 20 s (a server choice).
+DROP_REQUEST_TIMEOUT = 20.0
+
+#: Seconds to wait for the first, then the second, raw ``QUIT\r`` after answering the client's quit,
+#: and from the last one seen until the Chamber's buttons are restored with ``0x05 "A\r"``.
+#: I §5.5 step 5 (all server choices: 10 s, 1 s, 3 s).
+QUIT_WAIT = 10.0
+QUIT_SECOND_WAIT = 1.0
+RETURN_SETTLE = 3.0
+#: After the return, a missing ``QUIT\r`` (of the two the client sends) that still arrives within
+#: this long is swallowed, not relayed as chat (I §5.5 step 4, II §4.3 relay hygiene; our choice).
+LATE_QUIT_WINDOW = 10.0
+
+#: The pod state byte of a pod in drop state (I §7.1, I §7.4): it discards positions.
+POD_STATE_DROPPING = 4

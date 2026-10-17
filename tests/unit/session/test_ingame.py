@@ -1,11 +1,11 @@
-"""The in-game placeholder: frames in, bad input counted over a window (DESIGN §5)."""
+"""The in-game phase's input side: frames in, bad input counted over a window (DESIGN §5)."""
 
 from __future__ import annotations
 
 import pytest
 
 from fixtures.captures import load_capture
-from fixtures.sessions import Harness, enter_lobby, make_world
+from fixtures.sessions import Harness, make_world, play
 from opencs import policy
 from opencs.messages import ClientMessage, client
 from opencs.session.ingame import InGamePhase
@@ -17,8 +17,7 @@ SHORT_B = bytes.fromhex("62 10 21 43 48 41 f5 85 14 88 88 13 40 74 18 11 10 92 a
 
 
 def in_game() -> tuple[Harness, list[ClientMessage]]:
-    h = enter_lobby(make_world())
-    h.session.to_ingame()
+    h = play(make_world())
     seen: list[ClientMessage] = []
     phase = h.session.phase
     assert isinstance(phase, InGamePhase)

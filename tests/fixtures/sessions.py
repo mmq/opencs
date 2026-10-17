@@ -7,15 +7,18 @@ import random
 from dataclasses import dataclass, field
 
 from fixtures.lobbies import city
+from opencs import policy
 from opencs.clock import ManualClock
 from opencs.config import CityConfig
 from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.messages import ServerMessage
+from opencs.routing import Router
 from opencs.session.phases import Services
 from opencs.session.session import Session
 from opencs.store.memory import MemoryAccountStore
+from opencs.world.city import City
 
 FAST_ITERATIONS = 1000
 
@@ -33,6 +36,9 @@ class FakeIO:
 
     def send(self, msg: ServerMessage) -> None:
         self.messages.append(msg)
+
+    def send_first(self, msg: ServerMessage) -> None:
+        self.messages.insert(0, msg)
 
     def close(self, reason: str) -> None:
         self.closed_with.append(reason)
@@ -89,7 +95,11 @@ def make_world(
     clock = ManualClock(start)
     identity = Identity(MemoryAccountStore(), iterations=FAST_ITERATIONS)
     lobby = Lobby(cities or (city("A"), city("B"), city("C")), default, random.Random(seed))
-    return World(clock, identity, lobby, Services(identity, lobby, clock))
+    configs = cities or (city("A"), city("B"), city("C"))
+    cities_by_letter = {c.letter: City(c) for c in configs}
+    router = Router()
+    services = Services(identity, lobby, clock, cities_by_letter, router)
+    return World(clock, identity, lobby, services)
 
 
 def connect(world: World, conn_id: int | None = None) -> Harness:
@@ -117,5 +127,14 @@ def enter_lobby(world: World, account: str = "JOINGENIE") -> Harness:
     """A session that is in the Chamber, version check answered, output cleared."""
     h = login(world, account)
     h.feed("CSTTBT 105 150\r")
+    h.take()
+    return h
+
+
+def play(world: World, letter: str = "A", team: int = 0) -> Harness:
+    """A session in the Chamber taken through ``/PLAY`` and ``/GO 0`` into the in-game phase."""
+    h = enter_lobby(world)
+    h.feed(f"/PLAY {letter} {policy.TEAM_NAMES[team]}\r")
+    h.feed("/GO 0\r")
     h.take()
     return h

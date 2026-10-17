@@ -155,6 +155,28 @@ def test_frames_end_in_cr_and_raw_bytes_pass_through_in_order() -> None:
     assert data.endswith(b"\x0dtail")
 
 
+def test_send_first_goes_ahead_of_queued_traffic_and_is_tagged_when_written() -> None:
+    def script(io: ConnectionIO, data: bytes) -> None:
+        io.send_raw(b"first")
+        io.send(server.ReleaseDrop(3))
+        io.send_first(server.PingReply())
+        io.close("done")
+
+    async def scenario() -> bytes:
+        connection, reader, writer, _ = build(script)
+        reader.push(b"go")
+        await wait(connection.run())
+        return writer.data
+
+    data = asyncio.run(scenario())
+    frames = FrameReader().feed(data.replace(b"first", b""))
+    assert [f.payload[0:1] for f in frames] == [b"E", b"A"]  # the reply, then the queued drop
+    assert frames[0].payload[1] == 0x10  # tags follow the write order, not the call order
+    assert frames[1].payload[1] == 0x11
+    assert data.startswith(b"CS")  # ahead of the raw bytes queued before it, too
+    assert data.index(b"first") > 0
+
+
 # --- lifecycle -------------------------------------------------------------------------------
 
 

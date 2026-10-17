@@ -12,7 +12,7 @@ import asyncio
 import contextlib
 import logging
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 from opencs import policy
@@ -40,6 +40,8 @@ class ConnectionIO(Protocol):
     def send_raw(self, data: bytes) -> None: ...
 
     def send(self, msg: ServerMessage) -> None: ...
+
+    def send_first(self, msg: ServerMessage) -> None: ...
 
     def close(self, reason: str) -> None: ...
 
@@ -88,6 +90,7 @@ class Connection:
         *,
         outbox_limit: int = policy.OUTBOX_LIMIT,
         flush_timeout: float = policy.CLOSE_FLUSH_TIMEOUT,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.context = context
         self._reader = reader
@@ -96,6 +99,7 @@ class Connection:
         self._clock = clock
         self._limit = outbox_limit
         self._flush_timeout = flush_timeout
+        self._sleep = sleep  # the session tick's pacing; tests pulse it by hand
         self._log = ConnectionLog(logging.getLogger("opencs.net"), context)
         self._outbox: deque[Outbound] = deque()
         self._wake = asyncio.Event()
@@ -116,6 +120,11 @@ class Connection:
     def send(self, msg: ServerMessage) -> None:
         """Queue a message; its tag is assigned when it is written."""
         self._enqueue(msg)
+
+    def send_first(self, msg: ServerMessage) -> None:
+        """Queue a message ahead of everything already queued: the latency ping's reply, whose
+        delay the client measures and shows (I §8.7)."""
+        self._enqueue(msg, front=True)
 
     def close(self, reason: str) -> None:
         """Send what is queued, then close. A client that does not read is cut after
@@ -143,13 +152,16 @@ class Connection:
         for task in self._tasks:  # a pump stuck in drain() on a dead peer must not hold us up
             task.cancel()
 
-    def _enqueue(self, item: bytes | ServerMessage) -> None:
+    def _enqueue(self, item: bytes | ServerMessage, *, front: bool = False) -> None:
         if self._closing or self._aborted:
             return
         if len(self._outbox) >= self._limit:
             self.abort(f"outbox over {self._limit} items")
             return
-        self._outbox.append(item)
+        if front:
+            self._outbox.appendleft(item)
+        else:
+            self._outbox.append(item)
         self._wake.set()
 
     def encode(self, msg: ServerMessage) -> bytes:
@@ -215,7 +227,7 @@ class Connection:
 
     async def _tick_pump(self) -> None:
         while True:
-            await asyncio.sleep(1 / policy.SESSION_TICK_HZ)
+            await self._sleep(1 / policy.SESSION_TICK_HZ)
             if self._session is not None and not (self._closing or self._aborted):
                 self._guard(self._session.tick, self._clock.now())
 
