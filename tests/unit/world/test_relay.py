@@ -9,7 +9,7 @@ from fixtures.delivery import deliveries, to
 from fixtures.lobbies import city
 from fixtures.pods import report
 from fixtures.spec_vectors import FULL_FRAMES
-from opencs.messages import client, decode_server, server, server_payload
+from opencs.messages import client, decode_client, decode_server, server, server_payload
 from opencs.wire.frame import build_frame
 from opencs.world import relay
 from opencs.world.city import City, JoinResult
@@ -93,3 +93,71 @@ def test_a_dead_pods_fly_over_reports_are_not_relayed() -> None:
     c.client_message(a, client.DropMe(), 4.0)  # the pod drops again and is placed again
     out = deliveries(c, c.client_message(a, report(4, x_off=900), 4.1))
     assert [m.state for _, m in relayed(out)] == [0]
+
+
+# --- the Grenade and shot relays ---------------------------------------------------------------
+
+
+def three() -> tuple[City, list[int]]:
+    c = City(city("A"))
+    ids = []
+    for callsign, team in (("AAA", 0), ("BBB", 1), ("CCC", 1)):
+        r = c.join(callsign, team, 0.0)
+        assert isinstance(r, JoinResult)
+        ids.append(r.player_id)
+    return c, ids
+
+
+def test_a_grenade_is_relayed_as_the_tagged_e_g_to_every_other_client() -> None:
+    """A.3b: the captured 'E'-'G' from P1 reaches P2 as a tagged 'E' with the same fields."""
+    c, (a, b, d) = three()
+    thrown = decode_client(FULL_FRAMES["A3b_E_grenade_c2s"][1][5:])
+    assert isinstance(thrown, client.Grenade)
+    out = deliveries(c, c.client_message(a, thrown, 1.0))
+    assert [pid for pid, _ in out] == [b, d]  # not the thrower; not asked whether introduced
+    ((_, msg), _) = out
+    captured = FULL_FRAMES["A3b_E_grenade_s2c"][1]  # tag 0x87
+    assert build_frame(server_payload(msg, 0x87)) == captured
+    assert (thrown.pos.cell_x, thrown.pos.cell_z) == (2, 2) and thrown.yaw == 869
+
+
+def test_a_grenade_reaches_a_client_that_has_not_reported_yet() -> None:
+    c, (a, b, d) = three()
+    c.client_message(a, report(4), 1.0)
+    thrown = client.Grenade(report(0).pos, 100, 200)
+    assert [pid for pid, _ in deliveries(c, c.client_message(a, thrown, 2.0))] == [b, d]
+
+
+def shot(kind: int) -> client.Shot:
+    return client.Shot(0, report(0, x_off=207, y=212, z_off=235).pos, 3196, 0, kind)
+
+
+def test_a_shot_is_relayed_verbatim_to_every_client_but_the_reporter() -> None:
+    c, (a, b, d) = three()
+    fired = shot(11)
+    out = deliveries(c, c.client_message(a, fired, 1.0))
+    assert [pid for pid, _ in out] == [b, d]
+    msg = out[0][1]
+    assert isinstance(msg, server.Shot)
+    assert (msg.id, msg.pos, msg.orient, msg.pitch, msg.kind) == (
+        0,
+        fired.pos,
+        3196,
+        0,
+        11,
+    )
+    assert c.unsafe_shots == 0
+
+
+@pytest.mark.parametrize("kind", [1, 2, 3, 9, 11, 12, 13])
+def test_every_safe_kind_is_relayed(kind: int) -> None:
+    c, (a, *_) = three()
+    assert len(c.client_message(a, shot(kind), 1.0)) == 1
+
+
+@pytest.mark.parametrize("kind", [0, 4, 5, 6, 7, 8, 10, 14, 15, 16, 17, 18, 19, 20, 100])
+def test_an_unsafe_kind_is_dropped_and_counted(kind: int) -> None:
+    c, (a, *_) = three()
+    assert c.client_message(a, shot(kind), 1.0) == []
+    assert c.client_message(a, shot(kind), 1.5) == []
+    assert c.unsafe_shots == 2

@@ -20,7 +20,7 @@ from opencs.config import CityConfig
 from opencs.messages import ClientMessage, ServerMessage, client, server
 from opencs.world import chat, relay
 from opencs.world.entities import Entity, introduce
-from opencs.world.events import Event, ToHolders, ToPlayer
+from opencs.world.events import Event, ToAllExcept, ToHolders, ToPlayer
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.pods import Pod, PodPhase
 from opencs.world.view import ClientView
@@ -93,11 +93,17 @@ class City:
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
+        #: Shots dropped because their KIND would crash a client (I §8.25).
+        self.unsafe_shots = 0
         self._handlers: dict[
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
+            client.Grenade: lambda p, m, now: [
+                Event(relay.grenade(_as(client.Grenade, m)), ToAllExcept(p.id))
+            ],
+            client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m)),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -236,6 +242,16 @@ class City:
             log.debug("dropping chat of style %d from player %d", typed.style, player.id)
             return []
         return [event]
+
+    def _shot(self, player: Player, fired: client.Shot) -> list[Event]:
+        """A shot, relayed verbatim to every other client (I §8.25, I App. B). An unsafe KIND is
+        dropped and counted: a modified client must not crash the others."""
+        shot = relay.shot(fired)
+        if shot is None:
+            self.unsafe_shots += 1
+            log.warning("dropping a shot of KIND %d from player %d", fired.kind, player.id)
+            return []
+        return [Event(shot, ToAllExcept(player.id))]
 
     def _died(self, player: Player, now: float) -> list[Event]:
         """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""

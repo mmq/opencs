@@ -31,3 +31,18 @@ def pod_state(pod_id: int, report: client.PodState) -> server.PodState:
         state=state,
         weight=report.weight,
     )
+
+
+def grenade(thrown: client.Grenade) -> server.GrenadeInFlight:
+    """The tagged ``'E'``-``'G'`` the other clients get for a thrown Grenade: the same fields
+    (I §9.3.6, I §8). The thrower's own client already flies it."""
+    return server.GrenadeInFlight(thrown.pos, thrown.yaw, thrown.pitch)
+
+
+def shot(fired: client.Shot) -> server.Shot | None:
+    """The ``'c'`` the other clients get for a shot, verbatim, or None if its KIND is one that
+    crashes the client (I §8.25): the caller drops it and counts it. Only the reduced KINDs
+    1, 2, 3 and 9 (and +10) are relayed."""
+    if not fired.is_safe_kind:
+        return None
+    return server.Shot(fired.shooter, fired.pos, fired.orient, fired.pitch, fired.kind)
