@@ -79,6 +79,14 @@ def test_star_after_the_delay_when_not_telling_has_not_come() -> None:
     assert h.take() == b""
 
 
+def test_the_prompt_is_due_exactly_at_the_delay() -> None:
+    h = connect(make_world())
+    h.feed("HHH\rJOINGENIE\r")
+    h.take()
+    h.advance(policy.LOGIN_PROMPT_DELAY)
+    assert h.take() == b"\r\n*"
+
+
 def test_star_on_not_telling_when_it_comes_before_the_delay() -> None:
     h = connect(make_world())
     h.feed("HHH\rJOINGENIE\r")

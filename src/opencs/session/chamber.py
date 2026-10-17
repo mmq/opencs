@@ -7,6 +7,7 @@ All timers are deadlines checked in ``tick``; nothing sleeps.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
@@ -14,7 +15,9 @@ from typing import TYPE_CHECKING, Any
 from opencs import policy
 from opencs.lobby import commands, replies
 from opencs.lobby.lobby import Denied, Member, Placement
+from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import TextPhase
+from opencs.session.ratelimit import TokenBucket
 from opencs.wire.text import arm_line
 
 if TYPE_CHECKING:
@@ -26,6 +29,10 @@ GO_PROBLEMS = {
     2: "THE CITY FILE FOR MAP {map} DOES NOT MATCH THIS SERVER",
     3: "YOUR COMPUTER HAS NOT ENOUGH MEMORY TO LOAD MAP {map}",
 }
+
+
+#: The client's version reply (II §4.1): ``CSTTBT <n> <n>``.
+_VERSION_REPLY = re.compile(r"CSTTBT \d+ \d+")
 
 
 class State(Enum):
@@ -47,6 +54,12 @@ class ChamberPhase(TextPhase):
         self._placement: Placement | None = None
         self._city_list_at: float | None = None
         self._handlers = self._handler_table()
+        self._late_reply_possible = False
+        self._bucket = TokenBucket(
+            policy.CHAMBER_BURST_LINES, policy.CHAMBER_LINES_PER_SECOND, host.now()
+        )
+        self._drops = WindowedCounter(policy.CHAMBER_FLOOD_DROPS, policy.CHAMBER_FLOOD_WINDOW)
+        self._warned = False
 
     @property
     def member(self) -> Member:
@@ -64,6 +77,7 @@ class ChamberPhase(TextPhase):
         if self._state is State.VERSION and now >= self._deadline:
             self.host.log.info("no version reply in %.0f s; entering anyway", policy.VERSION_WAIT)
             self._open_lobby()
+            self._late_reply_possible = True
         elif self._state is State.LAUNCH and now >= self._deadline:
             self.host.log.info("no /GO reply in %.0f s; staying in the Chamber", policy.GO_WAIT)
             self._state = State.LOBBY
@@ -82,11 +96,36 @@ class ChamberPhase(TextPhase):
             self.host.log.info("version reply: %r", line)
             self._open_lobby()
             return
+        if self._state is State.LOBBY and (
+            self._swallow_late_reply(line) or not self._within_rate()
+        ):
+            return
         command = commands.parse(line)
         if self._state is State.LAUNCH:
             self._launch_line(command)
         else:
             self._lobby_line(command)
+
+    def _swallow_late_reply(self, line: str) -> bool:
+        """A version reply that arrives after the timeout is not chat: drop the first line after
+        entering if it is one (II §4.1)."""
+        possible, self._late_reply_possible = self._late_reply_possible, False
+        return possible and bool(_VERSION_REPLY.fullmatch(line.strip()))
+
+    def _within_rate(self) -> bool:
+        """Spend a token for this line; over the limit, drop it, warn once, and close a flood
+        (DESIGN §5)."""
+        now = self.host.now()
+        if self._bucket.take(now):
+            self._warned = False
+            return True
+        if self._drops.record(now):
+            self.host.log.warning("closing: Chamber flood")
+            self.host.close("Chamber flood")
+        elif not self._warned:
+            self._warned = True
+            self._say(replies.denied("TOO MANY LINES: SLOW DOWN"))
+        return False
 
     def _open_lobby(self) -> None:
         self._state = State.LOBBY

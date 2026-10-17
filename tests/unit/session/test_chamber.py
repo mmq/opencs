@@ -62,9 +62,85 @@ def test_no_reply_within_five_seconds_enters_anyway() -> None:
     assert h.take() == b""
     h.advance(0.2)
     assert h.take().startswith(ENTER_A)
-    # A late reply is then an ordinary (empty) line, not a second entry.
+    # A late reply is neither a second entry nor chat (see the two-player test below).
     h.feed("CSTTBT 105 150\r")
     assert ENTER_A not in h.take()
+
+
+def test_a_late_version_reply_is_not_relayed_as_chat() -> None:
+    world = make_world()
+    other = enter_lobby(world, "OTHER")
+    h = login(world)
+    h.take()
+    h.advance(policy.VERSION_WAIT)  # exactly the boundary
+    assert h.take().startswith(ENTER_A)
+    other.take()
+    h.feed("CSTTBT 105 150\r")
+    assert other.take() == b""
+    # Only once: the same text later is ordinary chat.
+    h.feed("CSTTBT 105 150\r")
+    assert b"CSTTBT 105 150" in other.take()
+
+
+def test_a_non_reply_first_line_after_the_timeout_is_still_chat() -> None:
+    world = make_world()
+    other = enter_lobby(world, "OTHER")
+    h = login(world)
+    h.advance(policy.VERSION_WAIT)
+    other.take()
+    h.feed("hello\r")
+    assert b"hello" in other.take()
+
+
+# --- the line rate limit (DESIGN §5) -----------------------------------------------------------
+
+
+def test_a_burst_of_chat_is_cut_to_the_budget_and_the_sender_is_warned_once() -> None:
+    world = make_world()
+    other = enter_lobby(world, "OTHER")
+    h = enter_lobby(world)
+    other.take()
+    h.feed("x\r" * (policy.CHAMBER_BURST_LINES + 5))
+    assert other.take().count(b"JOINGENI: x") == policy.CHAMBER_BURST_LINES
+    assert h.take().count(b"TOO MANY LINES") == 1
+
+
+def test_the_budget_refills_with_time() -> None:
+    world = make_world()
+    other = enter_lobby(world, "OTHER")
+    h = enter_lobby(world)
+    h.feed("x\r" * (policy.CHAMBER_BURST_LINES + 5))
+    h.take()
+    other.take()
+    h.advance(1 / policy.CHAMBER_LINES_PER_SECOND)
+    h.feed("y\r")
+    assert b"JOINGENI: y" in other.take()
+    assert b"TOO MANY" not in h.take()
+
+
+def test_sustained_flooding_closes_the_connection() -> None:
+    h = enter_lobby(make_world())
+    h.feed("x\r" * (policy.CHAMBER_BURST_LINES + policy.CHAMBER_FLOOD_DROPS + 1))
+    assert h.io.closed
+
+
+def test_honest_pace_is_never_limited() -> None:
+    h = enter_lobby(make_world())
+    for _ in range(100):
+        h.advance(1.0)
+        h.feed("/STATUS\r")
+    assert not h.io.closed
+    assert b"TOO MANY" not in h.take()
+
+
+def test_the_go_reply_is_not_rate_limited() -> None:
+    h = enter_lobby(make_world())
+    h.feed("/PLAY A\r")
+    h.take()
+    h.feed("x\r" * (policy.CHAMBER_BURST_LINES + 5))  # in LAUNCH: not chat, not counted
+    h.take()
+    h.feed("/GO 0\r")
+    assert h.take() == b"\x05C\r"
 
 
 def test_a_reply_before_the_timeout_does_not_enter_twice() -> None:

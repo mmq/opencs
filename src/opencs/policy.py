@@ -158,6 +158,17 @@ USABLE_COLORS = tuple(range(7))
 #: value).
 CHAT_MAX_CHARS = 72
 
+#: Per-connection limit on lines in the Chamber (DESIGN §5 "Input is hostile"): a token bucket of
+#: ``CHAMBER_BURST_LINES`` refilled at ``CHAMBER_LINES_PER_SECOND``. Each chat line is relayed to
+#: every other member, so an unlimited sender could overflow their outboxes and disconnect them.
+#: A player types far slower; a button press sends a few lines at once. Excess lines are dropped
+#: with one warning; more than ``CHAMBER_FLOOD_DROPS`` drops in ``CHAMBER_FLOOD_WINDOW`` seconds
+#: close the connection. Ours (the spec sets no rate).
+CHAMBER_BURST_LINES = 8
+CHAMBER_LINES_PER_SECOND = 2.0
+CHAMBER_FLOOD_DROPS = 40
+CHAMBER_FLOOD_WINDOW = 10.0
+
 #: How long after a bare ``/CITY`` a bare city letter counts as the button's second half and gets
 #: the hint line (II §4.2: "within 2 min"), in seconds.
 CITY_HINT_WINDOW = 120.0
