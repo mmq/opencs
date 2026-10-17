@@ -57,8 +57,8 @@ class Router:
                 return [p.id for p in players if p.id != player_id]
             case ToTeam(team):
                 return [p.id for p in players if p.team == team]
-            case ToHolders(entity_id):
-                return [p.id for p in players if p.view.holds(entity_id)]
+            case ToHolders(entity_id, except_player):
+                return [p.id for p in players if p.view.holds(entity_id) and p.id != except_player]
 
     def deliver(self, city: City, events: Iterable[Event]) -> None:
         """Send each event to the sinks of its audience. A player with no sink (not yet seated in

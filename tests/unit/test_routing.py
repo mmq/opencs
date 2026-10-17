@@ -78,6 +78,13 @@ def test_to_holders_reaches_those_whose_view_holds_the_entity() -> None:
     assert who(t, ToHolders(200)) == []
 
 
+def test_to_holders_except_leaves_out_one_holder() -> None:
+    t = table()
+    assert who(t, ToHolders(2, except_player=2)) == [3]  # the owner is left out
+    assert who(t, ToHolders(2, except_player=3)) == [2]
+    assert who(t, ToHolders(2, except_player=0)) == [2, 3]  # not a holder: changes nothing
+
+
 def test_to_a_player_who_is_not_in_the_city_nobody_is_reached() -> None:
     assert who(table(), ToPlayer(9)) == []
 

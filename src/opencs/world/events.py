@@ -41,9 +41,12 @@ class ToTeam:
 @dataclass(frozen=True, slots=True)
 class ToHolders:
     """Every client whose view holds this entity, i.e. has been told it exists (``'A'`` for a pod,
-    a Muncher's ``'K'``; I App. B, I §7.3)."""
+    a Muncher's ``'K'``; I App. B, I §7.3). ``except_player`` leaves one holder out: a relayed
+    ``'b'`` goes to everyone who holds the pod but its owner, whose own echo would drag it to a
+    stale position."""
 
     entity_id: int
+    except_player: int | None = None
 
 
 type Audience = ToPlayer | ToAll | ToAllExcept | ToTeam | ToHolders
