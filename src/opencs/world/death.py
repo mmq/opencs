@@ -21,6 +21,7 @@ import logging
 from opencs.messages import server
 from opencs.world import scoring
 from opencs.world.events import Event, ToPlayer
+from opencs.world.host import WorldHost
 from opencs.world.player import Player
 
 log = logging.getLogger("opencs.world")
@@ -53,3 +54,23 @@ def settle(victim: Player, payees: list[Player], destroy: list[Event], now: floa
     victim.grace.arm(now)  # the client's new-life reset re-arms it (I §9.1.5)
     victim.hits.clear()
     return events + destroy + victim.bounty.zero()
+
+
+def player_died(host: WorldHost, victim: Player, now: float) -> list[Event]:
+    """The victim's pod died (its bare ``'J'``, or a line drop in a fight, II §13 item 3): the
+    pod's own steps, then ``settle``. A second death before the respawn changes nothing."""
+    destroy = victim.pod.on_death(now)
+    if not destroy:
+        return []
+    victim.loadout.clear()  # the client empties every bay on its death (I §9.3.4, II §13)
+    events = settle(victim, payees(host, victim, now), destroy, now)
+    # The client lowered its marker silently, so the record takes the mirror's (II §11.3).
+    victim.progress.on_own_death(victim.score.marker)
+    return events
+
+
+def payees(host: WorldHost, victim: Player, now: float) -> list[Player]:
+    """The players to pay for a death: those in the victim's hit set within the window, still in
+    the city, and not on the victim's team (I §9.2.8, II §11.2)."""
+    found = (host.player(pid) for pid in victim.hits.payees(now))
+    return [p for p in found if p is not None and p.team != victim.team]

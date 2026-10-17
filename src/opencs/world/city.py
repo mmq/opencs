@@ -108,7 +108,7 @@ class City:
             client.Shot: lambda p, m, now: self.hits.shot(p, _as(client.Shot, m), now),
             client.HitReport: lambda p, m, now: self.hits.hit(p, _as(client.HitReport, m), now),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
-            client.Died: lambda p, m, now: self._died(p, now),
+            client.Died: lambda p, m, now: death.player_died(self, p, now),
         }
 
     # --- who is here -------------------------------------------------------------------------
@@ -395,24 +395,6 @@ class City:
             log.debug("dropping chat of style %d from player %d", typed.style, player.id)
             return []
         return [event]
-
-    def _died(self, player: Player, now: float) -> list[Event]:
-        """The client's bare ``'J'``: its pod died. The payout, the notices, the ``'J'`` and the
-        bounty zero are ``death.settle``; a second ``'J'`` before the respawn changes nothing."""
-        died = player.pod.on_death(now)
-        if not died:
-            return []
-        player.loadout.clear()  # the client empties every bay on its death (I §9.3.4, II §13)
-        events = death.settle(player, self._payees(player, now), died, now)
-        # The client lowered its marker silently, so the record takes the mirror's (II §11.3).
-        player.progress.on_own_death(player.score.marker)
-        return events
-
-    def _payees(self, victim: Player, now: float) -> list[Player]:
-        """The players to pay for a death: those in the victim's hit set within the window, still
-        in the city, and not on the victim's team (I §9.2.8, II §11.2)."""
-        found = (self._players.get(pid) for pid in victim.hits.payees(now))
-        return [p for p in found if p is not None and p.team != victim.team]
 
 
 def _as[M: ClientMessage](kind: type[M], msg: ClientMessage) -> M:
