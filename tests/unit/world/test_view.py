@@ -18,3 +18,11 @@ def test_hold_and_forget() -> None:
 
 def test_the_join_time_is_kept_for_the_id_reuse_guard() -> None:
     assert ClientView(0, joined_at=12.0).joined_at == 12.0
+
+
+def test_city_wide_state_is_recorded_apart_from_the_entities_held() -> None:
+    view = ClientView(3, joined_at=0.0)
+    assert not view.was_told("territory", None)
+    view.tell("territory", (1, 2))
+    assert view.was_told("territory", (1, 2)) and not view.was_told("territory", (1, 3))
+    assert view.held == set()  # nothing but real entity ids is ever held

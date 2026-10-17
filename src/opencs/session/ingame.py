@@ -75,6 +75,8 @@ class InGamePhase(Phase):
             client.HitReport: TokenBucket(*policy.RELAY_LIMIT_HIT, now),
             client.Chat: TokenBucket(*policy.RELAY_LIMIT_CHAT, now),
             client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
+            client.TowerOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
+            client.ModuleOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
         }
         self._over_budget = 0
         self._stalled_since: float | None = None
@@ -217,6 +219,8 @@ class InGamePhase(Phase):
                     self._over_budget += 1  # dropped: counted with the bad input in ``_process``
                     if isinstance(message, client.Shot):
                         self._note_shot(message)  # not relayed, but still a shot (II §9.3)
+                    elif isinstance(message, client.TowerOrder):
+                        self._refuse_order()  # the point it spent comes back (I §9.4.2)
                     return
                 self._to_city(message)
 
@@ -225,6 +229,12 @@ class InGamePhase(Phase):
         city = self._city
         assert city is not None
         city.note_shot(self._player_id, shot, self.host.now())
+
+    def _refuse_order(self) -> None:
+        """Answer an over-budget tower order ``'O'`` 2 instead of leaving the client waiting."""
+        city = self._city
+        assert city is not None
+        self.host.services.router.deliver(city, city.refuse_order(self._player_id))
 
     def _to_city(self, message: ClientMessage) -> None:
         """Hand a message to the world. An exception in the city is a bug: log it with the

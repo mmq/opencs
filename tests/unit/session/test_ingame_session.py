@@ -10,6 +10,7 @@ from opencs import policy
 from opencs.messages import (
     ClientMessage,
     ServerMessage,
+    WirePos,
     client,
     client_payload,
     decode_client,
@@ -448,3 +449,24 @@ def test_a_shot_over_the_budget_is_not_relayed_but_still_reaches_the_shot_log() 
     shot = frame(client.Shot(0, report(0).pos, 0, 0, 1))
     h.feed(shot * (burst + 1))
     assert len(player.shots) == burst + 1
+
+
+def test_a_tower_order_over_the_order_budget_is_answered_queue_full_so_the_point_is_refunded() -> (
+    None
+):
+    # I §9.4.2, II §14: the client spends a multiplier point on sending an order, and a refusal
+    # (subs 1-4) gives it back, so an order that is not passed on must still be answered.
+    h = play(make_world())
+    h.feed(frame(report(4)))
+    sent(h)
+    burst, _ = policy.RELAY_LIMIT_ORDER
+    # Beside an enemy corner, so every order within the budget is answered 1 and the ones over
+    # it are told apart by their 2.
+    order = frame(client.TowerOrder(WirePos(7, 1, 100, 20, 100), 0, 0))
+    h.feed(order * (burst + 2))
+    replies = [m for m in sent(h) if isinstance(m, server.OrderReply)]
+    assert (
+        replies
+        == [server.OrderReply(policy.ORDER_BAD_DROP_POINT)] * burst
+        + [server.OrderReply(policy.ORDER_QUEUE_FULL)] * 2
+    )

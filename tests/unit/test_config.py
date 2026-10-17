@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from opencs.config import ConfigError, load_config
+from opencs.messages import limits
 
 SHIPPED = Path(__file__).parents[2] / "config" / "server.toml"
 
@@ -197,3 +198,61 @@ def test_map_number_may_be_any_single_digit_from_one(tmp_path: Path) -> None:
     # I §5.4: <rev> repeats the map number and must be 0-9, so 9 is the last map a city can name.
     config = load_config(write_config(tmp_path, {"A": with_line("map = 9")}))
     assert config.cities[0].map == 9
+
+
+def blocks_line(rows: list[str]) -> str:
+    return "blocks = [" + ", ".join(f'"{r}"' for r in rows) + "]"
+
+
+GOOD_ROWS = ["00000000"] * 7 + ["01230123"]
+
+
+def test_blocks_are_read_row_by_row_and_default_to_none(tmp_path: Path) -> None:
+    config = load_config(write_config(tmp_path, {"A": with_line(blocks_line(GOOD_ROWS))}))
+    assert config.cities[0].blocks == tuple(tuple(int(c) for c in r) for r in GOOD_ROWS)
+    config = load_config(write_config(tmp_path, {"A": CITY}))
+    assert config.cities[0].blocks is None
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        GOOD_ROWS[:-1],  # seven rows
+        [*GOOD_ROWS, "00000000"],  # nine rows
+        [*GOOD_ROWS[:-1], "0123012"],  # a short row
+        [*GOOD_ROWS[:-1], "012301230"],  # a long row
+        [*GOOD_ROWS[:-1], "01230124"],  # class 4: the client indexes its table unchecked
+        [*GOOD_ROWS[:-1], "0123012x"],
+    ],
+)
+def test_bad_blocks_fail_naming_the_key(tmp_path: Path, rows: list[str]) -> None:
+    with pytest.raises(ConfigError, match=r"A\.toml: blocks:"):
+        load_config(write_config(tmp_path, {"A": with_line(blocks_line(rows))}))
+
+
+def test_blocks_must_be_a_list_of_strings(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="blocks"):
+        load_config(write_config(tmp_path, {"A": with_line("blocks = 5")}))
+    with pytest.raises(ConfigError, match="blocks"):
+        load_config(write_config(tmp_path, {"A": with_line("blocks = [1,2,3,4,5,6,7,8]")}))
+
+
+def test_the_score_overflow_constraint_is_checked_at_the_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every map under the 51 ceiling is safe (640 x 51 < 32 768), so the check is a guard: move
+    the limit to the exact product to see both sides of it."""
+    text = with_line("max_multiplier = 8") + "\n" + blocks_line(["00111100"] * 8)
+    total = 8 * (4 * 2 + 4 * 1)  # per row: four class-1 blocks worth 2, four class-0 worth 1
+    assert total == 96
+    product = total * 8
+    monkeypatch.setattr(limits, "SCORE_PRODUCT_LIMIT", product + 1)
+    load_config(write_config(tmp_path, {"A": text}))  # product just under the limit
+    monkeypatch.setattr(limits, "SCORE_PRODUCT_LIMIT", product)
+    with pytest.raises(ConfigError, match=r"blocks: grid total 96 x max_multiplier 8"):
+        load_config(write_config(tmp_path, {"A": text}))
+
+
+def test_the_largest_possible_map_fits_the_largest_multiplier(tmp_path: Path) -> None:
+    text = with_line("max_multiplier = 51") + "\n" + blocks_line(["33333333"] * 8)
+    assert load_config(write_config(tmp_path, {"A": text})).cities[0].max_multiplier == 51

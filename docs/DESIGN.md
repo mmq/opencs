@@ -94,6 +94,7 @@ src/opencs/
     territory.py         block classes (I §8.22, S4)
     weather.py           a city's ambient program (I §8.20)
     logistics.py         guppies and orders (I §9.4, I §9.4.3)
+    orders.py            tower orders, guppy actions to events, towers placed and destroyed (I §9.4, S3)
     modules.py           catalog, drops, pickup, eject (I §9.3.1, I §9.3.3)
     effects.py           effect-module requests (I §9.3.5, II §16.1)
     structures.py        towers and their durability (S3)

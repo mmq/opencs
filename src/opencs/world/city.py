@@ -20,12 +20,14 @@ from opencs.config import CityConfig
 from opencs.messages import ClientMessage, client, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
-from opencs.world.entities import Entity, introduce
+from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
+from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
+from opencs.world.territory import Territory
 from opencs.world.view import ClientView
 
 log = logging.getLogger("opencs.world")
@@ -53,11 +55,15 @@ class City:
 
     def __init__(self, config: CityConfig) -> None:
         self.config = config
+        #: The block-class map every client is sent once, on its first report (I §7.3).
+        self._territory = Territory(config.blocks)
         self._players: dict[int, Player] = {}
         self._ids = IdSpace()
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
+        #: Tower orders, the team guppies and the standing towers (I §9.4).
+        self.orders = Orders(self, self._territory)
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -79,6 +85,15 @@ class City:
             ],
             client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
             client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
+            client.TowerOrder: lambda p, m, now: self.orders.tower_order(
+                p, _as(client.TowerOrder, m), now
+            ),
+            client.ModuleOrder: lambda p, m, now: self.orders.module_order(
+                p, _as(client.ModuleOrder, m)
+            ),
+            client.LegArrived: lambda p, m, now: self.orders.leg_arrived(
+                p, _as(client.LegArrived, m), now
+            ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -152,6 +167,7 @@ class City:
         """Nobody is here: the next game starts fresh (S13)."""
         self._ids = IdSpace()
         self._live.clear()
+        self.orders.reset()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -264,6 +280,19 @@ class City:
                 events += introduce(entity, player.view, now)
         return events
 
+    def allocate_structure_id(self) -> int | None:
+        """A free id for a tower (II §8)."""
+        return self._ids.allocate(IdRange.STRUCTURE, self._earliest_start())
+
+    def release_structure_id(self, entity_id: int, now: float) -> None:
+        self._ids.release(IdRange.STRUCTURE, entity_id, now)
+
+    def refuse_order(self, player_id: int) -> list[Event]:
+        """A tower order the session did not pass on (over the order budget): see
+        ``Orders.refuse_order``."""
+        player = self._players.get(player_id)
+        return [] if player is None else self.orders.refuse_order(player)
+
     def despawn(self, entity_id: int) -> None:
         """The entity is gone: later joiners are not given it. Clients are told by the caller."""
         self._live.pop(entity_id, None)
@@ -286,10 +315,11 @@ class City:
         )
 
     def _go_live(self, player: Player, now: float) -> list[Event]:
-        """The player's first ``'b'`` is in: it is told about every pod already live, and they are
-        told about it, once per pair (I §7.2). Players that have not reported yet are
-        introduced when they do."""
+        """The player's first ``'b'`` is in: it is given the territory grid and every entity already
+        live (pods, towers, guppies), and the pods are told about it, once per pair (I §7.2,
+        I §7.3). Players that have not reported yet are introduced when they do."""
         events: list[Event] = []
+        events += inform(self._territory, player.view, now)
         for entity in self._live.values():
             events += introduce(entity, player.view, now)
         self._live[player.id] = player
@@ -361,7 +391,7 @@ class City:
         credit = reporter.shots.attribute(now)
         victim = self._players.get(hit.target)
         if victim is None:
-            return self._hit_entity(reporter, hit, credit.credited)
+            return self._hit_entity(reporter, hit, credit.credited, now)
         if victim.pod.phase is PodPhase.DEAD or not victim.pod.has_reported:
             log.debug("hit on player %d, which is not in play; ignored", victim.id)
             return []
@@ -375,9 +405,14 @@ class City:
             return []
         return [Event(damage, ToPlayer(victim.id))]
 
-    def _hit_entity(self, reporter: Player, hit: client.HitReport, credited: bool) -> list[Event]:
-        """A hit on something that is not a player's pod: a tower, Sentinel, Muncher or mine. Their
-        durability is the structures' and NPCs' (M7, M9); until then the report is ignored."""
+    def _hit_entity(
+        self, reporter: Player, hit: client.HitReport, credited: bool, now: float
+    ) -> list[Event]:
+        """A hit on something that is not a player's pod. A tower loses hit points (II §10); a
+        Sentinel, Muncher or mine is M9's, and until then the report is ignored."""
+        tower = self.orders.towers.get(hit.target)
+        if tower is not None:
+            return self.orders.hit_tower(reporter, tower, hit, now)
         log.debug(
             "player %d hit entity %d (credited=%s); not ruled yet",
             reporter.id,

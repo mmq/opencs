@@ -359,3 +359,36 @@ GRACE_BOX_TILES = 3
 #: at most 3 a second); four times that with a burst of several seconds' worth, as the other
 #: relayed kinds (``RELAY_LIMIT_*``). Ours.
 RELAY_LIMIT_HIT = (40, 16.0)
+
+# --- Towers, guppies and territory (I §9.4, II §10, II §5, II §14; DESIGN §3.1 ``structures``) ---
+
+#: Damage a tower absorbs before it is destroyed, and a MegaTower's (twice: the manual's 2:1 ratio).
+#: The client holds no tower health, so the number is ours: a full pod's power, so the same per-shot
+#: table applies and the starting gun's 150 destroys a tower in 20 hits. II §10.
+TOWER_HP = 3000
+MEGATOWER_HP = 6000
+
+#: A tower order meeting this many waiting jobs is refused with ``'O'`` sub 2 ("mission queue
+#: full", refunded). The client has the line, the number is ours. II §14, II §14.
+MAX_WAITING_TOWER_ORDERS = 4
+
+#: The ``'O'`` answers to a tower order: accepted, bad drop point, mission queue full. I §8.17, I
+#: §9.4.2.
+ORDER_ACCEPTED = 0
+ORDER_BAD_DROP_POINT = 1
+ORDER_QUEUE_FULL = 2
+
+#: The first guppy id; team ``t``'s guppy is ``GUPPY_BASE_ID + t``, which also picks its color
+#: and its cruise altitude. I §6.2, I §9.4.1, II §14.
+GUPPY_BASE_ID = GUPPY_IDS[0]
+
+#: The ``'E'``-``'P'`` ok byte M7 answers every module order with, until M8 delivers modules: 0
+#: ("Unable, no X modules in stock") so the client's purchase menu re-opens at once instead of
+#: after a second. I §8.7.
+MODULE_ORDER_UNAVAILABLE = 0
+
+#: Per-session limit on orders (tower and module), a token bucket ``(burst, per second)``, as
+#: ``RELAY_LIMIT_*`` (DESIGN §5). A player orders at most once a second (the manual's one purchase
+#: per second, II §14); each accepted order queues work, so an unlimited sender is bounded here
+#: as well as by the queue. Ours.
+RELAY_LIMIT_ORDER = (4, 1.0)
