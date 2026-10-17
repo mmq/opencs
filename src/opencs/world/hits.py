@@ -66,8 +66,12 @@ class Hits:
         counted.
         """
         player.shots.record(now, fired.shooter)
-        self.note_fire(fired.shooter, fired.pos, now, "ENEMY FIRE")
-        if fired.shooter != player.id and not self._host.is_known_npc(fired.shooter):
+        mismatch = fired.shooter != player.id and not self._host.is_known_npc(fired.shooter)
+        # A shooter that is neither the sender nor a known NPC is taken as the sender's own shot,
+        # so a spoofed id cannot mark the sender's teammates as under attack (II §13, I §11.4, II
+        # §9.2).
+        self.note_fire(player.id if mismatch else fired.shooter, fired.pos, now, "ENEMY FIRE")
+        if mismatch:
             self.shooter_mismatches += 1
             # Warn once; a client that simulates NPCs this city does not know yet (before they
             # exist) would otherwise fill the log with one line per shot.

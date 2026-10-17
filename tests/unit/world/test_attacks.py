@@ -104,10 +104,13 @@ def test_an_npc_shot_is_an_attack_on_every_pod_in_range_even_the_reporters() -> 
     assert last(c, d) == ""
 
 
-def test_an_unknown_shooter_is_treated_as_an_npc() -> None:
-    c, (a, b) = field_of([0, 0], [1000, 1100])
-    shoot(c, b, 9999, 1000)
-    assert last(c, a) != "" and last(c, b) != ""
+def test_an_unknown_shooter_is_taken_as_the_senders_own_shot() -> None:
+    c, (a, b, d) = field_of([0, 0, 1], [1000, 1100, 1200])
+    shoot(c, b, 9999, 1100)  # b names a shooter that is no pod and no NPC
+    assert last(c, a) == ""  # b's teammate is not marked
+    assert last(c, b) == ""  # nor is b
+    assert last(c, d) != ""  # b's enemy is, as for any shot of b's
+    assert c.shooter_mismatches == 1
 
 
 def test_a_shot_the_session_dropped_still_counts() -> None:

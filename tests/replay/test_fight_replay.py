@@ -25,6 +25,7 @@ from dataclasses import dataclass
 import pytest
 
 from fixtures.captures import capture_names, load_capture
+from fixtures.cities import Npc
 from fixtures.lobbies import city
 from opencs import policy
 from opencs.messages import DecodeError, client, decode_client, decode_server, server
@@ -101,6 +102,9 @@ class Replayer:
             self.power.append((t, msg.power, msg.state, msg.pos.y))
             judge(self.result, self.pod, self.power, self.own_shots, t)
         elif isinstance(msg, client.Shot):
+            if msg.shooter != self.me and not self.city.is_known_npc(msg.shooter):
+                self.city.spawn(Npc(msg.shooter), t)  # the NPC the client simulates; the live
+                # city has spawned it, and only a known NPC's shot is everyone's enemy
             self.city.client_message(self.me, msg, t)
             if msg.shooter == self.me:
                 self.own_shots.append(t)
