@@ -10,3 +10,11 @@ def test_create_get_and_duplicate() -> None:
     assert store.get("ALICE") == account
     assert not store.create(Account("ALICE", b"other", b"other", 1))
     assert store.get("ALICE") == account
+
+
+def test_callsign_registered_compares_the_cut_names() -> None:
+    store = MemoryAccountStore()
+    store.create(Account("ALPHAXYZ", b"s", b"h", 1))
+    assert store.callsign_registered("ALPHAXYZ", 8)
+    assert not store.callsign_registered("ALPHAXY", 8)
+    assert store.callsign_registered("ALPHA", 5)

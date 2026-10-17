@@ -19,3 +19,6 @@ class MemoryAccountStore:
             return False
         self._accounts[account.name] = account
         return True
+
+    def callsign_registered(self, callsign: str, length: int) -> bool:
+        return any(name[:length] == callsign for name in self._accounts)

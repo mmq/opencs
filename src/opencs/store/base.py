@@ -36,3 +36,8 @@ class AccountStore(Protocol):
     def create(self, account: Account) -> bool:
         """Store a new account; False, storing nothing, if the name is taken."""
         ...
+
+    def callsign_registered(self, callsign: str, length: int) -> bool:
+        """True if some account's name cut to ``length`` characters equals ``callsign``: that
+        callsign belongs to the account, so no guest may take it (II §3)."""
+        ...

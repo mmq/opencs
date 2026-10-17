@@ -79,7 +79,11 @@ class Identity:
         return callsign in self._callsigns
 
     def _guest(self, name: str) -> Pilot | Refused:
-        if name != policy.GUEST_ACCOUNT_NAME and self._store.get(name) is not None:
+        # Compare callsigns, not names: ALPHAXYZW would otherwise be played as ALPHAXYZ's callsign.
+        base = name[: policy.MAX_CALLSIGN_LENGTH]
+        if name != policy.GUEST_ACCOUNT_NAME and self._store.callsign_registered(
+            base, policy.MAX_CALLSIGN_LENGTH
+        ):
             return Refused("THAT NAME IS A REGISTERED ACCOUNT: LOG IN WITH ITS PASSWORD")
         return self._admit(name, None)
 

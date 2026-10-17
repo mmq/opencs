@@ -120,6 +120,29 @@ def test_a_guest_cannot_take_a_registered_accounts_name() -> None:
     assert pilot(identity.login("zed")) == Pilot("ZED", None)
 
 
+def test_a_guest_cannot_take_a_registered_accounts_callsign_by_truncation() -> None:
+    identity, _ = make()
+    identity.release(pilot(identity.login("ALPHAXYZ,secret")))
+    refused = identity.login("ALPHAXYZW")
+    assert isinstance(refused, Refused)
+    assert pilot(identity.login("ALPHAXYZ,secret")).callsign == "ALPHAXYZ"
+
+
+def test_a_guest_cannot_take_the_callsign_of_a_longer_registered_name() -> None:
+    identity, _ = make()
+    identity.release(pilot(identity.login("LONGNAME99,secret")))
+    assert isinstance(identity.login("LONGNAME"), Refused)
+    assert isinstance(identity.login("LONGNAMEX"), Refused)
+    assert pilot(identity.login("LONGNAM")).callsign == "LONGNAM"
+
+
+def test_joingenie_with_a_password_is_a_guest_and_registers_nothing() -> None:
+    identity, store = make()
+    guest = pilot(identity.login("joingenie,x"))
+    assert guest.is_guest
+    assert store.get("JOINGENIE") is None
+
+
 def test_a_guest_online_makes_the_real_account_take_a_numbered_callsign() -> None:
     identity, _ = make()
     guest = pilot(identity.login("ALICE"))
