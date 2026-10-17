@@ -316,3 +316,24 @@ def test_a_hit_on_a_mine_is_ignored() -> None:
     mine_id = lay(c, a)
     assert deliveries(c, c.client_message(b, client.HitReport(mine_id, 0), 12.0)) == []
     assert mine_id in c.effects.mines
+
+
+# --- not this milestone's ---
+
+
+def test_call_muncher_call_sentinel_and_the_drone_are_logged_and_ignored() -> None:
+    c, (a, _b) = world()
+    t = tower(c, 1, at(10))
+    for letter in "CS":
+        assert use(c, a, letter) == []
+    assert c.client_message(a, client.Drone(None), 10.0) == []
+    assert t in c.orders.towers and not c.effects.mines
+
+
+def test_an_emptied_city_forgets_its_mines_and_drops() -> None:
+    c, (a, b) = world()
+    lay(c, a)
+    c.drops.create(6, WirePos(0, 0, 1, 1, 1), 5.0)
+    c.leave(a, 20.0)
+    c.leave(b, 21.0)
+    assert not c.effects.mines and not c.drops.drops
