@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from opencs.lobby.identity import Identity, Pilot
 from opencs.store.base import Account, ProgressRecord, Stores
 from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
+from opencs.store.sqlite import MIGRATIONS, SchemaError, SqliteStore
 
 STAMP = 1_700_000_000.5
 
@@ -20,7 +23,12 @@ def _memory(tmp_path: Path) -> Stores:
     return Stores(MemoryAccountStore(), MemoryProgressStore(lambda: STAMP))
 
 
-FACTORIES: dict[str, Factory] = {"memory": _memory}
+def _sqlite(tmp_path: Path) -> Stores:
+    db = SqliteStore(tmp_path / "t.db", now=lambda: STAMP)
+    return Stores(db, db)
+
+
+FACTORIES: dict[str, Factory] = {"memory": _memory, "sqlite": _sqlite}
 
 
 @pytest.fixture(params=sorted(FACTORIES))
@@ -89,3 +97,75 @@ def test_negative_markers_and_large_scores_survive(stores: Stores) -> None:
         10**13,
         10**15,
     )
+
+
+# --- SQLite only: the file, the schema and the migrations -------------------------------------
+
+
+def test_a_reopened_file_still_holds_accounts_and_progress(tmp_path: Path) -> None:
+    path = tmp_path / "t.db"
+    first = SqliteStore(path)
+    first.create(Account("ALICE", b"salt", b"hash", 7))
+    first.save("acct:ALICE", RECORD)
+    first.close()
+    second = SqliteStore(path)
+    assert second.get("ALICE") == Account("ALICE", b"salt", b"hash", 7)
+    loaded = second.load("acct:ALICE")
+    assert loaded is not None and loaded.bays == RECORD.bays and loaded.career == RECORD.career
+    second.close()
+
+
+def test_a_new_file_is_migrated_to_the_latest_version(tmp_path: Path) -> None:
+    db = SqliteStore(tmp_path / "t.db")
+    assert db.schema_version == len(MIGRATIONS)
+    db.close()
+
+
+def test_a_new_migration_runs_once_on_an_old_file_and_keeps_its_data(tmp_path: Path) -> None:
+    path = tmp_path / "t.db"
+    old = SqliteStore(path)
+    old.save("k", RECORD)
+    old.close()
+    extra = (*MIGRATIONS, ("ALTER TABLE progress ADD COLUMN note TEXT",))
+    upgraded = SqliteStore(path, migrations=extra)
+    assert upgraded.schema_version == len(extra)
+    loaded = upgraded.load("k")
+    assert loaded is not None and loaded.score == RECORD.score
+    upgraded.close()
+    again = SqliteStore(path, migrations=extra)  # nothing to run: the ALTER would fail twice
+    assert again.schema_version == len(extra)
+    again.close()
+
+
+def test_a_failing_migration_leaves_the_old_version_intact(tmp_path: Path) -> None:
+    path = tmp_path / "t.db"
+    SqliteStore(path).close()
+    bad = (*MIGRATIONS, ("ALTER TABLE progress ADD COLUMN ok TEXT", "THIS IS NOT SQL"))
+    with pytest.raises(sqlite3.Error):
+        SqliteStore(path, migrations=bad)
+    db = SqliteStore(path)  # still version 1, and the half-applied ALTER was rolled back
+    assert db.schema_version == len(MIGRATIONS)
+    with pytest.raises(sqlite3.Error):
+        db._db.execute("SELECT ok FROM progress")
+    db.close()
+
+
+def test_a_database_from_a_newer_server_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "t.db"
+    SqliteStore(path, migrations=(*MIGRATIONS, ("CREATE TABLE later (x)",))).close()
+    with pytest.raises(SchemaError):
+        SqliteStore(path)
+
+
+def test_passwords_are_never_in_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "t.db"
+    db = SqliteStore(path)
+    password = "Hunter2-Unmistakable"
+    identity = Identity(db, iterations=1000)
+    assert isinstance(identity.login(f"ALICE,{password}"), Pilot)
+    db.close()
+    raw = path.read_bytes()
+    assert password.encode() not in raw
+    assert b"ALICE" in raw  # the name is stored, and the check above could otherwise be vacuous
+    stored = SqliteStore(path).get("ALICE")
+    assert stored is not None and len(stored.password_hash) == 32 and len(stored.salt) > 0
