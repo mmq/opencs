@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Self
 
+from opencs.messages import limits
 from opencs.messages.base import ClientMessage, DecodeError, message, sub_letters
 from opencs.messages.fields import (
     WirePos,
@@ -33,9 +34,6 @@ EFFECTS = {
     "I": "Immunize",
     "D": "Mine Sweep",
 }
-
-#: Bays a pod has (I §8.6).
-BAY_COUNT = 9
 
 
 @message
@@ -102,7 +100,7 @@ class Bays(ClientMessage):
 
     @classmethod
     def read(cls, r: Reader, sub: int) -> Self:
-        levels = tuple(read_b10(r) for _ in range(BAY_COUNT))
+        levels = tuple(read_b10(r) for _ in range(limits.BAY_COUNT))
         return cls(levels, read_b88(r))
 
 

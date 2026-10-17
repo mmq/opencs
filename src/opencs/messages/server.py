@@ -171,10 +171,6 @@ class SetStatus(ServerMessage):
         return cls(r.num(), read_b10(r), r.num())
 
 
-#: Bays a pod has (I §8.6).
-BAY_COUNT = 9
-
-
 @message
 class SetBays(ServerMessage):
     """``'D'`` ``'B'`` ``level x9:b10, marker:b88``: set the nine module-bay levels (0 = no bay,
@@ -186,7 +182,7 @@ class SetBays(ServerMessage):
     marker: int
 
     def validate(self) -> None:
-        check_range("bay count", len(self.levels), BAY_COUNT, BAY_COUNT)
+        check_range("bay count", len(self.levels), limits.BAY_COUNT, limits.BAY_COUNT)
         for level in self.levels:
             check_range("bay level", level, 0, policy.MAX_MODULE_LEVEL)
         check_b88("marker", self.marker)
@@ -199,7 +195,7 @@ class SetBays(ServerMessage):
 
     @classmethod
     def read(cls, r: Reader, sub: int) -> Self:
-        levels = tuple(read_b10(r) for _ in range(BAY_COUNT))
+        levels = tuple(read_b10(r) for _ in range(limits.BAY_COUNT))
         return cls(levels, read_b88(r))
 
 
