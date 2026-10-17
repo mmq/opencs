@@ -20,6 +20,12 @@ ALLOWED: dict[str, set[str]] = {
 }
 
 
+#: Packages that must be sans-IO (DESIGN §3, §3.4) and the standard-library modules they may not
+#: import: no sockets, no event loop, no threads, no wall clock. Extend to ``world`` in M4.
+SANS_IO = ("session", "lobby")
+FORBIDDEN_STDLIB = {"asyncio", "socket", "selectors", "threading", "time", "select", "ssl"}
+
+
 def _imports(path: Path) -> set[str]:
     found: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text())):
@@ -52,3 +58,10 @@ def test_the_guard_covers_the_layers_the_design_forbids() -> None:
     assert not {"net", "session"} & ALLOWED["lobby"]
     assert not {"net", "session", "lobby", "world"} & ALLOWED["wire"]
     assert not {"net", "session", "lobby", "world"} & ALLOWED["messages"]
+
+
+def test_sans_io_packages_import_no_io_modules() -> None:
+    for package in SANS_IO:
+        for path in (ROOT / package).rglob("*.py"):
+            for name in _imports(path):
+                assert name.split(".")[0] not in FORBIDDEN_STDLIB, f"{path.name} imports {name}"
