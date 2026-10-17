@@ -8,6 +8,7 @@ import pytest
 from fixtures.delivery import to
 from fixtures.drops import at, drop, game, player
 from fixtures.lobbies import city
+from fixtures.pods import report
 from opencs.messages import WirePos, client, server
 from opencs.world.city import City, JoinResult
 from opencs.world.orders import Strike
@@ -177,6 +178,43 @@ def test_a_pod_already_dead_is_not_killed_twice() -> None:
     assert record is not None and record.eligible
     assert out == [(b, server.Delete(a))]
     assert player(c, b).score.server_credit == credit
+
+
+def respawn(c: City, pid: int) -> None:
+    """The client's bare 'A', the drop, and the report that lands."""
+    c.client_message(pid, client.DropMe(), 24.0)
+    c.client_message(pid, report(4), 25.0)
+    c.client_message(pid, at(2000), 28.0)
+
+
+def test_a_pod_that_died_respawned_and_dropped_inside_the_window_is_not_in_a_fight() -> None:
+    c, (a, b) = game([0, 1])
+    c.client_message(b, client.HitReport(a, 10), 20.0)
+    c.client_message(a, client.Died(), 21.0)
+    respawn(c, a)  # landed
+    credit = player(c, b).score.server_credit
+    out, record = drop(c, a, 35.0)
+    assert record is not None and record.eligible
+    assert out == [(b, server.Delete(a))]  # no second 'J'
+    assert player(c, b).score.server_credit == credit
+
+
+def test_a_strike_before_the_pods_death_is_not_a_fight_for_its_next_life() -> None:
+    c, (a, _) = game([0, 1])
+    c.orders.strikes.append(Strike(20.0, 1, SPOT))
+    c.client_message(a, client.Died(), 21.0)
+    respawn(c, a)
+    _, record = drop(c, a, 35.0)
+    assert record is not None and record.eligible
+
+
+def test_an_attack_after_the_respawn_is_still_a_fight() -> None:
+    c, (a, b) = game([0, 1])
+    c.client_message(a, client.Died(), 21.0)
+    respawn(c, a)
+    enemy_shot(c, b, 30.0)
+    _, record = drop(c, a, 35.0)
+    assert record is not None and not record.eligible
 
 
 def test_a_pod_that_never_reported_is_eligible() -> None:

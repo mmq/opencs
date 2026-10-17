@@ -53,6 +53,7 @@ def settle(victim: Player, payees: list[Player], destroy: list[Event], now: floa
     victim.score.on_own_death(now)
     victim.grace.arm(now)  # the client's new-life reset re-arms it (I §9.1.5)
     victim.hits.clear()
+    victim.attacks.new_life(now)  # the attacks that killed it are paid; a drop later is no fight
     return events + destroy + victim.bounty.zero()
 
 
