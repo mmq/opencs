@@ -66,63 +66,112 @@ def test_type_and_tag_properties() -> None:
     assert parse_one(FULL_FRAMES["A3_A"][1]).payload[1] == 0x20  # tag 20
 
 
-def test_a3_state_message_fields() -> None:
-    r = Reader(parse_one(FULL_FRAMES["A3_b"][1]).payload)
-    assert r.raw(1) == b"b"
-    assert r.b10() == 0
-    assert r.num() == 145  # Xoff
-    assert r.num() == 240  # Y
-    assert r.num() == 5  # Zoff
-    assert r.num() == 450  # orient
-    assert (r.b88(), r.b88(), r.b10(), r.b10()) == (0, 0, 0, 0)  # fwd, fwd_target, v1, v2
-    assert r.b10() == 4  # state: drop
-    assert r.num() == 3000  # power
-    assert r.b10() == 0  # weight
-    assert (r.b10(), r.b10()) == (0, 0)  # armor
+# Field-by-field decodes of every A.3 / A.3b vector, with the codec Appendix A.1/A.2 names for each
+# field (I §4.3: the wrong codec is the commonest error; zero hides it, so non-zero values matter).
+# ops: r = one raw byte (type, tag, sub-type), others are the codec names.
+_Ops = tuple[str, ...]
+FIELD_CASES: list[tuple[str, _Ops, tuple[object, ...]]] = [
+    # A.3
+    (
+        "A3_B",  # type, tag, self_id, slot, callsign, network, city, max_mult, tower_output,
+        # max_module_level, n4, n5
+        ("r", "r", "b10", "b10", "str", "str", "str", "b10", "b10", "b10", "b10", "b10"),
+        (b"B", b"\x11", 0, 0, b"JOINGENI", b"GENIE", b"CYBERCITY ONE", 8, 1, 2, 0, 0),
+    ),
+    ("A3_S", ("r", "b10"), (b"S", 0)),
+    ("A3_A", ("r", "r", "b10"), (b"A", b"\x20", 0)),  # tag 20, id 0
+    (
+        "A3_b",  # grid, Xoff, Y, Zoff, orient, fwd, fwd_target, v1, v2, state, power, ...
+        (
+            *("r", "grid", "num", "num", "num", "num", "b88", "b88", "num", "num", "b10"),
+            *("num", "b10", "num", "num"),
+        ),
+        (b"b", (0, 0), 145, 240, 5, 450, 0, 0, 0, 0, 4, 3000, 0, 0, 0),
+    ),
+    ("A3_EN", ("r", "r"), (b"E", b"N")),
+    ("A3_EN_reply", ("r", "r", "r"), (b"E", b"\x27", b"N")),  # tag 27
+    ("A3_d", ("r", "rest"), (b"d", bytes([0x11, 0x12, 0x13, 0x14, 0x15]))),
+    ("A3_I", ("r", "num", "b10"), (b"I", 4096, 0)),  # the Sentinel, damage class 0
+    (
+        "A3_M",  # grid, Xoff, Y, Zoff, mega, priority
+        ("r", "grid", "num", "num", "num", "b10", "b10"),
+        (b"M", (0, 0), 224, 62, 332, 0, 0),
+    ),
+    ("A3_K", ("r", "num"), (b"K", 250)),
+    ("A3_Q", ("r", "b10", "num"), (b"Q", 0, 32)),  # sub 0, object 32
+    # A.3b
+    (
+        "A3b_G",  # id, callsign, slot, grid, Xoff, Y, Zoff, orient, v1:b88, v2, bounty_div10
+        ("r", "r", "b10", "str", "b10", "grid", "num", "num", "num", "num", "b88", "num", "num"),
+        (b"G", b"\x3a", 1, b"JOINGEN2", 8, (0, 0), 75, 240, 75, 450, 0, 0, 0),
+    ),
+    ("A3b_A", ("r", "r", "b10"), (b"A", b"\x3b", 1)),
+    (
+        "A3b_b",  # S->C relayed: id first, then as A.1 'b' (no power or armor)
+        (
+            *("r", "b10", "grid", "num", "num", "num", "num", "b88", "b88", "num", "num"),
+            *("b10", "b10"),
+        ),
+        (b"b", 1, (0, 0), 75, 240, 75, 450, 0, 0, 0, 0, 0, 0),
+    ),
+    (
+        "A3b_E_grenade_c2s",
+        ("r", "r", "grid", "num", "num", "num", "num", "num"),
+        (b"E", b"G", (2, 2), 100, 72, 300, 869, 3332),
+    ),
+    (
+        "A3b_E_grenade_s2c",
+        ("r", "r", "r", "grid", "num", "num", "num", "num", "num"),
+        (b"E", b"\x87", b"G", (2, 2), 100, 72, 300, 869, 3332),
+    ),
+    ("A3b_J_s2c", ("r", "r", "num"), (b"J", b"\x4d", 1)),  # tag 4d, id num 20 -> 1
+    ("A3b_J_c2s", ("r",), (b"J",)),
+    ("A3b_J0_s2c", ("r", "r", "num"), (b"J", b"\x4f", 0)),
+    ("A3b_A_c2s", ("r",), (b"A",)),
+    ("A3b_U", ("r", "b10", "str"), (b"U", 0, b"ok")),
+    ("A3b_a", ("r", "b10", "b10", "str"), (b"a", 0, 0, b"ok")),  # sender, style, text
+    ("A3b_C_c2s", ("r",), (b"C",)),
+    ("A3b_C_s2c", ("r", "r"), (b"C", b"\x65")),
+    (
+        "A3b_c",  # shooter:num, grid, Xoff, Y, Zoff, orient, pitch, kind
+        ("r", "num", "grid", "num", "num", "num", "num", "num", "b10"),
+        (b"c", 0, (1, 1), 207, 212, 235, 3196, 0, 1),
+    ),
+    ("A3b_I_c2s", ("r", "num", "b10"), (b"I", 1, 0)),  # target num 20 -> 1, damage 0
+]
+
+
+def _vector_payload(name: str) -> bytes:
+    if name in FULL_FRAMES:
+        return parse_one(FULL_FRAMES[name][1]).payload
+    return PAYLOADS[name]
+
+
+@pytest.mark.parametrize(("name", "ops", "expected"), FIELD_CASES, ids=[c[0] for c in FIELD_CASES])
+def test_spec_vector_fields(name: str, ops: _Ops, expected: tuple[object, ...]) -> None:
+    r = Reader(_vector_payload(name))
+    got: list[object] = []
+    for op in ops:
+        match op:
+            case "r":
+                got.append(r.raw(1))
+            case "rest":
+                got.append(r.rest())
+            case _:
+                got.append(getattr(r, op)())
+    assert tuple(got) == expected
     assert r.at_end()
 
 
-def test_a3_identity_message_fields() -> None:
-    r = Reader(parse_one(FULL_FRAMES["A3_B"][1]).payload)
-    assert (r.raw(1), r.raw(1)) == (b"B", b"\x11")  # type, tag
-    assert (r.b10(), r.b10()) == (0, 0)  # self_id, slot
-    assert r.str() == b"JOINGENI"
-    assert r.str() == b"GENIE"
-    assert r.str() == b"CYBERCITY ONE"
-    assert (r.b10(), r.b10(), r.b10(), r.b10(), r.b10()) == (8, 1, 2, 0, 0)
-    assert r.at_end()
+def test_every_vector_has_a_field_case() -> None:
+    covered = {c[0] for c in FIELD_CASES}
+    assert covered == set(FULL_FRAMES) | set(PAYLOADS)
 
 
-def test_a3b_fields() -> None:
-    g = Reader(parse_one(FULL_FRAMES["A3b_G"][1]).payload)
-    g.raw(2)  # type, tag
-    assert g.b10() == 1  # id: a pod id is a b10 byte (I §6.2)
-    assert g.str() == b"JOINGEN2"
-    assert g.b10() == 8  # slot: index 1, team 0
-    assert g.grid() == (0, 0)
-    assert (g.num(), g.num(), g.num(), g.num()) == (75, 240, 75, 450)
-    assert (g.b88(), g.b10(), g.b10()) == (0, 0, 0)
-    assert g.at_end()
-
-    e = Reader(parse_one(FULL_FRAMES["A3b_E_grenade_c2s"][1]).payload)
-    assert e.raw(2) == b"EG"
-    assert e.grid() == (2, 2)
-    assert (e.num(), e.num(), e.num(), e.num(), e.num()) == (100, 72, 300, 869, 3332)
-    assert e.at_end()
-
-    i = Reader(parse_one(FULL_FRAMES["A3_I"][1]).payload)
-    assert i.raw(1) == b"I"
-    assert i.num() == 4096
-    assert i.b10() == 0
-
-    u = Reader(parse_one(FULL_FRAMES["A3b_U"][1]).payload)
-    assert (u.raw(1), u.b10(), u.str()) == (b"U", 0, b"ok")
-
-    c = Reader(PAYLOADS["A3b_c"])
-    assert (c.raw(1), c.b10()) == (b"c", 0)
-    assert c.grid() == (1, 1)
-    assert (c.num(), c.num(), c.num(), c.num(), c.num()) == (207, 212, 235, 3196, 0)
-    assert c.b10() == 1
+def test_grenade_relay_is_the_client_payload_behind_a_tag() -> None:
+    c2s = parse_one(FULL_FRAMES["A3b_E_grenade_c2s"][1]).payload
+    s2c = parse_one(FULL_FRAMES["A3b_E_grenade_s2c"][1]).payload
+    assert s2c == c2s[:1] + b"\x87" + c2s[1:]
 
 
 def test_back_to_back_without_terminator() -> None:
