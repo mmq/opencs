@@ -4,6 +4,8 @@ session."""
 
 from __future__ import annotations
 
+import pytest
+
 from fixtures.delivery import deliveries, to
 from fixtures.lobbies import city
 from fixtures.pods import report
@@ -160,3 +162,21 @@ def test_a_purchase_after_an_unsaved_kill_is_still_a_purchase() -> None:
     c.client_message(pid, client.Bays((3, 2, 2, 2, 2, 2, 2, 2, 2), 1), 20.0)
     (note,) = c.take_progress()
     assert note.record.bay_points == 50_000  # less the 100 000 threshold of a level-2 bay
+
+
+def test_a_change_made_before_a_handler_failed_is_still_reported() -> None:
+    c, pid = join()
+    c.client_message(pid, report(4), 5.0)
+    c.take_progress()
+    player = c.player(pid)
+    assert player is not None
+
+    def broken(p: object, msg: object, now: float) -> list[object]:
+        player.progress.on_status(1700, 990, now)
+        raise RuntimeError("a bug after the change")
+
+    c._handlers[client.Status] = broken  # type: ignore[assignment]
+    with pytest.raises(RuntimeError):
+        c.client_message(pid, client.Status(1700, 4, 990), 20.0)
+    (note,) = c.take_progress()
+    assert (note.record.score, note.record.bay_points) == (1700, 990)

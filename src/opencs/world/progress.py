@@ -93,8 +93,9 @@ class Progress:
            bay points, or ``RESTORE_SETTLE`` has passed (a report built before the restore landed
            says SCORE 0, bay points 0).
         2. SCORE floor: a SCORE below the last one saved this game is refused (the same stale
-           report, once the guard is off). A report with negative bay points is not a state the
-           client can be restored to, and is refused too."""
+           report, once the guard is off). A report with negative bay points (the 16-bit wrap of
+           territory income, I §9.2.6) is a transient overflow, not an earned balance, and
+           is refused too: the last good figure stays (II §11.3)."""
         guard = self._guard
         if guard is not None:
             shows_restore = score >= guard.score and bay_points >= guard.bay_points

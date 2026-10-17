@@ -262,9 +262,12 @@ class City:
         if handler is None:
             log.debug("ignoring %s from player %d", type(msg).__name__, player_id)
             return []
-        events = handler(player, msg, now)
-        self._note_progress(player)
-        return events
+        try:
+            return handler(player, msg, now)
+        finally:
+            # Also when the handler raised: the record changes only through ``Progress``'s guarded
+            # methods, each a whole valid state, so what it changed before failing is worth saving.
+            self._note_progress(player)
 
     def take_progress(self) -> list[ProgressChanged]:
         """The records that changed since the last call, newest per identity, for the session layer

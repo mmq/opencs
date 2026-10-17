@@ -265,7 +265,8 @@ class InGamePhase(Phase):
             self.host.log.exception(
                 "city %s failed on %r; request dropped", city.config.letter, message
             )
-        # Whatever the call changed in the player's record, even if it then failed halfway.
+        # Whatever the call changed in the player's record, even if the handler then
+        # raised (the city notes progress in a ``finally``).
         self.host.services.persistence.flush(city)
 
     # --- time --------------------------------------------------------------------------------
