@@ -31,8 +31,8 @@ Every client message the captures ever contain appears at least once. Never capt
 by hand-built tests: A.2 `'E'` `W H L M C I D` effects and `'E'`-`'A'` Air Support, `'E'`-`'d'` Drone;
 A.1 `'E'`-`'A'`, `'E'`-`'C'`, `'E'`-`'K'`, `'F'`, `'Q'` destroy, single-cell `'T'`, `'S'`, `'c'` (a
 server-side relay of a shot is in none of the chosen runs). No capture holds a Muncher trip (a client
-`'K'` for an id of 260 or more; the README's corpus check, and no log in the capture corpus mentions a Muncher), so `tests/replay/test_muncher_replay.py`
-drives a modeled client instead (no captured Muncher trip exists).
+`'K'` for an id of 260 or more), and no log in the capture corpus mentions a Muncher,
+so `tests/replay/test_muncher_replay.py` drives a modeled client instead (no captured Muncher trip exists).
 
 | file | what it is for |
 |---|---|
