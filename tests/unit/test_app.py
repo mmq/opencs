@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import socket
 from dataclasses import replace
 from pathlib import Path
@@ -122,29 +123,42 @@ def test_two_clients_chat_in_the_chamber_and_the_second_gets_a_new_callsign() ->
     asyncio.run(scenario())
 
 
+class ClosedSignal(logging.Handler):
+    """Sets an event when a connection logs that it has closed (after its session was released)."""
+
+    def __init__(self, event: asyncio.Event) -> None:
+        super().__init__()
+        self.event = event
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage().endswith("closed"):
+            self.event.set()
+
+
 def test_a_client_that_vanishes_frees_its_callsign() -> None:
     async def scenario() -> None:
-        stop, task, port = await start(local_config())
-        first = await connect(port)
-        await first.send("HHH\rJOINGENIE\r")
-        await first.expect(b"PASSWORD: ")
-        first.writer.close()
-        # The server notices the close; a later guest then gets the plain callsign again. Wait for
-        # that by trying until the callsign comes back (each try is a real round trip).
-        for _ in range(200):
+        closed = asyncio.Event()
+        handler = ClosedSignal(closed)
+        net_log = logging.getLogger("opencs.net")
+        net_log.addHandler(handler)
+        net_log.setLevel(logging.INFO)
+        try:
+            stop, task, port = await start(local_config())
+            first = await connect(port)
+            await first.send("HHH\rJOINGENIE\r")
+            await first.expect(b"PASSWORD: ")
+            first.writer.close()
+            await asyncio.wait_for(closed.wait(), TIMEOUT)  # the server has released the pilot
             c = await connect(port)
             await c.send("HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r")
             await c.expect(b"\x05PRESS RETURN\r")
             await c.send("\r")
-            welcome = await c.expect(b"JOINGEN")
-            tail = await c.expect(b".")
+            await c.expect(b"WELCOME TO THE CHAMBER, JOINGENI.")
             c.writer.close()
-            if (welcome + tail).endswith(b"JOINGENI."):
-                break
-        else:
-            raise AssertionError("callsign was never freed")
-        stop.set()
-        await asyncio.wait_for(task, TIMEOUT)
+            stop.set()
+            await asyncio.wait_for(task, TIMEOUT)
+        finally:
+            net_log.removeHandler(handler)
 
     asyncio.run(scenario())
 
