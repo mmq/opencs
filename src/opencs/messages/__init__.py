@@ -5,12 +5,14 @@ Each message encodes and decodes itself; it must not know what a message causes 
 directions of ``'b'``); the entry points are re-exported here.
 """
 
-from opencs.messages import server
+from opencs.messages import client, server
 from opencs.messages.base import (
     ClientMessage,
     DecodeError,
     Message,
     ServerMessage,
+    client_payload,
+    decode_client,
     decode_server,
     server_payload,
 )
@@ -23,6 +25,9 @@ __all__ = [
     "ServerMessage",
     "WirePos",
     "WireXZ",
+    "client",
+    "client_payload",
+    "decode_client",
     "decode_server",
     "server",
     "server_payload",
