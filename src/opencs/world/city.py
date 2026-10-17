@@ -462,11 +462,14 @@ class City:
     def _hit_entity(
         self, reporter: Player, hit: client.HitReport, credited: bool, now: float
     ) -> list[Event]:
-        """A hit on something that is not a player's pod. A tower loses hit points (II §10); a
-        Sentinel, Muncher or mine is M9's, and until then the report is ignored."""
+        """A hit on something that is not a player's pod. A tower loses hit points (II §10); a mine
+        is ignored; a Sentinel or Muncher is M9's, and until then it is ignored too."""
         tower = self.orders.towers.get(hit.target)
         if tower is not None:
             return self.orders.hit_tower(reporter, tower, hit, now)
+        if hit.target in self.effects.mines:
+            log.debug("player %d hit mine %d; mines have no durability", reporter.id, hit.target)
+            return []  # mines have no durability (ours)
         log.debug(
             "player %d hit entity %d (credited=%s); not ruled yet",
             reporter.id,

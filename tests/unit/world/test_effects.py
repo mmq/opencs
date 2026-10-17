@@ -218,3 +218,101 @@ def test_an_emptied_city_starts_again_in_the_default_weather() -> None:
     c.leave(a, 20.0)
     c.leave(b, 21.0)
     assert c.weather.palette == policy.DEFAULT_PALETTE
+
+
+# --- Mine and Mine Sweep ---
+
+
+def mines_in(out: list[tuple[int, ServerMessage]], pid: int) -> list[server.SpawnMine]:
+    return [m for m in to(out, pid) if isinstance(m, server.SpawnMine)]
+
+
+def lay(c: City, pid: int, now: float = 10.0) -> int:
+    out = use(c, pid, "M", now)
+    return mines_in(out, pid)[0].id
+
+
+def test_a_mine_is_spawned_at_the_sender_for_everyone_with_the_senders_team_as_variant() -> None:
+    c, (a, b, d) = world([2, 1, 0])
+    out = use(c, a, "M")
+    pos = c.player(a).pod.placed.pos  # type: ignore[union-attr]
+    expected = server.SpawnMine(policy.STRUCTURE_IDS[0], 2, pos)
+    for pid in (a, b, d):
+        assert mines_in(out, pid) == [expected]
+    assert c.effects.mines[expected.id].team == 2
+    assert expected.id >= 8192
+
+
+def test_a_mine_is_given_to_a_late_joiner_once() -> None:
+    c, (a, _b) = world()
+    mine_id = lay(c, a)
+    late = c.join("LATE", 2, 20.0)
+    pid = late.player_id  # type: ignore[union-attr]
+    first = deliveries(c, c.client_message(pid, report(4), 21.0))
+    assert [m.id for m in mines_in(first, pid)] == [mine_id]
+    again = deliveries(c, c.client_message(pid, report(0), 22.0))
+    assert mines_in(again, pid) == []
+
+
+def test_mine_sweep_destroys_only_other_teams_mines_within_one_block() -> None:
+    c, (a, b) = world()
+    mine_a = lay(c, a)  # team 0's own, laid at HERE
+    mine_b = lay(c, b)  # team 1's, at HERE too
+    far = at(REACH + 1)
+    c.client_message(
+        b, report(0, cell_x=far.cell_x, cell_z=far.cell_z, x_off=far.x_off, z_off=far.z_off), 11.0
+    )
+    mine_far = lay(c, b, now=12.0)
+    out = use(c, a, "D", now=13.0)
+    for pid in (a, b):
+        assert to(out, pid) == [server.Destroy(mine_b)]
+    assert set(c.effects.mines) == {mine_a, mine_far}
+
+
+def test_mine_sweep_reach_is_600_ft_inclusive() -> None:
+    c, (a, b) = world()
+    edge, past = at(REACH), at(REACH + 1)
+    for where, now in ((edge, 11.0), (past, 12.0)):
+        c.client_message(
+            b,
+            report(
+                0, cell_x=where.cell_x, cell_z=where.cell_z, x_off=where.x_off, z_off=where.z_off
+            ),
+            now,
+        )
+        lay(c, b, now=now + 0.5)
+    out = use(c, a, "D", now=14.0)
+    assert len(to(out, a)) == 1 and len(c.effects.mines) == 1
+
+
+def test_a_swept_mine_is_forgotten_for_late_joiners_and_its_id_is_released() -> None:
+    c, (a, b) = world()
+    mine_id = lay(c, b)
+    use(c, a, "D")
+    late = c.join("LATE", 2, 20.0)
+    pid = late.player_id  # type: ignore[union-attr]
+    out = deliveries(c, c.client_message(pid, report(4), 21.0))
+    assert mines_in(out, pid) == [] and mine_id not in c.effects.mines
+
+
+def test_mine_sweep_with_nothing_to_sweep_sends_nothing() -> None:
+    c, (a, _b) = world()
+    lay(c, a)
+    assert use(c, a, "D", now=11.0) == []
+
+
+def test_the_city_keeps_at_most_max_mines_and_destroys_the_oldest() -> None:
+    c, (a, b) = world()
+    first = lay(c, a, now=10.0)
+    for i in range(policy.MAX_MINES - 1):
+        lay(c, a, now=10.1 + i)
+    assert len(c.effects.mines) == policy.MAX_MINES
+    out = use(c, a, "M", now=500.0)
+    assert to(out, b)[0] == server.Destroy(first) and len(c.effects.mines) == policy.MAX_MINES
+
+
+def test_a_hit_on_a_mine_is_ignored() -> None:
+    c, (a, b) = world()
+    mine_id = lay(c, a)
+    assert deliveries(c, c.client_message(b, client.HitReport(mine_id, 0), 12.0)) == []
+    assert mine_id in c.effects.mines
