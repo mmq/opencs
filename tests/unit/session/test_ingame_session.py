@@ -357,3 +357,29 @@ def test_a_city_that_refuses_the_join_closes_the_connection() -> None:
     h = play(world)
     assert h.io.closed
     assert "refused" in h.io.closed_with[0]
+
+
+def test_a_join_that_raises_closes_the_connection_and_seats_nobody() -> None:
+    world = make_world()
+
+    def boom(*args: object) -> None:
+        raise RuntimeError("bug")
+
+    city_a(world).join = boom  # type: ignore[method-assign,assignment]
+    h = play(world)
+    assert h.io.closed
+    assert city_a(world).players() == []
+
+
+def test_a_leave_that_raises_is_logged_and_the_quit_goes_on() -> None:
+    world = make_world()
+    h = play(world)
+
+    def boom(*args: object) -> None:
+        raise RuntimeError("bug")
+
+    city_a(world).leave = boom  # type: ignore[method-assign,assignment]
+    quit_game(h)
+    assert sent(h) == [server.QuitAck()]
+    assert not h.io.closed
+    h.session.closed()  # and the line drop afterward does not try again

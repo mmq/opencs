@@ -95,21 +95,27 @@ class City:
         player_id = self._ids.allocate(IdRange.PLAYER, self._earliest_start())
         if player_id is None:
             return JoinRefused("NO FREE PLAYER ID")
-        player = Player(player_id, callsign, team, free[0], ClientView(player_id, now))
+        index = free[0]
+        cfg = self.config
+        try:
+            # Build the 'B' before seating anyone: if it cannot be built, nobody is seated.
+            hello = server.Session(
+                self_id=player_id,
+                index=index,
+                team=team,
+                callsign=callsign.encode("ascii"),
+                network=policy.NETWORK_NAME.encode("ascii"),
+                city=cfg.name.encode("ascii"),
+                max_mult=cfg.max_multiplier,
+                tower_output=cfg.tower_output,
+                max_module_level=cfg.max_module_level,
+            )
+        except Exception:
+            self._ids.release(IdRange.PLAYER, player_id, now)
+            raise
+        player = Player(player_id, callsign, team, index, ClientView(player_id, now))
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
         self._players[player_id] = player
-        cfg = self.config
-        hello = server.Session(
-            self_id=player_id,
-            index=player.index,
-            team=team,
-            callsign=callsign.encode("ascii"),
-            network=policy.NETWORK_NAME.encode("ascii"),
-            city=cfg.name.encode("ascii"),
-            max_mult=cfg.max_multiplier,
-            tower_output=cfg.tower_output,
-            max_module_level=cfg.max_module_level,
-        )
         return JoinResult(player_id, team, player.index, hello)
 
     def leave(self, player_id: int, now: float) -> list[Event]:

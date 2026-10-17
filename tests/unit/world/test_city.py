@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fixtures.lobbies import city
 from fixtures.pods import report
 from opencs.messages import client, server, server_payload
@@ -137,3 +139,13 @@ def test_a_city_resets_when_the_last_player_leaves() -> None:
     pid = joined(c).player_id
     c.leave(pid, 1.0)
     assert joined(c, "NEXT", 0, now=2.0).player_id == 0  # a fresh game, a fresh id space
+
+
+def test_a_join_whose_b_cannot_be_built_seats_nobody() -> None:
+    c = cyber_city_one()
+    joined(c, "FIRST")
+    before = [p.id for p in c.players()]
+    with pytest.raises(UnicodeEncodeError):
+        c.join("CAFÉ", 0, 1.0)  # the 'B' carries ASCII only
+    assert [p.id for p in c.players()] == before
+    assert joined(c, "SECOND", now=2.0).index == 1  # the slot was not taken

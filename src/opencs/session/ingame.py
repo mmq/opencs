@@ -89,7 +89,14 @@ class InGamePhase(Phase):
         assert member is not None and member.city is not None and member.team is not None
         city = self.host.services.cities[member.city]
         now = self.host.now()
-        joined = city.join(member.callsign, member.team, now)
+        try:
+            joined = city.join(member.callsign, member.team, now)
+        except Exception:
+            # A bug in the world: log it with the request and close; nobody is seated (DESIGN §5).
+            self.host.log.exception("city %s failed on a join", city.config.letter)
+            self.stage = Stage.GONE
+            self.host.close("city failed on the join")
+            return
         if isinstance(joined, JoinRefused):
             # The Chamber has already told the client to launch; there is no way back but a new
             # connection.
@@ -121,7 +128,13 @@ class InGamePhase(Phase):
         self._city = None
         router = self.host.services.router
         router.unregister(city.config.letter, self._player_id)
-        router.deliver(city, city.leave(self._player_id, self.host.now()))
+        try:
+            router.deliver(city, city.leave(self._player_id, self.host.now()))
+        except Exception:
+            # The player is out of this session either way; the others' notice is lost (DESIGN §5).
+            self.host.log.exception(
+                "city %s failed on leave of player %d", city.config.letter, self._player_id
+            )
 
     def closed(self) -> None:
         """A line drop mid-game (``/RESUME`` records are M10's)."""
