@@ -181,3 +181,14 @@ def test_an_empty_city_is_reset_and_the_next_order_creates_the_guppy_afresh() ->
     c.client_message(pid, report(4), 9.0)
     out = deliveries(c, c.client_message(pid, client.TowerOrder(point(1), 0, 0), 10.0))
     assert sent_to(out, pid, server.MobileCreate) == [server.MobileCreate(GUPPY, HOME)]
+
+
+def test_a_reset_forgets_the_towers_so_they_feed_no_territory_income() -> None:
+    c, (a, b) = playing([0, 1])
+    order(c, a, 1)
+    arrive(c, a)
+    arrive(c, a)  # delivered
+    assert c._towers  # a tower stands
+    c.leave(a, 7.0)
+    c.leave(b, 7.0)  # the city empties and is reset
+    assert c._towers == {} and c.territory_income() == {}

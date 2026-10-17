@@ -136,6 +136,15 @@ def test_each_team_has_its_own_guppy_and_queue() -> None:
     assert len(g0.queue) == len(g2.queue) == 1
 
 
+def test_every_team_guppy_has_its_own_id_from_250_to_253() -> None:
+    # The id sets the guppy's color and altitude on the client (I §9.4.1).
+    logistics = Logistics()
+    for team in range(4):
+        logistics.order(job(1, team=team))
+    ids = [g.entity_id for team in range(4) if (g := logistics.guppy(team)) is not None]
+    assert ids == [250, 251, 252, 253]
+
+
 # --- the replies ---
 
 
