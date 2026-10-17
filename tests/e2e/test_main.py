@@ -1,4 +1,6 @@
+import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -6,22 +8,28 @@ from pathlib import Path
 
 import pytest
 
+from opencs import policy
+
 ROOT = Path(__file__).parents[2]
 CONFIG = ROOT / "config" / "server.toml"
 TIMEOUT = 15.0
+LISTENING = re.compile(r"listening on (\S+):(\d+)")
 
 
 @pytest.mark.e2e
-def test_main_listens_then_exits_zero_on_sigterm() -> None:
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
+def test_main_listens_on_the_given_address_then_exits_zero(sig: signal.Signals) -> None:
     proc = subprocess.Popen(
         [
             sys.executable,
             "-m",
             "opencs",
+            "--host",
+            "127.0.0.1",
             "--port",
             "0",
             "--config",
-            str(ROOT / "config/server.toml"),
+            str(CONFIG),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -35,11 +43,17 @@ def test_main_listens_then_exits_zero_on_sigterm() -> None:
         lines: list[str] = []
         for line in proc.stdout:
             lines.append(line)
-            if "listening on" in line:
+            found = LISTENING.search(line)
+            if found:
                 break
         else:
             pytest.fail("no 'listening on' line:\n" + "".join(lines))
-        proc.send_signal(signal.SIGTERM)
+        # The overrides took effect: the configured port is 2399, the flag asked for any free one.
+        assert found.group(1) == "127.0.0.1"
+        port = int(found.group(2))
+        assert port not in (0, policy.DEFAULT_PORT)
+        socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT).close()
+        proc.send_signal(sig)
         lines.extend(proc.stdout)
         assert proc.wait(TIMEOUT) == 0
     finally:
