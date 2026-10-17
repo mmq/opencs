@@ -20,11 +20,17 @@ class LegCount:
 
     A client that was introduced after the create leg is *joining*: its copy is at home and its
     reports drive nothing until it is in step with the guppy. ``caught_up`` is the leg last sent to
-    it as a catch-up, or None while only the create has been sent."""
+    it as a catch-up, or None while only the create has been sent.
+
+    ``owed`` is how many reports the client can still make: one for the create and one for each
+    destination sent to it since. A report with none owed is out of protocol (a modified client's
+    early report) and is ignored, so a client can never run its count ahead of the legs it was
+    actually sent."""
 
     reports: int = 0
     joining: bool = False
     caught_up: int | None = None
+    owed: int = 0
 
 
 @dataclass(slots=True)

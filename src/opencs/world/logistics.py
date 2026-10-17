@@ -142,7 +142,7 @@ class Guppy:
     def client_introduced(self, view: ClientView) -> None:
         """A client was sent the create (I §7.3 step 1). While the guppy is still on its create
         leg the client counts from leg 0 like everyone; otherwise it is *joining*."""
-        view.legs[self.entity_id] = LegCount(joining=self.phase is not Phase.CREATING)
+        view.legs[self.entity_id] = LegCount(joining=self.phase is not Phase.CREATING, owed=1)
 
     def enqueue(self, job: Job) -> None:
         """Queue behind the waiting jobs, or, for a priority job, behind the earlier priority ones
@@ -194,10 +194,20 @@ class Logistics:
         Matched to a leg by that client's own count, with no timing: its n-th report is leg n.
         The first report of a leg acts; the other clients' reports of it are duplicates. A report
         for a leg ahead of the one in force is out of step: counted in ``ignored_reports`` and
-        dropped, which a client that follows the protocol never causes."""
+        dropped, which a client that follows the protocol never causes. So is a report beyond the
+        legs this client has been sent (``LegCount.owed``): a client's count never runs ahead of
+        what it was told, whatever it sends."""
         guppy = next((g for g in self._guppies.values() if g.entity_id == guppy_id), None)
         if guppy is None or guppy.phase is Phase.ABSENT:
             return []
+        if count.owed <= 0:
+            self.ignored_reports += 1
+            return []
+        count.owed -= 1
+        return self._counted_report(guppy, player_id, count)
+
+    def _counted_report(self, guppy: Guppy, player_id: int, count: LegCount) -> list[Action]:
+        """A report within the legs the client was sent, matched to a leg by its count."""
         if count.joining:
             # Step 4: while joining, a report drives nothing. The one that brings the client in
             # step is, when the guppy is in flight, the arrival of the current leg: it carries

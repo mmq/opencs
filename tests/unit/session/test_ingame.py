@@ -204,13 +204,14 @@ def test_orders_beyond_their_burst_are_dropped_and_counted_not_queued() -> None:
     assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
 
 
-def test_leg_reports_beyond_their_burst_are_dropped_and_counted() -> None:
+def test_leg_reports_are_not_rate_limited_so_no_honest_count_can_be_cut_short() -> None:
+    # A report is counted by its position (I §9.4.1): dropping one would put the client a leg
+    # behind for good. Logistics bounds them by the legs sent instead.
     h, seen = relayed_in_game()
-    burst, _ = policy.RELAY_LIMIT_LEG_REPORT
     leg = frame(client_payload(client.LegArrived(250)))
-    h.feed(leg * (burst + 3))
-    assert len(seen) == burst
-    assert h.session.phase._bad.total == 3  # type: ignore[attr-defined]
+    h.feed(leg * 20)
+    assert len(seen) == 20
+    assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
 
 
 def test_the_budget_refills_with_time() -> None:

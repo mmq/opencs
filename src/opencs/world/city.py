@@ -477,13 +477,16 @@ class City:
                 case Dispatch(guppy, dest):
                     # Only clients that count legs for it; one still joining is sent no 'K' for
                     # this guppy until its copy has reported (I §7.3 step 2).
-                    events += [
-                        Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id))
-                        for p in self.players()
-                        if (count := p.view.legs.get(guppy.entity_id)) is not None
-                        and not count.joining
-                    ]
+                    for p in self.players():
+                        count = p.view.legs.get(guppy.entity_id)
+                        if count is not None and not count.joining:
+                            count.owed += 1  # it will report this leg (I §9.4.1)
+                            events.append(
+                                Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id))
+                            )
                 case CatchUp(guppy, player_id, dest):
+                    if (to := self._players.get(player_id)) is not None:
+                        to.view.legs[guppy.entity_id].owed += 1
                     events.append(
                         Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(player_id))
                     )

@@ -199,3 +199,63 @@ def test_after_the_originals_leave_the_joiner_alone_completes_legs() -> None:
     assert ks(out, j) == [server.MobileCreate(GUPPY, dest(2))]
     assert towers(arrive(c, j, 29.0), j)
     assert c._logistics.ignored_reports == 0
+
+
+# --- a client's count is bounded by the legs it was sent (I §9.4.1) ---
+
+
+def test_a_report_beyond_the_legs_sent_is_ignored_and_does_not_advance_the_count() -> None:
+    c, a, _b = playing()
+    order(c, a, 1)  # the create is sent: one report is owed
+    count = c.player(a).view.legs[GUPPY]  # type: ignore[union-attr]
+    assert count.owed == 1
+    arrive(c, a)  # the create leg is reported; the dispatch to point 1 is sent
+    assert (count.owed, count.reports) == (1, 1)
+    assert towers(arrive(c, a), a)  # leg 1, owed: delivers the tower
+    assert (count.owed, count.reports) == (1, 2)  # and the way home was sent
+    arrive(c, a)  # home
+    assert (count.owed, count.reports) == (0, 3)
+    assert c._logistics.ignored_reports == 0
+    assert arrive(c, a) == []  # nothing is owed: a modified client reporting early
+    assert (count.owed, count.reports) == (0, 3)  # the count did not run ahead
+    assert c._logistics.ignored_reports == 1
+
+
+def test_early_reports_cannot_pre_report_a_leg_that_has_not_been_sent() -> None:
+    # The cheat the bound limits: report the legs of a long queue before they are flown.
+    c, a, b = playing()
+    for n in range(1, 4):
+        order(c, a, n)
+    arrive(c, a)
+    for _ in range(10):
+        arrive(c, a)
+    # a's reports delivered what was sent to it (one tower, the way home, then the next job...)
+    # but never more legs than it was told about.
+    count = c.player(a).view.legs[GUPPY]  # type: ignore[union-attr]
+    guppy = c._logistics.guppy(0)
+    assert guppy is not None
+    assert count.reports <= guppy.legs
+    assert c._logistics.ignored_reports >= 1
+    # b has been sent the same legs and is unaffected: its own reports are all honored.
+    sent_to_b = c.player(b).view.legs[GUPPY].owed  # type: ignore[union-attr]
+    assert sent_to_b == guppy.legs
+
+
+def test_a_late_joiners_real_peak_is_never_ignored() -> None:
+    # A joiner owes its create report, then one per catch-up; honest reports never exceed that.
+    c, a, _b = playing()
+    order(c, a, 1)
+    arrive(c, a)  # outbound
+    j, _ = join(c)
+    count = c.player(j).view.legs[GUPPY]  # type: ignore[union-attr]
+    assert count.owed == 1  # only the create so far
+    arrive(c, j)  # create report -> catch-up to the point
+    assert count.owed == 1
+    arrive(c, a)  # delivered; the guppy returns
+    arrive(c, j)  # arrival at the old leg -> catch-up home
+    assert count.owed == 1
+    arrive(c, j)  # home: counted in
+    assert count.owed == 0
+    assert c._logistics.ignored_reports == 0
+    assert arrive(c, j) == []  # one more than it was sent
+    assert c._logistics.ignored_reports == 1
