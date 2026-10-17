@@ -401,13 +401,13 @@ MAX_WAITING_TOWER_ORDERS = 4
 #: The ``'O'`` answers to a tower order: accepted, bad drop point, mission queue full. I §8.17, I
 #: §9.4.2.
 ORDER_ACCEPTED = 0
+ORDER_BAD_DROP_POINT = 1
+ORDER_QUEUE_FULL = 2
 
 #: Multiplier points the client spends when it sends a tower order: a tower 1, a MegaTower 2 (I
 #: §9.4.2, II §13 item 2). Every ``'O'`` refusal refunds one. The client's own rule, not our choice.
 TOWER_COST = 1
 MEGA_TOWER_COST = 2
-ORDER_BAD_DROP_POINT = 1
-ORDER_QUEUE_FULL = 2
 
 #: The first guppy id; team ``t``'s guppy is ``GUPPY_BASE_ID + t``, which also picks its color
 #: and its cruise altitude. I §6.2, I §9.4.1, II §14.
