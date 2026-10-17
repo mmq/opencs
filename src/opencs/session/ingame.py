@@ -77,6 +77,8 @@ class InGamePhase(Phase):
             client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
             client.TowerOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
             client.ModuleOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
+            client.PickupRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
+            client.EjectRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
         }
         self._over_budget = 0
         self._stalled_since: float | None = None

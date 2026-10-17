@@ -436,3 +436,8 @@ PICKUP_RANGE_FEET = 50
 #: "never landed". The client's next ``'b'`` can have been built before the change landed. I §9.3.4,
 #: II §13; a guess that the ledger replay passes at.
 LOADOUT_GRACE_REPORTS = 2
+
+#: Per-session limit on pickup and eject requests, a token bucket ``(burst, per second)``, as
+#: ``RELAY_LIMIT_*`` (DESIGN §5): an eject spawns a ``'P'`` and a pickup a ``'Q'`` destroy for every
+#: other client. A pod has nine bays, so the burst covers ejecting them all. Ours.
+RELAY_LIMIT_MODULE_OPS = (12, 4.0)

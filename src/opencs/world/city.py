@@ -104,6 +104,18 @@ class City:
             client.LegArrived: lambda p, m, now: self.orders.leg_arrived(
                 p, _as(client.LegArrived, m), now
             ),
+            client.PickupRequest: lambda p, m, now: self.drops.pickup(
+                p, _as(client.PickupRequest, m).object, now
+            ),
+            client.ModuleRested: lambda p, m, now: self._module_rested(
+                p, _as(client.ModuleRested, m)
+            ),
+            client.EjectRequest: lambda p, m, now: self.drops.eject(
+                p, _as(client.EjectRequest, m).module, now
+            ),
+            client.ModuleUsedUp: lambda p, m, now: self._module_used_up(
+                p, _as(client.ModuleUsedUp, m)
+            ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -354,6 +366,14 @@ class City:
             if other.pod.has_reported:
                 events += introduce(player, other.view, now)
         return events
+
+    def _module_rested(self, player: Player, rested: client.ModuleRested) -> list[Event]:
+        self.drops.rested(player, rested.object, rested.pos)
+        return []
+
+    def _module_used_up(self, player: Player, used: client.ModuleUsedUp) -> list[Event]:
+        self.drops.used_up(player, used.module)
+        return []
 
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
         """A line the player typed, echoed to its audience (I §8.23)."""
