@@ -146,3 +146,14 @@ def test_a_change_restarts_the_grace() -> None:
     led.remove(HIGH_SPEED)  # the client's report can lag the change by a frame
     assert led.report(1) is None and led.report(1) is None
     assert led.mismatches == 0
+
+
+def test_a_resume_restores_the_confirmed_ledger_and_not_a_pending_install() -> None:
+    led = Loadout()
+    led.install(ROCKET_PACK)
+    led.report(4)
+    led.install(MEGA_TOWER)  # sent, not yet seen in a weight: it may never land
+    assert led.for_resume == [ROCKET_PACK]
+    assert led.carried == [ROCKET_PACK, MEGA_TOWER]
+    led.for_resume.append(1)  # a copy: changing it does not touch the ledger
+    assert led.for_resume == [ROCKET_PACK]

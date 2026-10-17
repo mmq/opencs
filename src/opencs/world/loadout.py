@@ -45,8 +45,15 @@ class Loadout:
         self._pending_age = 0
 
     @property
+    def for_resume(self) -> list[int]:
+        """The confirmed ledger: what a ``/RESUME`` restores (II §13 item 2). A pending
+        install is left out: it may be one the client never took."""
+        return list(self.modules)
+
+    @property
     def carried(self) -> list[int]:
-        """Every module the ledger holds, confirmed or pending: what a resume would restore."""
+        """Every module the ledger holds, confirmed or pending. Bookkeeping only (tests, logs):
+        a resume restores ``for_resume``."""
         return [*self.modules, *self.pending]
 
     def install(self, module: int) -> None:
