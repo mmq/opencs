@@ -14,8 +14,9 @@ TARGET = WireXZ(3, 3, 120, 340)
 STAND_Y = 233
 
 
-def world(teams: list[int] | None = None) -> tuple[City, list[int]]:
-    c, ids = seat(teams or [0, 1])
+def world(teams: list[int] | None = None, **config: object) -> tuple[City, list[int]]:
+    config = {"max_module_level": 4, **config}
+    c, ids = seat(teams or [0, 1], **config)
     for pid in ids:
         c.client_message(pid, report(0, cell_x=1, cell_z=1, x_off=50, z_off=50, y=STAND_Y), 1.0)
     return c, ids
@@ -71,7 +72,7 @@ def test_the_altitude_is_the_one_at_request_time() -> None:
 
 
 def test_a_client_still_loading_is_not_sent_the_grenade() -> None:
-    c, (a, b) = seat([0, 1], reported=False)
+    c, (a, b) = seat([0, 1], reported=False, max_module_level=4)
     c.client_message(a, report(4, y=STAND_Y), 1.0)
     request(c, a)
     out = fly(c, a, 0, 2)
@@ -120,4 +121,9 @@ def test_a_saturated_queue_acknowledges_but_queues_nothing() -> None:
 
 def test_a_request_before_the_first_report_is_ignored() -> None:
     c, (a,) = seat([0], reported=False)
+    assert request(c, a) == []
+
+
+def test_a_city_that_does_not_stock_air_support_ignores_the_request() -> None:
+    c, (a, _b) = world(max_module_level=3)  # Air Support is level 4
     assert request(c, a) == []

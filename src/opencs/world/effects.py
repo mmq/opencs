@@ -14,9 +14,11 @@ from collections.abc import Callable, Iterator
 
 from opencs import policy
 from opencs.messages import WirePos, server
+from opencs.messages.catalog import EFFECT_MODULES
 from opencs.world.entities import inform
 from opencs.world.events import Event, ToPlayer
 from opencs.world.host import WorldHost
+from opencs.world.modules import ModuleRules
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
@@ -39,8 +41,11 @@ def within_one_block(center: WirePos, other: WirePos) -> bool:
 class Effects:
     """One city's effect modules."""
 
-    def __init__(self, host: WorldHost, orders: Orders, weather: Weather) -> None:
+    def __init__(
+        self, host: WorldHost, orders: Orders, weather: Weather, rules: ModuleRules
+    ) -> None:
         self._host = host
+        self._rules = rules
         self._orders = orders
         self._weather = weather
         self._effects: dict[str, _Effect] = {
@@ -62,10 +67,14 @@ class Effects:
 
     def request(self, player: Player, effect: str, now: float) -> list[Event]:
         """An ``'E'`` effect request from ``player`` (I §9.3.5, II §16.1). Ignored before the pod's
-        first report and while it is dead; Call Muncher, Call Sentinel and anything not built are
-        logged and ignored."""
+        first report and while it is dead, and when the city does not stock the module (an honest
+        pod holds only modules this server delivered, so it is a forged request: logged, I §11);
+        Call Muncher, Call Sentinel and anything not built are logged and ignored."""
         placed = player.pod.placed
         if placed is None or player.pod.phase is PodPhase.DEAD:
+            return []
+        if not self._rules.stocks(EFFECT_MODULES.get(effect, 0)):
+            log.info("effect %r from player %d: this city does not stock it", effect, player.id)
             return []
         handler = self._effects.get(effect)
         if handler is None:

@@ -206,6 +206,26 @@ def test_an_eject_of_a_non_module_or_before_the_first_report_is_ignored() -> Non
     assert eject(c2, x) == []
 
 
+@pytest.mark.parametrize(
+    ("module", "config"),
+    [
+        (31, {}),  # Liberator, level 4, in a level-2 city
+        (REPAIR, {"banned_modules": (REPAIR,)}),
+        (47, {"max_module_level": 5, "banned_modules": (47,)}),
+    ],
+)
+def test_an_eject_of_a_module_the_city_does_not_stock_spawns_nothing(
+    module: int, config: dict[str, object], caplog: pytest.LogCaptureFixture
+) -> None:
+    c, (a, b) = seat([0, 1], **config)
+    for pid in (a, b):
+        c.client_message(pid, report(0, x_off=100, z_off=100), 1.0)
+    with caplog.at_level(logging.INFO, logger="opencs.world"):
+        assert eject(c, a, module) == []
+    assert c.drops.drops == {}
+    assert "does not stock" in caplog.text
+
+
 def test_drops_beyond_the_city_bound_destroy_the_oldest_drop() -> None:
     c, (_a, b) = setup([0, 1])
     first = drop(c)

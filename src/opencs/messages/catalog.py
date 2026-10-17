@@ -76,6 +76,22 @@ CATALOG: dict[int, Module] = {
 }
 
 
+#: The module each effect request letter comes from: ``'E'`` sub letter to catalog index (I §9.3.5,
+#: II §16.1, I §9.3.1). ``'A'`` is Air Support.
+EFFECT_MODULES = {
+    "R": 6,
+    "W": 15,
+    "H": 18,
+    "L": 31,
+    "M": 16,
+    "D": 29,
+    "I": 11,
+    "A": 32,
+    "C": 17,
+    "S": 36,
+}
+
+
 def is_module_index(index: int) -> bool:
     """True if ``index`` names a module the client has (I §9.3.1)."""
     return index in CATALOG

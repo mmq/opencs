@@ -72,8 +72,9 @@ class Drop:
 class Drops:
     """One city's dropped modules."""
 
-    def __init__(self, host: WorldHost) -> None:
+    def __init__(self, host: WorldHost, rules: ModuleRules) -> None:
         self._host = host
+        self._rules = rules
         #: Every drop, by id, oldest first.
         self.drops: dict[int, Drop] = {}
         self._ejects = 0  # modules ejected so far: picks the kick direction
@@ -134,12 +135,20 @@ class Drops:
     def eject(self, player: Player, module: int, now: float) -> list[Event]:
         """``'Q'`` sub 1: the pod ejected a module (its bay is already empty). A drop appears
         ``EJECT_HEIGHT`` above the pod with a one-foot kick cycling through four directions, and the
-        module leaves the ledger (I §9.4.2, I §9.3.4, II §13). Not a catalog index: ignored."""
+        module leaves the ledger (I §9.4.2, I §9.3.4, II §13). A module the city does not stock (not
+        a catalog index, above its level, banned) cannot be in an honest pod's bays, since installs
+        come only from this server: it is ignored and logged (I §11, our pickup, eject and effect
+        rules; see I §9.3.3, II §16.1)."""
         placed = player.pod.placed
-        if placed is None or not is_module_index(module):
+        if placed is None:
+            return []
+        if not self._rules.stocks(module):
+            log.info(
+                "player %d ejected module %d, which this city does not stock", player.id, module
+            )
             return []
         if not player.loadout.remove(module):
-            log.debug("player %d ejected module %d the ledger did not hold", player.id, module)
+            log.info("player %d ejected module %d the ledger did not hold", player.id, module)
         vx, vz = policy.EJECT_KICKS[self._ejects % len(policy.EJECT_KICKS)]
         self._ejects += 1
         pos = WirePos.from_world(

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from opencs import policy
 from opencs.messages import ClientMessage, WirePos, client, server
-from opencs.messages.catalog import is_module_index
+from opencs.messages.catalog import EFFECT_MODULES, is_module_index
 from opencs.messages.fields import GRENADE_KIND
 from opencs.world.events import Event, ToPlayer, ToPlayers
 from opencs.world.host import WorldHost
@@ -140,6 +140,9 @@ class Orders:
         acknowledges but queues nothing."""
         placed = player.pod.placed
         if placed is None:
+            return []
+        if not self._rules.stocks(EFFECT_MODULES["A"]):
+            log.info("Air Support from player %d: this city does not stock it", player.id)
             return []
         reply = Event(server.AirSupportReply(policy.AIR_SUPPORT_ACKNOWLEDGED), ToPlayer(player.id))
         if self.logistics.queue_saturated(player.team):

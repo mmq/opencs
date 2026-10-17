@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
+import pytest
+
 from fixtures.cities import seat
 from fixtures.delivery import deliveries, to
 from fixtures.pods import report
@@ -17,9 +21,11 @@ def at(dx: int, dz: int = 0) -> WirePos:
     return WirePos.from_world(HERE[0] + dx, 20, HERE[1] + dz)
 
 
-def world(teams: list[int] | None = None) -> tuple[City, list[int]]:
-    """Players (team 0 first) all standing at HERE."""
-    c, ids = seat(teams or [0, 1])
+def world(teams: list[int] | None = None, **config: object) -> tuple[City, list[int]]:
+    """Players (team 0 first) all standing at HERE, in a city that stocks every effect module
+    unless ``config`` says otherwise."""
+    config = {"max_module_level": 4, **config}
+    c, ids = seat(teams or [0, 1], **config)
     pos = at(0)
     for pid in ids:
         c.client_message(
@@ -337,3 +343,26 @@ def test_an_emptied_city_forgets_its_mines_and_drops() -> None:
     c.leave(a, 20.0)
     c.leave(b, 21.0)
     assert not c.effects.mines and not c.drops.drops
+
+
+# --- only what the city stocks (our pickup, eject and effect rules; see I §9.3.3, II §16.1) ---
+
+
+def test_an_effect_above_the_cities_level_is_ignored() -> None:
+    c, (a, _b) = world(max_module_level=3)  # Liberator is level 4
+    e = tower(c, 1, at(10))
+    assert use(c, a, "L") == []
+    assert e in c.orders.towers
+
+
+def test_a_banned_effect_is_ignored_and_logged(caplog: pytest.LogCaptureFixture) -> None:
+    c, (a, _b) = world(banned_modules=(6,))  # Repair
+    t = tower(c, 0, at(10))
+    damage(c, t, 100)
+    before = hp(c, t)
+    with caplog.at_level(logging.INFO, logger="opencs.world"):
+        assert use(c, a, "R") == []
+    assert hp(c, t) == before
+    assert "does not stock" in caplog.text
+    use(c, a, "H")  # an effect that is not banned still works
+    assert hp(c, t)[1] == 2 * before[1]

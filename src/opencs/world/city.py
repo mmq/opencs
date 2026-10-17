@@ -68,15 +68,11 @@ class City:
         #: The city's weather condition, sent on a client's first report and on every change.
         self.weather = Weather()
         #: Tower orders, the team guppies and the standing towers (I §9.4).
-        self.drops = Drops(self)
-        self.orders = Orders(
-            self,
-            self._territory,
-            ModuleRules(config.max_module_level, frozenset(config.banned_modules)),
-            self.drops,
-        )
+        rules = ModuleRules(config.max_module_level, frozenset(config.banned_modules))
+        self.drops = Drops(self, rules)
+        self.orders = Orders(self, self._territory, rules, self.drops)
         #: The effect modules (I §9.3.5, II §16.1).
-        self.effects = Effects(self, self.orders, self.weather)
+        self.effects = Effects(self, self.orders, self.weather, rules)
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
