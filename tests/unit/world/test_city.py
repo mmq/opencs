@@ -6,10 +6,10 @@ import pytest
 
 from fixtures.lobbies import city
 from fixtures.pods import report
-from opencs.messages import client, server, server_payload
+from opencs.messages import ClientMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
 from opencs.world.city import City, JoinRefused, JoinResult
-from opencs.world.events import Event, ToAll, ToHolders
+from opencs.world.events import Event, ToAll, ToHolders, ToPlayer
 
 # I App. A.1: the first frame of a real session (city "CYBERCITY ONE"), tag 11.
 A3_B_FRAME = bytes.fromhex(
@@ -77,18 +77,26 @@ def test_ids_are_unique_and_a_player_holds_its_own_pod() -> None:
     assert not c.player(0).view.holds(1)  # type: ignore[union-attr]
 
 
+def handshake(c: City, pid: int, msg: ClientMessage, now: float) -> list[Event]:
+    """What the city says about the pod's life, less the relay of its 'b'."""
+    events = c.client_message(pid, msg, now)
+    return [e for e in events if not isinstance(e.message, server.PodState)]
+
+
 def test_the_drop_handshake_through_the_city() -> None:
     c = cyber_city_one()
     pid = joined(c).player_id
     release = Event(server.ReleaseDrop(pid), ToHolders(pid))
-    assert c.client_message(pid, report(4), 1.0) == [release]
+    # The first report: nobody else holds the pod yet, so the release is its owner's alone.
+    assert handshake(c, pid, report(4), 1.0) == [Event(server.ReleaseDrop(pid), ToPlayer(pid))]
     assert c.tick(1.2) == [release]
-    assert c.client_message(pid, report(1), 1.5) == []
+    assert handshake(c, pid, report(1), 1.5) == []
     assert c.tick(1.6) == []
-    assert c.client_message(pid, client.Died(), 30.0) == [Event(server.Destroy(pid), ToAll())]
-    assert c.client_message(pid, report(4), 31.0) == []
+    assert handshake(c, pid, client.Died(), 30.0) == [Event(server.Destroy(pid), ToAll())]
+    assert handshake(c, pid, report(4), 31.0) == []  # the fly-over: no answer, and no relay
+    assert c.client_message(pid, report(4), 31.5) == []
     assert c.tick(31.2) == []
-    assert c.client_message(pid, client.DropMe(), 39.0) == [release]
+    assert handshake(c, pid, client.DropMe(), 39.0) == [release]
 
 
 def test_messages_from_unknown_players_and_unruled_messages_are_ignored() -> None:
@@ -102,9 +110,9 @@ def test_messages_from_unknown_players_and_unruled_messages_are_ignored() -> Non
 def test_leaving_deletes_the_pod_on_the_other_clients_that_hold_it() -> None:
     c = cyber_city_one()
     a, b = joined(c, "A", 0).player_id, joined(c, "B", 0).player_id
-    c.player(b).view.hold(a)  # type: ignore[union-attr]  (M5 introduces; here by hand)
+    c.player(b).view.hold(a)  # type: ignore[union-attr]  (introductions are in test_introductions)
     events = c.leave(a, 5.0)
-    assert events == [Event(server.Delete(a), ToHolders(a))]
+    assert events == [Event(server.Delete(a), ToPlayer(b))]
     assert c.player(a) is None
     assert [p.id for p in c.players()] == [b]  # the leaver is no holder any more
     assert c.leave(a, 6.0) == []  # twice is harmless

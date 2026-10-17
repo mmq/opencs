@@ -148,3 +148,10 @@ def test_after_the_give_up_ticks_stay_quiet_when_the_last_report_was_not_state_4
     pod.on_report(report(0), 0.0)
     pod.on_death(1.0)
     assert pod.tick(1.0 + policy.DROP_REQUEST_TIMEOUT) == []
+
+
+def test_a_pod_has_reported_from_its_first_b_on() -> None:
+    pod = Pod(0)
+    assert not pod.has_reported
+    pod.on_report(report(4), 0.0)
+    assert pod.has_reported

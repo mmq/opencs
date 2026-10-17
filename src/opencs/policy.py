@@ -279,3 +279,20 @@ LATE_QUIT_WINDOW = 10.0
 
 #: The pod state byte of a pod in drop state (I §7.1, I §7.4): it discards positions.
 POD_STATE_DROPPING = 4
+
+#: The pod state byte of a falling pod (I §8.24): its ``v1``/``v2`` are vertical velocity, and it
+#: is the one state besides 0 that a relayed ``'b'`` may carry.
+POD_STATE_FALLING = 1
+
+#: Per-session limits on the client messages the city relays to other players (DESIGN §5 "Input is
+#: hostile"; I §8, I §8.24, I §8.25, I §9.3.5): a token bucket per kind, ``(burst, per second)``.
+#: One relayed frame lands in every other outbox, so an unlimited sender could overflow them and get
+#: the receivers disconnected (``OUTBOX_LIMIT``). Excess frames are dropped and counted as bad
+#: input, so a sustained flood closes the flooder's own connection (``MAX_BAD_INPUT``). Sized from
+#: the real captures, whose peaks per kind are: 'b' 3 in 1 s and 20 in 10 s; shots (Rapid Fire,
+#: Tri-Shot) 3 in 1 s and 17 in 10 s; chat 1 per second; Grenades 1 per second. Each limit is about
+#: four times the sustained peak with a burst of several seconds' worth. Ours.
+RELAY_LIMIT_POD_STATE = (12, 8.0)
+RELAY_LIMIT_SHOT = (40, 16.0)
+RELAY_LIMIT_CHAT = (8, 2.0)
+RELAY_LIMIT_GRENADE = (8, 4.0)

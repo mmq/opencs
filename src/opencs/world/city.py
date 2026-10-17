@@ -17,10 +17,12 @@ from dataclasses import dataclass, field
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, client, server
-from opencs.world.events import Event, ToHolders
+from opencs.messages import ClientMessage, ServerMessage, client, server
+from opencs.world import chat, relay
+from opencs.world.entities import Entity, introduce
+from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
-from opencs.world.pods import Pod
+from opencs.world.pods import Pod, PodPhase
 from opencs.world.view import ClientView
 
 log = logging.getLogger("opencs.world")
@@ -39,6 +41,31 @@ class Player:
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
+
+    @property
+    def entity_id(self) -> int:
+        return self.id
+
+    def creating_messages(self) -> Sequence[ServerMessage]:
+        """``'G'`` at the pod's last position, then ``'A'``: ``'G'`` leaves the new pod in drop
+        state and a pod in drop state discards every ``'b'`` (I §7.2 steps 2 and 3). A pod that
+        is dead and awaiting its drop is introduced where it last stood without the ``'A'``: every
+        other client has it in drop state since the ``'J'``, so the newcomer's copy waits there
+        too, and the ``'A'`` that releases the pod for them (its bare ``'A'``, or the timeout)
+        reaches the newcomer as a holder (I §7.2)."""
+        placed = self.pod.placed
+        assert placed is not None, "a pod is introduced only after its first 'b' (I §7.2)"
+        introduce = server.Introduce(
+            id=self.id,
+            callsign=self.callsign.encode("ascii"),
+            index=self.index,
+            team=self.team,
+            pos=placed.pos,
+            orient=placed.orient,
+        )
+        if self.pod.phase is PodPhase.DEAD:
+            return (introduce,)
+        return (introduce, server.ReleaseDrop(self.id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +92,20 @@ class City:
         self.config = config
         self._players: dict[int, Player] = {}
         self._ids = IdSpace()
+        #: The entities every client that is playing should hold: the pods that have reported
+        #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
+        self._live: dict[int, Entity] = {}
+        #: Shots dropped because their KIND would crash a client (I §8.25).
+        self.unsafe_shots = 0
         self._handlers: dict[
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
-            client.PodState: lambda p, m, now: p.pod.on_report(_as(client.PodState, m), now),
+            client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
+            client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
+            client.Grenade: lambda p, m, now: [
+                Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
+            ],
+            client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m)),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -125,8 +162,15 @@ class City:
         if player is None:
             return []
         self._ids.release(IdRange.PLAYER, player_id, now)
-        # The leaver is out of the roster, so ``ToHolders`` cannot reach its own client.
-        events = [Event(server.Delete(player_id), ToHolders(player_id))]
+        self._live.pop(player_id, None)
+        # Name the holders now: forgetting the pod below would leave ``ToHolders`` nobody to reach
+        # by the time the router resolves it. The leaver is out of the roster, so its own client is
+        # not among them.
+        events = []
+        for other in self.players():
+            if other.view.holds(player_id):
+                other.view.forget(player_id)
+                events.append(Event(server.Delete(player_id), ToPlayer(other.id)))
         if not self._players:
             self._reset()
         return events
@@ -134,6 +178,7 @@ class City:
     def _reset(self) -> None:
         """Nobody is here: the next game starts fresh (S13)."""
         self._ids = IdSpace()
+        self._live.clear()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -159,6 +204,99 @@ class City:
         for player in self.players():
             events += player.pod.tick(now)
         return events
+
+    def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
+        """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2),
+        then the relay to the clients that hold it (I §8.24)."""
+        first = not player.pod.has_reported
+        events = player.pod.on_report(report, now)
+        if first:
+            # Nobody else holds this pod yet, so its drop 'A' is for its owner alone; the others
+            # are given theirs by the introduction, after their 'G'. ``ToHolders`` resolves after
+            # this call, when the introductions below have made them holders, so it is named.
+            events = [
+                Event(e.message, ToPlayer(player.id))
+                if isinstance(e.message, server.ReleaseDrop)
+                else e
+                for e in events
+            ]
+            events += self._go_live(player)
+        if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
+            events.append(
+                Event(
+                    relay.pod_state(player.id, report),
+                    ToHolders(player.id, except_player=player.id),
+                )
+            )
+        return events
+
+    def spawn(self, entity: Entity) -> list[Event]:
+        """A new entity (a pod, tower, drop, mine, Sentinel, guppy or Muncher): every client that
+        is playing gets its creating packets through ``introduce``, the function a later joiner's
+        sync uses, and the city remembers it for them (I §7.3)."""
+        self._live[entity.entity_id] = entity
+        events: list[Event] = []
+        for player in self.players():
+            if player.pod.has_reported:  # its client is past the 'B'
+                events += introduce(entity, player.view)
+        return events
+
+    def despawn(self, entity_id: int) -> None:
+        """The entity is gone: later joiners are not given it. Clients are told by the caller."""
+        self._live.pop(entity_id, None)
+        for player in self._players.values():
+            player.view.forget(entity_id)
+
+    def _playing(self, *, team: int | None = None, but: int | None = None) -> ToPlayers:
+        """The clients that have reported, for messages every client takes (chat, shots,
+        Grenades; I App. B means every client in the game). One still loading has
+        its receive ring nearly full from the ``'B'`` repeat (I §7.1, II §7), and has been
+        introduced to nobody, so it would drop chat and shots anyway (our audience rule (clients
+        that have reported); see I App. B). ``team`` narrows to one team, ``but`` leaves one player
+        out."""
+        return ToPlayers(
+            frozenset(
+                p.id
+                for p in self._players.values()
+                if p.pod.has_reported and p.id != but and (team is None or p.team == team)
+            )
+        )
+
+    def _go_live(self, player: Player) -> list[Event]:
+        """The player's first ``'b'`` is in: it is told about every pod already live, and they are
+        told about it, once per pair (I §7.2). Players that have not reported yet are
+        introduced when they do."""
+        events: list[Event] = []
+        for entity in self._live.values():
+            events += introduce(entity, player.view)
+        self._live[player.id] = player
+        for other in self.players():
+            if other.pod.has_reported:
+                events += introduce(player, other.view)
+        return events
+
+    def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
+        """A line the player typed, echoed to its audience (I §8.23)."""
+        event = chat.chat_line(
+            player.id,
+            typed,
+            open_to=self._playing(),
+            team_to=self._playing(team=player.team),
+        )
+        if event is None:
+            log.debug("dropping chat of style %d from player %d", typed.style, player.id)
+            return []
+        return [event]
+
+    def _shot(self, player: Player, fired: client.Shot) -> list[Event]:
+        """A shot, relayed verbatim to every other client (I §8.25, I App. B). An unsafe KIND is
+        dropped and counted: a modified client must not crash the others."""
+        shot = relay.shot(fired)
+        if shot is None:
+            self.unsafe_shots += 1
+            log.warning("dropping a shot of KIND %d from player %d", fired.kind, player.id)
+            return []
+        return [Event(shot, self._playing(but=player.id))]
 
     def _died(self, player: Player, now: float) -> list[Event]:
         """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""

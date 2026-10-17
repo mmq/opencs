@@ -29,6 +29,7 @@ from opencs.messages import (
 )
 from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import Phase
+from opencs.session.ratelimit import TokenBucket
 from opencs.wire.codec import BYTE_MIN
 from opencs.wire.frame import Frame, FrameReader, build_frame
 from opencs.wire.text import QuitScanner
@@ -66,6 +67,15 @@ class InGamePhase(Phase):
         self._reader = FrameReader()
         self._bad = WindowedCounter(policy.MAX_BAD_INPUT, policy.BAD_INPUT_WINDOW)
         self._bad_seen = 0
+        # Budgets for the messages the city relays to everyone (policy.RELAY_LIMIT_*).
+        now = host.now()
+        self._relay_buckets: dict[type[ClientMessage], TokenBucket] = {
+            client.PodState: TokenBucket(*policy.RELAY_LIMIT_POD_STATE, now),
+            client.Shot: TokenBucket(*policy.RELAY_LIMIT_SHOT, now),
+            client.Chat: TokenBucket(*policy.RELAY_LIMIT_CHAT, now),
+            client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
+        }
+        self._over_budget = 0
         self._stalled_since: float | None = None
         self._city: City | None = None
         self._player_id = -1
@@ -178,6 +188,8 @@ class InGamePhase(Phase):
                 self.host.log.debug("undecodable %r frame: %s", frame.type, exc)
                 continue
             self.handle(message)
+        failed += self._over_budget  # frames dropped for exceeding their budget count as bad
+        self._over_budget = 0
         if self._bad.record(now, failed):
             self.host.log.warning(
                 "%d bad frames or messages in %.0f s; closing",
@@ -199,6 +211,10 @@ class InGamePhase(Phase):
             case client.Acks() | client.Flags():
                 pass  # acknowledgments; the client's own 'S' is not relayed (I §8)
             case _:
+                bucket = self._relay_buckets.get(type(message))
+                if bucket is not None and not bucket.take(self.host.now()):
+                    self._over_budget += 1  # dropped: counted with the bad input in ``_process``
+                    return
                 self._to_city(message)
 
     def _to_city(self, message: ClientMessage) -> None:

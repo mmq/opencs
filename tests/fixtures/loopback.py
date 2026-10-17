@@ -103,19 +103,37 @@ class Client:
         self._parsed += self._frames.feed(data)
 
     async def expect_frame(self, letter: str) -> ServerMessage:
-        """Read until a server frame of this type letter has arrived; return it decoded."""
+        """Read until a server frame of this type letter has arrived; return it decoded. The whole
+        wait has one deadline, so a frame that never comes fails the test with the frame types
+        that did, even while other frames keep arriving."""
         want = letter.encode()
-        while True:
-            for i, frame in enumerate(self._parsed):
-                if frame.payload[:1] == want:
-                    del self._parsed[: i + 1]
-                    return decode_server(frame.payload)[0]
-            await self._receive()
+
+        async def find() -> ServerMessage:
+            while True:
+                for i, frame in enumerate(self._parsed):
+                    if frame.payload[:1] == want:
+                        del self._parsed[: i + 1]
+                        return decode_server(frame.payload)[0]
+                await self._receive()
+
+        try:
+            return await asyncio.wait_for(find(), TIMEOUT)
+        except TimeoutError:
+            seen = [f.payload[:1] for f in self._parsed]
+            raise AssertionError(f"no {letter!r} frame; unclaimed frames: {seen!r}") from None
 
     async def expect(self, needle: bytes) -> bytes:
-        """Read until ``needle`` has arrived; return everything up to and including it."""
-        while needle not in self.buffer:
-            await self._receive()
+        """Read until ``needle`` has arrived; return everything up to and including it. One
+        deadline for the whole wait."""
+
+        async def find() -> None:
+            while needle not in self.buffer:
+                await self._receive()
+
+        try:
+            await asyncio.wait_for(find(), TIMEOUT)
+        except TimeoutError:
+            raise AssertionError(f"no {needle!r}; buffered: {self.buffer!r}") from None
         end = self.buffer.index(needle) + len(needle)
         got, self.buffer = self.buffer[:end], self.buffer[end:]
         return got

@@ -8,7 +8,7 @@ from fixtures.lobbies import city
 from opencs.messages import ServerMessage, server
 from opencs.routing import Router
 from opencs.world.city import City, JoinResult
-from opencs.world.events import Event, ToAll, ToAllExcept, ToHolders, ToPlayer, ToTeam
+from opencs.world.events import Event, ToAll, ToAllExcept, ToHolders, ToPlayer, ToPlayers, ToTeam
 
 
 @dataclass
@@ -57,6 +57,12 @@ def test_to_player_reaches_only_that_player() -> None:
     assert who(table(), ToPlayer(1)) == [1]
 
 
+def test_to_players_reaches_exactly_the_named_players_in_id_order() -> None:
+    t = table()
+    t.router.deliver(t.city, [Event(server.QuitAck(), ToPlayers(frozenset({3, 0, 9})))])
+    assert [i for i, s in sorted(t.sinks.items()) if s.got] == [0, 3]
+
+
 def test_to_all_reaches_everyone() -> None:
     assert who(table(), ToAll()) == [0, 1, 2, 3]
 
@@ -76,6 +82,13 @@ def test_to_holders_reaches_those_whose_view_holds_the_entity() -> None:
     assert who(t, ToHolders(2)) == [2, 3]  # its owner and the client that was introduced
     assert who(t, ToHolders(0)) == [0]
     assert who(t, ToHolders(200)) == []
+
+
+def test_to_holders_except_leaves_out_one_holder() -> None:
+    t = table()
+    assert who(t, ToHolders(2, except_player=2)) == [3]  # the owner is left out
+    assert who(t, ToHolders(2, except_player=3)) == [2]
+    assert who(t, ToHolders(2, except_player=0)) == [2, 3]  # not a holder: changes nothing
 
 
 def test_to_a_player_who_is_not_in_the_city_nobody_is_reached() -> None:
