@@ -92,6 +92,9 @@ class InGamePhase(Phase):
         self._hello_sent = 0
         self._next_hello = 0.0
         self._first_frame = False
+        #: When the last bytes arrived: a line that goes quiet for ``SILENCE_SECONDS`` after the
+        #: first frame is dropped (II §13 item 1).
+        self._last_bytes_at = now
         # The quit handshake.
         self._quit_scanner = QuitScanner()
         self._quit_deadline = 0.0
@@ -165,15 +168,55 @@ class InGamePhase(Phase):
             )
 
     def closed(self) -> None:
-        """A line drop mid-game. The record is already saved from the reports so far; the held game
-        for ``/RESUME`` is M10b's."""
-        self._leave_city()
+        """The socket ended. While playing, with the server not the one that closed it, that is a
+        line drop (II §13 item 1); after a quit the player is already out."""
+        if self.stage is Stage.PLAYING and self.host.close_reason is None:
+            self._line_dropped(self.host.now())
+        else:
+            self._leave_city()
         self.stage = Stage.GONE
+
+    def _line_dropped(self, fight_at: float) -> None:
+        """The line dropped mid-game (II §13): the city decides whether it was a fight, which
+        is a death, and what record the player leaves; only a real account is held for
+        ``/RESUME`` (D1). ``fight_at`` is when the line went quiet. The record is already saved
+        from the reports so far."""
+        city = self._city
+        if city is None:
+            return
+        self._city = None
+        services = self.host.services
+        member = self.host.member
+        account = member is not None and member.account is not None
+        services.router.unregister(city.config.letter, self._player_id)
+        try:
+            dropped = city.line_drop(
+                self._player_id, self.host.now(), fight_at=fight_at, hold=account
+            )
+            services.router.deliver(city, dropped.events)
+            services.persistence.flush(city)
+        except Exception:
+            # A bug in the world: the player must still be gone from the city (DESIGN §5).
+            self.host.log.exception("city %s failed on a line drop", city.config.letter)
+            city.leave(self._player_id, self.host.now())
+            return
+        record = dropped.record
+        if record is None:
+            self.host.log.info("line dropped; nothing is kept for this player")
+        elif not account:
+            self.host.log.info("line dropped; JOINGENIE cannot resume (%s)", record.reason or "ok")
+        else:
+            services.held.hold(record)
+            self.host.log.info(
+                "line dropped; %s",
+                "held for /RESUME" if record.eligible else f"counted as a death ({record.reason})",
+            )
 
     # --- bytes in ----------------------------------------------------------------------------
 
     def feed(self, data: bytes) -> None:
         now = self.host.now()
+        self._last_bytes_at = now
         quits = self._quit_scanner.feed(data)
         if self.stage is Stage.QUITTING:
             self._count_quits(len(quits), now)
@@ -278,6 +321,16 @@ class InGamePhase(Phase):
             self._tick_quitting(now)
 
     def _tick_playing(self, now: float) -> None:
+        if self._first_frame and now - self._last_bytes_at >= policy.SILENCE_SECONDS:
+            # POD.FUN sent a packet and then nothing: the line is dead though the socket is not
+            # (II §13 item 1). The fight window is counted from when it went quiet.
+            self.host.log.info(
+                "no bytes for %.0f s; the line is taken as dropped", now - self._last_bytes_at
+            )
+            self._line_dropped(self._last_bytes_at)
+            self.stage = Stage.GONE
+            self.host.close("line silent")
+            return
         if (
             not self._first_frame
             and now >= self._next_hello

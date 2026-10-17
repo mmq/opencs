@@ -29,6 +29,8 @@ class Session:
         self.pilot: Pilot | None = None
         self.member: Member | None = None
         self._active = True
+        #: Why the server closed the connection, None while it has not (a drop by the peer).
+        self.close_reason: str | None = None
         self._released = False
         self.phase: Phase = LoginPhase(self)
         self._guard(self.phase.enter)
@@ -70,6 +72,7 @@ class Session:
         """Ask the connection to flush and close; the session stops reading."""
         if self._active:
             self._active = False
+            self.close_reason = reason
             self.log.info("closing: %s", reason)
             self.io.close(reason)
 

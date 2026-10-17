@@ -15,6 +15,7 @@ from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.messages import ServerMessage
 from opencs.routing import Router
+from opencs.session.held import HeldGames
 from opencs.session.persistence import Persistence
 from opencs.session.phases import Services
 from opencs.session.session import Session
@@ -101,13 +102,14 @@ def make_world(
 ) -> World:
     clock = ManualClock(start)
     identity = Identity(MemoryAccountStore(), iterations=FAST_ITERATIONS)
-    lobby = Lobby(cities or (city("A"), city("B"), city("C")), default, random.Random(seed))
     configs = cities or (city("A"), city("B"), city("C"))
-    cities_by_letter = {c.letter: City(c) for c in configs}
+    held = HeldGames(clock)
+    lobby = Lobby(configs, default, random.Random(seed), held)
+    cities_by_letter = {c.letter: City(c, reservations=held) for c in configs}
     router = Router()
     progress = progress or MemoryProgressStore()
     services = Services(
-        identity, lobby, clock, cities_by_letter, router, Persistence(progress, clock)
+        identity, lobby, clock, cities_by_letter, router, Persistence(progress, clock), held
     )
     return World(clock, identity, lobby, services, progress)
 
@@ -141,9 +143,9 @@ def enter_lobby(world: World, account: str = "JOINGENIE") -> Harness:
     return h
 
 
-def play(world: World, letter: str = "A", team: int = 0) -> Harness:
+def play(world: World, letter: str = "A", team: int = 0, account: str = "JOINGENIE") -> Harness:
     """A session in the Chamber taken through ``/PLAY`` and ``/GO 0`` into the in-game phase."""
-    h = enter_lobby(world)
+    h = enter_lobby(world, account)
     h.feed(f"/PLAY {letter} {policy.TEAM_NAMES[team]}\r")
     h.feed("/GO 0\r")
     h.take()

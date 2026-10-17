@@ -21,6 +21,7 @@ from opencs.lobby.lobby import Lobby
 from opencs.net.connection import ConnectionIO, SessionFactory
 from opencs.net.listener import Listener
 from opencs.routing import Router
+from opencs.session.held import HeldGames
 from opencs.session.persistence import Persistence
 from opencs.session.phases import Services
 from opencs.session.session import Session
@@ -47,9 +48,12 @@ def build_services(
     stores = stores or memory_stores()
     identity = Identity(stores.accounts)
     rng = rng or random.Random()
-    lobby = Lobby(config.cities, config.server.default_city, rng)
-    cities = {c.letter: City(c, rng) for c in config.cities if c.enabled}
-    return Services(identity, lobby, clock, cities, Router(), Persistence(stores.progress, clock))
+    held = HeldGames(clock)
+    lobby = Lobby(config.cities, config.server.default_city, rng, held)
+    cities = {c.letter: City(c, rng, held) for c in config.cities if c.enabled}
+    return Services(
+        identity, lobby, clock, cities, Router(), Persistence(stores.progress, clock), held
+    )
 
 
 def build_session_factory(services: Services) -> SessionFactory:
