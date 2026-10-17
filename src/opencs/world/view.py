@@ -4,11 +4,12 @@ The client keeps a registry it never unlinks from and answers a second create fo
 duplicate, so the server must remember which entities each client holds: whom it has been introduced
 to, which towers it has seen. Audiences like ``ToHolders`` resolve against this, and a late joiner's
 sync is built from it. It holds the client's own pod, the pods it has been introduced to and any
-other entity whose create it was sent.
+other entity whose create it was sent; city-wide state that is not an entity is in ``told``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 
 
@@ -43,6 +44,9 @@ class ClientView:
     held: set[int] = field(default_factory=set)
     #: Guppy id -> this client's leg count, for each guppy it holds (I §7.3).
     legs: dict[int, LegCount] = field(default_factory=dict)
+    #: City-wide state (not entities) -> the value this client was last sent: the territory grid
+    #: now, the weather in M9 (I §7.3: "once, plus again on every change").
+    told: dict[str, Hashable] = field(default_factory=dict)
 
     def hold(self, entity_id: int) -> None:
         """The client has been told this entity exists."""
@@ -52,6 +56,14 @@ class ClientView:
         """The client no longer holds it (it was deleted)."""
         self.held.discard(entity_id)
         self.legs.pop(entity_id, None)
+
+    def was_told(self, key: str, value: Hashable) -> bool:
+        """Whether the client's copy of city-wide state ``key`` is already at ``value``."""
+        return key in self.told and self.told[key] == value
+
+    def tell(self, key: str, value: Hashable) -> None:
+        """The client has been sent city-wide state ``key`` at ``value``."""
+        self.told[key] = value
 
     def holds(self, entity_id: int) -> bool:
         return entity_id in self.held

@@ -9,7 +9,7 @@ mine, Sentinel, guppy, Muncher) joins by implementing the same two members.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from typing import Protocol, runtime_checkable
 
 from opencs.messages import ServerMessage
@@ -45,3 +45,27 @@ def introduce(entity: Entity, view: ClientView, now: float) -> list[Event]:
     if isinstance(entity, TracksClients):
         entity.client_introduced(view)
     return [Event(m, ToPlayer(view.player_id)) for m in entity.creating_messages(now)]
+
+
+class CityState(Protocol):
+    """City-wide state a client is sent that is not an entity: the territory grid, the weather.
+    ``state_value`` is what a client's copy should equal now; a client is sent
+    ``state_messages`` whenever its copy differs, so the grid goes once and the weather goes again
+    on every change (I §7.3)."""
+
+    @property
+    def state_key(self) -> str: ...
+
+    @property
+    def state_value(self) -> Hashable: ...
+
+    def state_messages(self, now: float) -> Sequence[ServerMessage]: ...
+
+
+def inform(state: CityState, view: ClientView, now: float) -> list[Event]:
+    """The packets that bring ``view``'s client up to date with ``state``, or none if it is.
+    The sibling of ``introduce`` for state that is not an entity; a joiner's sync calls both."""
+    if view.was_told(state.state_key, state.state_value):
+        return []
+    view.tell(state.state_key, state.state_value)
+    return [Event(m, ToPlayer(view.player_id)) for m in state.state_messages(now)]

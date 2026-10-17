@@ -2,21 +2,20 @@
 
 The client computes control and income itself, from the towers it has been sent and the classes
 ``'T'`` gave it (I §9.2.6); the server sends no score for territory. This module is
-what the server needs of it: the ``'T'``-``'I'`` message (it is an ``Entity`` so the one sync path
-of ``entities.introduce`` hands it to every client once, I §7.3) and a pure control computation
-for the server's own use (logging; M9's Muncher goes for the team owning most blocks).
+what the server needs of it: the ``'T'``-``'I'`` message (it is ``CityState``, so
+``entities.inform`` hands it to every client once, I §7.3) and a pure control computation for
+the server's own use (logging; M9's Muncher goes for the team owning most blocks).
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Hashable, Iterable, Sequence
 
 from opencs.messages import ServerMessage, limits, server
 
-#: The ``Entity.entity_id`` of the territory grid in a ``ClientView``. No real entity has a negative
-#: id, so it never collides with a pod, tower or guppy.
-TERRITORY_ID = -1
+#: The key under which a ``ClientView`` records the grid it was sent.
+TERRITORY_KEY = "territory"
 
 type Block = tuple[int, int]  # (cell X, cell Z)
 
@@ -28,13 +27,13 @@ class Territory:
         self._rows = blocks
 
     @property
-    def entity_id(self) -> int:
-        return TERRITORY_ID
+    def state_key(self) -> str:
+        return TERRITORY_KEY
 
     @property
-    def has_map(self) -> bool:
-        """Whether the city sends a grid at all (else the client's default stands)."""
-        return self._rows is not None
+    def state_value(self) -> Hashable:
+        """The grid a client should hold: it never changes in a city's life, so it is sent once."""
+        return None if self._rows is None else tuple(tuple(row) for row in self._rows)
 
     def class_at(self, x: int, z: int) -> int:
         """The class of block (X, Z); 0 where no map is configured (the client's default)."""
@@ -44,7 +43,7 @@ class Territory:
         """Points per second block (X, Z) is worth to its owner, before the multiplier."""
         return limits.BLOCK_VALUES[self.class_at(x, z)]
 
-    def creating_messages(self, now: float) -> Sequence[ServerMessage]:
+    def state_messages(self, now: float) -> Sequence[ServerMessage]:
         """The ``'T'``-``'I'`` grid in world order (byte ``8*X + Z`` is block (X, Z), I §8.22), or
         nothing when the city has no map."""
         if self._rows is None:

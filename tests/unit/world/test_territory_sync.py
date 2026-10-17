@@ -20,6 +20,8 @@ def test_each_client_gets_the_grid_once_on_its_first_report() -> None:
     assert len(grids(to(first, a))) == 1 and grids(to(first, b)) == []
     second = deliveries(c, c.client_message(b, report(4), 1.5))
     assert len(grids(to(second, b))) == 1 and grids(to(second, a)) == []
+    # It is city-wide state, not an entity: the client holds no id for it.
+    assert all(i >= 0 for i in c.player(a).view.held) and c.player(a).view.told
     # A later report, the relay of 'b' and a walk never repeat it.
     later = deliveries(c, c.client_message(a, report(0), 2.0))
     assert grids([m for _, m in later]) == []

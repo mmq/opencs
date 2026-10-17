@@ -20,7 +20,7 @@ from opencs.config import CityConfig
 from opencs.messages import ClientMessage, WirePos, client, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
-from opencs.world.entities import Entity, introduce
+from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.logistics import (
@@ -317,8 +317,8 @@ class City:
         live (pods, towers, guppies), and the pods are told about it, once per pair (I §7.2,
         I §7.3). Players that have not reported yet are introduced when they do."""
         events: list[Event] = []
-        territory = [self._territory] if self._territory.has_map else []
-        for entity in (*territory, *self._live.values()):
+        events += inform(self._territory, player.view, now)
+        for entity in self._live.values():
             events += introduce(entity, player.view, now)
         self._live[player.id] = player
         for other in self.players():

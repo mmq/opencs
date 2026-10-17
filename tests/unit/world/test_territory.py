@@ -34,7 +34,7 @@ def rows(text: str) -> tuple[tuple[int, ...], ...]:
 
 
 def grid(territory: Territory) -> server.SetBlocks:
-    (message,) = territory.creating_messages(0.0)
+    (message,) = territory.state_messages(0.0)
     assert isinstance(message, server.SetBlocks)
     return message
 
@@ -75,7 +75,7 @@ def test_an_asymmetric_map_is_not_transposed_by_mistake() -> None:
 
 def test_no_map_sends_nothing_and_every_block_is_worth_one() -> None:
     t = Territory(None)
-    assert t.creating_messages(0.0) == ()
+    assert t.state_messages(0.0) == ()
     assert t.value_at(3, 4) == 1
 
 
