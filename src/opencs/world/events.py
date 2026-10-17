@@ -20,13 +20,22 @@ class ToPlayer:
 
 
 @dataclass(frozen=True, slots=True)
+class ToPlayers:
+    """Exactly these clients, named by the city when it makes the event. For messages that only a
+    client past its load can take, e.g. chat and relayed shots: a client that has not sent its
+    first ``'b'`` is still filling its receive ring with the ``'B'`` repeat (I §7.1, II §7)."""
+
+    player_ids: frozenset[int]
+
+
+@dataclass(frozen=True, slots=True)
 class ToAll:
     """Every client in the city (``'J'``, chat, ``'M'``...)."""
 
 
 @dataclass(frozen=True, slots=True)
 class ToAllExcept:
-    """Every client in the city but one (relayed ``'b'``, ``'c'``)."""
+    """Every client in the city but one."""
 
     player_id: int
 
@@ -52,7 +61,7 @@ class ToHolders:
     except_player: int | None = None
 
 
-type Audience = ToPlayer | ToAll | ToAllExcept | ToTeam | ToHolders
+type Audience = ToPlayer | ToPlayers | ToAll | ToAllExcept | ToTeam | ToHolders
 
 
 @dataclass(frozen=True, slots=True)

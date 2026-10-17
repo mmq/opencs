@@ -8,7 +8,7 @@ from fixtures.lobbies import city
 from opencs.messages import ServerMessage, server
 from opencs.routing import Router
 from opencs.world.city import City, JoinResult
-from opencs.world.events import Event, ToAll, ToAllExcept, ToHolders, ToPlayer, ToTeam
+from opencs.world.events import Event, ToAll, ToAllExcept, ToHolders, ToPlayer, ToPlayers, ToTeam
 
 
 @dataclass
@@ -55,6 +55,12 @@ def who(t: Table, audience: object) -> list[int]:
 
 def test_to_player_reaches_only_that_player() -> None:
     assert who(table(), ToPlayer(1)) == [1]
+
+
+def test_to_players_reaches_exactly_the_named_players_in_id_order() -> None:
+    t = table()
+    t.router.deliver(t.city, [Event(server.QuitAck(), ToPlayers(frozenset({3, 0, 9})))])
+    assert [i for i, s in sorted(t.sinks.items()) if s.got] == [0, 3]
 
 
 def test_to_all_reaches_everyone() -> None:

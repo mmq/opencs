@@ -98,13 +98,16 @@ def test_a_dead_pods_fly_over_reports_are_not_relayed() -> None:
 # --- the Grenade and shot relays ---------------------------------------------------------------
 
 
-def three() -> tuple[City, list[int]]:
+def three(*, reported: bool = True) -> tuple[City, list[int]]:
     c = City(city("A"))
     ids = []
     for callsign, team in (("AAA", 0), ("BBB", 1), ("CCC", 1)):
         r = c.join(callsign, team, 0.0)
         assert isinstance(r, JoinResult)
         ids.append(r.player_id)
+    if reported:
+        for pid in ids:
+            c.client_message(pid, report(4), 0.5)
     return c, ids
 
 
@@ -114,18 +117,24 @@ def test_a_grenade_is_relayed_as_the_tagged_e_g_to_every_other_client() -> None:
     thrown = decode_client(FULL_FRAMES["A3b_E_grenade_c2s"][1][5:])
     assert isinstance(thrown, client.Grenade)
     out = deliveries(c, c.client_message(a, thrown, 1.0))
-    assert [pid for pid, _ in out] == [b, d]  # not the thrower; not asked whether introduced
+    assert [pid for pid, _ in out] == [b, d]  # not the thrower
     ((_, msg), _) = out
     captured = FULL_FRAMES["A3b_E_grenade_s2c"][1]  # tag 0x87
     assert build_frame(server_payload(msg, 0x87)) == captured
     assert (thrown.pos.cell_x, thrown.pos.cell_z) == (2, 2) and thrown.yaw == 869
 
 
-def test_a_grenade_reaches_a_client_that_has_not_reported_yet() -> None:
-    c, (a, b, d) = three()
-    c.client_message(a, report(4), 1.0)
+def test_a_grenade_and_a_shot_skip_a_client_that_has_not_reported_yet() -> None:
+    # Its receive ring is filling with the 'B' repeat (I §7.1, II §7): nothing else may be sent to
+    # it.
+    c, (a, b, d) = three(reported=False)
+    for pid in (a, b):
+        c.client_message(pid, report(4), 1.0)
     thrown = client.Grenade(report(0).pos, 100, 200)
-    assert [pid for pid, _ in deliveries(c, c.client_message(a, thrown, 2.0))] == [b, d]
+    assert [pid for pid, _ in deliveries(c, c.client_message(a, thrown, 2.0))] == [b]
+    fired = client.Shot(0, report(0).pos, 3196, 0, 11)
+    assert [pid for pid, _ in deliveries(c, c.client_message(a, fired, 2.0))] == [b]
+    assert d not in [pid for pid, _ in deliveries(c, c.client_message(b, thrown, 3.0))]
 
 
 def shot(kind: int) -> client.Shot:

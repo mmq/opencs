@@ -20,7 +20,7 @@ from opencs.config import CityConfig
 from opencs.messages import ClientMessage, ServerMessage, client, server
 from opencs.world import chat, relay
 from opencs.world.entities import Entity, introduce
-from opencs.world.events import Event, ToAllExcept, ToHolders, ToPlayer
+from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.pods import Pod, PodPhase
 from opencs.world.view import ClientView
@@ -103,7 +103,7 @@ class City:
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.Grenade: lambda p, m, now: [
-                Event(relay.grenade(_as(client.Grenade, m)), ToAllExcept(p.id))
+                Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
             ],
             client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m)),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
@@ -247,6 +247,21 @@ class City:
         for player in self._players.values():
             player.view.forget(entity_id)
 
+    def _playing(self, *, team: int | None = None, but: int | None = None) -> ToPlayers:
+        """The clients that have reported, for messages every client takes (chat, shots,
+        Grenades; I App. B means every client in the game). One still loading has
+        its receive ring nearly full from the ``'B'`` repeat (I §7.1, II §7), and has been
+        introduced to nobody, so it would drop chat and shots anyway (our audience rule (clients
+        that have reported); see I App. B). ``team`` narrows to one team, ``but`` leaves one player
+        out."""
+        return ToPlayers(
+            frozenset(
+                p.id
+                for p in self._players.values()
+                if p.pod.has_reported and p.id != but and (team is None or p.team == team)
+            )
+        )
+
     def _go_live(self, player: Player) -> list[Event]:
         """The player's first ``'b'`` is in: it is told about every pod already live, and they are
         told about it, once per pair (I §7.2). Players that have not reported yet are
@@ -262,7 +277,12 @@ class City:
 
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
         """A line the player typed, echoed to its audience (I §8.23)."""
-        event = chat.chat_line(player.id, player.team, typed)
+        event = chat.chat_line(
+            player.id,
+            typed,
+            open_to=self._playing(),
+            team_to=self._playing(team=player.team),
+        )
         if event is None:
             log.debug("dropping chat of style %d from player %d", typed.style, player.id)
             return []
@@ -276,7 +296,7 @@ class City:
             self.unsafe_shots += 1
             log.warning("dropping a shot of KIND %d from player %d", fired.kind, player.id)
             return []
-        return [Event(shot, ToAllExcept(player.id))]
+        return [Event(shot, self._playing(but=player.id))]
 
     def _died(self, player: Player, now: float) -> list[Event]:
         """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""

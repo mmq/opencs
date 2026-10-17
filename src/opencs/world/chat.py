@@ -9,20 +9,23 @@ from __future__ import annotations
 
 from opencs.messages import client, server
 from opencs.messages.limits import CHAT_STYLE_OPEN, CHAT_STYLE_TEAM, SYSTEM_SENDER
-from opencs.world.events import Audience, Event, ToAll, ToTeam
+from opencs.world.events import Audience, Event, ToAll
 
 
-def chat_line(sender_id: int, team: int, typed: client.Chat) -> Event | None:
+def chat_line(
+    sender_id: int, typed: client.Chat, *, open_to: Audience, team_to: Audience
+) -> Event | None:
     """The ``'a'`` for a line a player typed: ``sender`` is the typist's pod id (the client adds the
-    callsign), the style is the one it sent, and the audience is every client for the open channel
-    or the typist's team for the team channel; the typist is in both, as it does not draw its own
-    line otherwise. Text is cut to printable ASCII, 230 bytes. A style the client never sends is
-    dropped (None): we relay chat styles 0 and 1 only.
+    callsign), the style is the one it sent, and the audience is ``open_to`` for the open channel
+    (every client) or ``team_to`` for the team channel (the typist's team). The city names both and
+    includes the typist in each, as it does not draw its own line otherwise. Text is cut to
+    printable ASCII, 230 bytes. A style the client never sends is dropped (None): we relay chat
+    styles 0 and 1 only.
     """
     if typed.style == CHAT_STYLE_OPEN:
-        audience: Audience = ToAll()
+        audience = open_to
     elif typed.style == CHAT_STYLE_TEAM:
-        audience = ToTeam(team)
+        audience = team_to
     else:
         return None
     text = server.sanitize_chat(typed.text)

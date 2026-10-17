@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from fixtures.delivery import deliveries
 from fixtures.lobbies import city
+from fixtures.pods import report
 from fixtures.spec_vectors import FULL_FRAMES
 from opencs.messages import ServerMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
@@ -21,6 +22,8 @@ def table() -> tuple[City, list[int]]:
         r = c.join(callsign, team, 0.0)
         assert isinstance(r, JoinResult)
         ids.append(r.player_id)
+    for pid in ids:  # all are playing: chat reaches only clients that have reported
+        c.client_message(pid, report(4), 0.5)
     return c, ids
 
 
@@ -78,3 +81,13 @@ def test_a_system_line_is_sanitized_too() -> None:
     assert isinstance(event.message, server.Chat)
     assert event.message.text.startswith(b"a b?z")
     assert len(event.message.text) == 230
+
+
+def test_chat_skips_a_client_that_is_still_loading() -> None:
+    # Its ring holds the 'B' repeat already (I §7.1, II §7); it would drop the line anyway, not yet
+    # having been introduced to the typist (I §8.23).
+    c, _ = table()
+    late = c.join("EEE", 0, 0.0)
+    assert isinstance(late, JoinResult)
+    assert late.player_id not in [pid for pid, _ in say(c, 0, 0, b"hi")]
+    assert late.player_id not in [pid for pid, _ in say(c, 0, 1, b"team")]

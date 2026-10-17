@@ -20,6 +20,7 @@ from opencs.world.events import (
     ToAllExcept,
     ToHolders,
     ToPlayer,
+    ToPlayers,
     ToTeam,
 )
 
@@ -51,6 +52,8 @@ class Router:
         match audience:
             case ToPlayer(player_id):
                 return [p.id for p in players if p.id == player_id]
+            case ToPlayers(player_ids):
+                return [p.id for p in players if p.id in player_ids]
             case ToAll():
                 return [p.id for p in players]
             case ToAllExcept(player_id):
