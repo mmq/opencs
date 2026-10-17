@@ -57,8 +57,8 @@ CHECKS: list[Check] = [
     Check(1, "login and Chamber reached", lambda a, b: has(a, r"in the Chamber")),
     Check(
         2,
-        "/PLAY answered with a city selection ('E')",
-        lambda a, b: has(a, r"server chose city"),
+        "/PLAY answered with a city selection ('E') and the launch ('C')",
+        lambda a, b: has(a, r"server chose city") and has(a, r"launched -- switching"),
     ),
     Check(
         3,

@@ -25,5 +25,9 @@ def test_judge_checks_1_and_2_pass_login_and_city_selection() -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert re.search(r"^ok +1 login and Chamber reached$", result.stdout, re.MULTILINE)
-    assert re.search(r"^ok +2 /PLAY answered with a city selection", result.stdout, re.MULTILINE)
+    assert re.search(
+        r"^ok +2 /PLAY answered with a city selection \('E'\) and the launch \('C'\)$",
+        result.stdout,
+        re.MULTILINE,
+    )
     assert "FAIL" not in result.stdout

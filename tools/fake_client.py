@@ -199,7 +199,7 @@ class FakeClient:
         await term.expect(b"PRESS RETURN\r")
         await term.send(b"CSTTBT 105 150\r")
         await term.expect(b"\x05A\r")
-        await term.expect(b"\x05D0\r")  # the welcome line's color block
+        await term.quiet_for(0.4)  # whatever welcome the server shows; only 'A' is protocol
         self.log("in the Chamber")
         for line in self.lobby_lines:
             await term.send(line.encode("ascii") + b"\r")
