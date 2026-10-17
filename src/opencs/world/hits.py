@@ -14,8 +14,9 @@ import logging
 from collections.abc import Sequence
 from typing import Protocol
 
-from opencs.messages import client
+from opencs.messages import WirePos, client
 from opencs.world import relay
+from opencs.world.attacks import in_fight_range
 from opencs.world.combat import damage_to_victim
 from opencs.world.effects import Effects
 from opencs.world.events import Event, ToPlayer
@@ -65,6 +66,7 @@ class Hits:
         counted.
         """
         player.shots.record(now, fired.shooter)
+        self.note_fire(fired.shooter, fired.pos, now, "SHOTS")
         if fired.shooter != player.id and not self._host.is_known_npc(fired.shooter):
             self.shooter_mismatches += 1
             # Warn once; a client that simulates NPCs this city does not know yet (before they
@@ -84,6 +86,24 @@ class Hits:
             log.log(level, "dropping a shot of KIND %d from player %d", fired.kind, player.id)
             return []
         return [Event(shot, self._host.playing(but=player.id))]
+
+    def note_fire(self, shooter_id: int, origin: WirePos, now: float, why: str) -> None:
+        """A shot or grenade left ``origin``: every pod that is not the shooter's own and not on its
+        team, and stands within ``FIGHT_RANGE`` of it, is under attack (II §13 item 3, D4). A
+        shooter that is not a player's pod is an NPC, everyone's enemy."""
+        shooter = self._host.player(shooter_id)
+        team = None if shooter is None else shooter.team
+        for p in self._host.players():
+            placed = p.pod.placed
+            if (
+                p.id == shooter_id
+                or p.team == team
+                or placed is None
+                or p.pod.phase is PodPhase.DEAD
+            ):
+                continue
+            if in_fight_range(placed.pos, origin):
+                p.attacks.mark(now, why)
 
     def hit(self, reporter: Player, hit: client.HitReport, now: float) -> list[Event]:
         """An ``'I'``: a hit the reporter's simulation registered on ``hit.target`` (I §9.1).
@@ -110,12 +130,15 @@ class Hits:
             return []
         if credit.credited:
             victim.hits.record(reporter.id, now)
+        if reporter.team != victim.team:
+            victim.attacks.mark(now, "A HIT REPORT")  # II §13 item 3
         damage = damage_to_victim(reporter.id, hit.damage)
         if damage is None:
             self.unrelayable_damage += 1
             level = logging.WARNING if self.unrelayable_damage == 1 else logging.DEBUG  # once
             log.log(level, "dropping damage byte %d from player %d", hit.damage, reporter.id)
             return []
+        victim.attacks.mark(now, "DAMAGE")
         return [Event(damage, ToPlayer(victim.id))]
 
     def _hit_entity(

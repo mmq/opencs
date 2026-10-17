@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from opencs.messages import ServerMessage, server
+from opencs.world.attacks import Attacks
 from opencs.world.combat import HitSet, ShotLog
 from opencs.world.grace import Grace
 from opencs.world.loadout import Loadout
@@ -43,6 +44,8 @@ class Player:
     grace: Grace = field(init=False)
     #: The modules this pod carries, as far as the server's messages say (I §9.3.4, II §13).
     loadout: Loadout = field(init=False)
+    #: When and how this pod was last under attack (II §13 item 3).
+    attacks: Attacks = field(init=False)
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
@@ -61,6 +64,7 @@ class Player:
         self.bounty = Bounty(self.id)
         self.grace = Grace(self.id, self.team)
         self.loadout = Loadout()
+        self.attacks = Attacks()
 
     @property
     def entity_id(self) -> int:

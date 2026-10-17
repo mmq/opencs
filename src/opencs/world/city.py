@@ -104,9 +104,7 @@ class City:
             client.PodState: lambda p, m, now: pod_state(self, p, _as(client.PodState, m), now),
             **score_handlers(self.config.max_module_level, self.config.max_multiplier),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
-            client.Grenade: lambda p, m, now: [
-                Event(relay.grenade(_as(client.Grenade, m)), self.playing(but=p.id))
-            ],
+            client.Grenade: lambda p, m, now: self._grenade(p, _as(client.Grenade, m), now),
             client.Shot: lambda p, m, now: self.hits.shot(p, _as(client.Shot, m), now),
             client.HitReport: lambda p, m, now: self.hits.hit(p, _as(client.HitReport, m), now),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
@@ -296,6 +294,7 @@ class City:
         player = self._players.get(player_id)
         if player is not None:
             player.shots.record(now, fired.shooter)
+            self.hits.note_fire(fired.shooter, fired.pos, now, "SHOTS")
 
     def tick(self, now: float) -> list[Event]:
         """Timed rules: the weather program (I §8.20), Sentinel replacements, Muncher meals
@@ -377,6 +376,12 @@ class City:
                 if p.pod.has_reported and p.id != but and (team is None or p.team == team)
             )
         )
+
+    def _grenade(self, player: Player, thrown: client.Grenade, now: float) -> list[Event]:
+        """A thrown Grenade is relayed to the other clients (I §9.3.6); it is also an attack on any
+        enemy pod near it (II §13 item 3)."""
+        self.hits.note_fire(player.id, thrown.pos, now, "A GRENADE")
+        return [Event(relay.grenade(thrown), self.playing(but=player.id))]
 
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
         """A line the player typed, echoed to its audience (I §8.23)."""

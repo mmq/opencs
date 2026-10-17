@@ -561,3 +561,25 @@ MUNCHER_EDGE_INSET_FEET = 50
 #: Most Munchers in a city at once; a Call Muncher past it is ignored. Ours (DESIGN §5): the module
 #: is used up per request, so honest play never nears it, but each Muncher costs legs of traffic.
 MAX_MUNCHERS = 16
+
+# --- /RESUME (II §13, II §13) ---------------------------------
+
+#: Seconds of no bytes from a client that has already sent a frame before the line is taken as
+#: dropped (D8). Ours: across every capture a live client never went more than 1.0 s between
+#: packets, so 15 s is more than ten times that.
+SILENCE_SECONDS = 15.0
+
+#: A pod is in "a fight you are about to lose" if it was under attack within this many seconds of
+#: the drop (D4). The manual's payout window, reused (I §9.2.8, II §11.2).
+BATTLE_WINDOW = 20.0
+
+#: An enemy shot, grenade or air strike fired within this many feet of a pod is an attack on it
+#: (D4): the client's own NPC targeting range, so not a number of ours.
+FIGHT_RANGE = 600.0
+
+#: A dropped game is held this long from the drop (D8): the README's "within 10 minutes".
+HOLD_SECONDS = 600.0
+
+#: Seconds from entering the Chamber after a drop in which ``/RESUME`` may be typed (D8): the
+#: manual summary's "within 3 minutes", counted from the re-entry (our reading).
+TYPE_SECONDS = 180.0
