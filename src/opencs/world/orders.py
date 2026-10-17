@@ -10,15 +10,19 @@ city has (the roster, spawning, the structure ids).
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from opencs import policy
 from opencs.messages import ClientMessage, WirePos, client, server
 from opencs.messages.catalog import is_module_index
-from opencs.world.events import Event, ToPlayer
+from opencs.messages.fields import GRENADE_KIND
+from opencs.world.events import Event, ToPlayer, ToPlayers
 from opencs.world.host import WorldHost
 from opencs.world.logistics import (
     Action,
+    AirSupportJob,
     CatchUp,
     Create,
     Deliver,
@@ -35,6 +39,16 @@ from opencs.world.structures import Tower, TowerHit
 from opencs.world.territory import Territory
 
 log = logging.getLogger("opencs.world")
+
+
+@dataclass(frozen=True, slots=True)
+class Strike:
+    """An Air Support grenade dropped: when, by whose team's guppy, where (I §9.3.6). M10's resume
+    reads these as enemy strikes near a dropped pod (II §13 item 3)."""
+
+    at: float
+    team: int
+    pos: WirePos
 
 
 class Orders:
@@ -55,11 +69,14 @@ class Orders:
         #: Hit reports on a tower with a damage byte past the client's table (I §8.11): ignored
         #: and counted, apart from the pod-damage relay's own counter.
         self.ignored_tower_damage = 0
+        #: The last Air Support strikes, newest last (II §13 item 3).
+        self.strikes: deque[Strike] = deque(maxlen=policy.STRIKE_LOG_MAX)
 
     def reset(self) -> None:
         """The city emptied: its towers, guppies and queues go with it (II §17)."""
         self.towers.clear()
         self.logistics = Logistics()
+        self.strikes.clear()
 
     # --- orders ------------------------------------------------------------------------------
 
@@ -112,6 +129,24 @@ class Orders:
         job = ModuleJob(player.team, order.module, point, order.priority != 0, player.id)
         return reply + self._perform(self.logistics.order(job), now)
 
+    def air_support(self, player: Player, request: client.AirSupport, now: float) -> list[Event]:
+        """``'E'``-``'A'`` (I §9.3.5): acknowledged at once with ``'E'``-``'A'`` 0 ("Rgr, Air
+        Support. CLEAR AREA!"), and a job queued for the team's guppy (priority honored, not
+        refused in a no-drop zone: the rule names tower drops). On arrival it drops a grenade at the
+        point, at the requester's last reported altitude. A team queue at the safety bound
+        acknowledges but queues nothing."""
+        placed = player.pod.placed
+        if placed is None:
+            return []
+        reply = Event(server.AirSupportReply(policy.AIR_SUPPORT_ACKNOWLEDGED), ToPlayer(player.id))
+        if self.logistics.queue_saturated(player.team):
+            log.warning("team %d guppy queue full; an Air Support request was dropped", player.team)
+            return [reply]
+        xz = request.pos
+        point = WirePos(xz.cell_x, xz.cell_z, xz.x_off, placed.pos.y, xz.z_off)
+        job = AirSupportJob(player.team, point, request.priority != 0, player.id)
+        return [reply, *self._perform(self.logistics.order(job), now)]
+
     def leg_arrived(self, player: Player, arrival: client.LegArrived, now: float) -> list[Event]:
         """A client's copy of a guppy completed a leg (I §9.4.1). Only guppies this client holds
         are counted: a Muncher's report (M9) or a made-up id is ignored."""
@@ -131,6 +166,8 @@ class Orders:
                     events += self.place_tower(job.team, job.pos, job.mega, now)
                 case Deliver(ModuleJob() as job):
                     events += self._drops.create(job.module, job.pos, now)
+                case Deliver(AirSupportJob() as job):
+                    events += self._strike(job, now)
                 case Dispatch(guppy, dest):
                     # Only clients that count legs for it; one still joining is sent no 'K' for
                     # this guppy until its copy has reported (I §7.3 step 2).
@@ -149,6 +186,17 @@ class Orders:
                         Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(player_id))
                     )
         return events
+
+    def _strike(self, job: AirSupportJob, now: float) -> list[Event]:
+        """The guppy arrived: a grenade (``'c'`` KIND 9, shooter = the guppy) at the point, spawned
+        level so it detonates at once, to every client past its load (I §9.3.6, I App. B). Damage is
+        the clients' own. Logged as a shot fired."""
+        guppy_id = policy.GUPPY_BASE_ID + job.team
+        self.strikes.append(Strike(now, job.team, job.pos))
+        log.info("air strike by guppy %d at %s", guppy_id, job.pos)
+        playing = frozenset(p.id for p in self._host.players() if p.pod.has_reported)
+        shot = server.Shot(guppy_id, job.pos, 0, 0, GRENADE_KIND)
+        return [Event(shot, ToPlayers(playing))]
 
     # --- towers ------------------------------------------------------------------------------
 

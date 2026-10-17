@@ -122,6 +122,9 @@ class City:
             client.EffectRequest: lambda p, m, now: self.effects.request(
                 p, _as(client.EffectRequest, m).effect, now
             ),
+            client.AirSupport: lambda p, m, now: self.orders.air_support(
+                p, _as(client.AirSupport, m), now
+            ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }

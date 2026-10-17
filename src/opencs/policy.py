@@ -464,3 +464,6 @@ RELAY_LIMIT_EFFECT = (6, 2.0)
 
 #: The ``'E'``-``'A'`` reply code: 0 = "GUPPY: Rgr, Air Support. CLEAR AREA!". I §9.3.5, II §16.1.
 AIR_SUPPORT_ACKNOWLEDGED = 0
+
+#: Air Support strikes kept for M10's resume check (enemy strikes near a dropped pod). Ours.
+STRIKE_LOG_MAX = 64

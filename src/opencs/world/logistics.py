@@ -92,8 +92,23 @@ class ModuleJob:
         return WireXZ(self.pos.cell_x, self.pos.cell_z, self.pos.x_off, self.pos.z_off)
 
 
-#: What a guppy can be asked to carry. Air Support joins in a later commit.
-type Job = TowerJob | ModuleJob
+@dataclass(frozen=True, slots=True)
+class AirSupportJob:
+    """Fly to ``pos`` and drop a grenade there (I §9.3.6): the point is the request's, at the
+    requester's last reported altitude."""
+
+    team: int
+    pos: WirePos
+    priority: bool
+    requester: int
+
+    @property
+    def destination(self) -> WireXZ:
+        return WireXZ(self.pos.cell_x, self.pos.cell_z, self.pos.x_off, self.pos.z_off)
+
+
+#: What a guppy can be asked to carry or do.
+type Job = TowerJob | ModuleJob | AirSupportJob
 
 
 class Phase(Enum):
