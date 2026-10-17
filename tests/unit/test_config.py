@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from opencs.config import ConfigError, load_config
+from opencs import policy
+from opencs.config import AmbientStep, CityConfig, ConfigError, load_config
 from opencs.messages import limits
 
 SHIPPED = Path(__file__).parents[2] / "config" / "server.toml"
@@ -263,3 +264,96 @@ def test_the_largest_possible_map_fits_the_largest_multiplier(tmp_path: Path) ->
 def test_a_ban_may_name_any_catalog_module(tmp_path: Path) -> None:
     config = load_config(write_config(tmp_path, {"A": with_line("banned_modules = [1, 47, 32]")}))
     assert config.cities[0].banned_modules == (1, 47, 32)
+
+
+# --- The living city: NPC population and the weather program (II §16, II §5) ------------
+
+
+def step(after: float, **fields: object) -> str:
+    body = "".join(f"{k} = {str(v).lower()}\n" for k, v in fields.items())
+    return f"\n[[ambient]]\nafter = {after}\n{body}"
+
+
+def load_city(tmp_path: Path, extra: str) -> CityConfig:
+    return load_config(write_config(tmp_path, {"A": CITY + extra})).cities[0]
+
+
+def test_the_shipped_cities_carry_the_reference_populations_and_programs() -> None:
+    a, b, c = load_config(SHIPPED).cities
+    assert (a.sentinels, a.muncher_every, a.ambient) == (0, 0, ())
+    assert (b.sentinels, b.sentinel_respawn, b.muncher_every) == (2, 300, 0)
+    assert b.ambient == (AmbientStep(600, rain=2), AmbientStep(300, rain=0))
+    assert (c.sentinels, c.sentinel_respawn, c.muncher_every) == (4, 180, 600)
+    assert c.ambient == (
+        AmbientStep(300, light=3),
+        AmbientStep(300, rain=3, lightning=True),
+        AmbientStep(240, rain=0, lightning=False),
+        AmbientStep(300, light=0),
+    )
+
+
+def test_a_city_without_npcs_or_a_program_has_none(tmp_path: Path) -> None:
+    city = load_city(tmp_path, "")
+    assert (city.sentinels, city.muncher_every, city.ambient) == (0, 0, ())
+    assert city.sentinel_respawn == policy.DEFAULT_SENTINEL_RESPAWN
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "sentinels = 49",
+        "sentinels = -1",
+        "sentinel_respawn = 0",
+        "sentinel_respawn = 86401",
+        "muncher_every = -1",
+        "muncher_every = true",
+        'muncher_every = "600"',
+    ],
+)
+def test_bad_population_values_name_the_key(tmp_path: Path, line: str) -> None:
+    with pytest.raises(ConfigError, match=line.split(" ", maxsplit=1)[0]):
+        load_config(write_config(tmp_path, {"A": with_line(line)}))
+
+
+def test_population_values_on_a_bound_are_accepted(tmp_path: Path) -> None:
+    city = load_city(tmp_path, "sentinels = 48\nsentinel_respawn = 1\nmuncher_every = 86400\n")
+    assert (city.sentinels, city.sentinel_respawn, city.muncher_every) == (48, 1.0, 86400.0)
+
+
+@pytest.mark.parametrize(
+    ("steps", "why"),
+    [
+        (step(10, light=5), "light"),
+        (step(10, light=-1), "light"),
+        (step(10, rain=4), "rain"),
+        (step(10, rain=-1), "rain"),
+        (step(10, lightning=1), "lightning"),
+        (step(-1, rain=1), "after"),
+        (step(604801, rain=1), "after"),
+        (step(0, rain=1), "period"),
+        (step(10, light=1) + step(10, light=2) + step(100, rain=1), "55"),
+        (step(54, light=1), "55"),
+        (step(30, light=1) + step(54, light=2), "55"),
+    ],
+)
+def test_bad_programs_are_refused(tmp_path: Path, steps: str, why: str) -> None:
+    with pytest.raises(ConfigError, match=why):
+        load_city(tmp_path, steps)
+
+
+def test_light_changes_may_be_exactly_55_seconds_apart_and_the_wrap_counts(tmp_path: Path) -> None:
+    ok = load_city(tmp_path, step(55, light=1) + step(55, light=2))
+    assert [s.light for s in ok.ambient] == [1, 2]
+    # 55 s between the two light changes, but 14 s from the last round the loop to the first.
+    with pytest.raises(ConfigError, match="55"):
+        load_city(tmp_path, step(10, light=1) + step(55, light=2) + step(4, rain=1))
+
+
+def test_a_rain_only_program_has_no_light_spacing_to_check(tmp_path: Path) -> None:
+    city = load_city(tmp_path, step(1, rain=1) + step(1, rain=0, lightning=True))
+    assert city.ambient == (AmbientStep(1, rain=1), AmbientStep(1, rain=0, lightning=True))
+
+
+def test_an_unknown_key_in_a_step_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="notes"):
+        load_city(tmp_path, '\n[[ambient]]\nafter = 1\nnotes = "x"\n')

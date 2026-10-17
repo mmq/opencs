@@ -34,8 +34,20 @@ class ServerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class AmbientStep:
+    """One step of a city's weather program (I §8.20, II §5): ``after`` seconds since the
+    previous step (since the game began, for the first), then whichever of the palette ``light``
+    (0-4), ``rain`` (0-3) and ``lightning`` it names change. The program loops."""
+
+    after: float
+    light: int | None = None
+    rain: int | None = None
+    lightning: bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CityConfig:
-    """One joinable game's rule set (II §5); weather and NPCs come later."""
+    """One joinable game's rule set (II §5, II §16, II §5)."""
 
     letter: str
     name: str
@@ -51,6 +63,13 @@ class CityConfig:
     #: The territory map: ``BLOCK_SIDE`` rows (cell Z 0..7, top to bottom) of ``BLOCK_SIDE`` classes
     #: 0-3 (cell X 0..7), or None for the client's default, every block worth 1 (II §5).
     blocks: tuple[tuple[int, ...], ...] | None = None
+    #: Resident Sentinels, the seconds before a destroyed one is replaced, and the seconds between
+    #: free Munchers (0 = none). II §16.3.
+    sentinels: int = 0
+    sentinel_respawn: float = policy.DEFAULT_SENTINEL_RESPAWN
+    muncher_every: float = 0.0
+    #: The weather program, looped from the moment the city's game starts (empty = none).
+    ambient: tuple[AmbientStep, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +94,7 @@ class _Table:
     def fail(self, key: str, problem: str) -> ConfigError:
         return ConfigError(f"{self._path}: {key}: {problem}")
 
-    def _get(self, key: str, default: Any, kind: type, kind_name: str) -> Any:
+    def _get(self, key: str, default: Any, kind: type | tuple[type, ...], kind_name: str) -> Any:
         self._seen.add(key)
         if key not in self._data:
             if default is _REQUIRED:
@@ -95,6 +114,36 @@ class _Table:
         if not low <= value <= high:
             raise self.fail(key, f"{value} is outside {low}..{high}")
         return value
+
+    def optional_integer(self, key: str, *, low: int, high: int) -> int | None:
+        """An integer in ``low..high`` or None when the key is absent."""
+        if key not in self._data:
+            self._seen.add(key)
+            return None
+        return self.integer(key, low=low, high=high)
+
+    def optional_boolean(self, key: str) -> bool | None:
+        if key not in self._data:
+            self._seen.add(key)
+            return None
+        return self.boolean(key)
+
+    def number(self, key: str, default: Any = _REQUIRED, *, low: float, high: float) -> float:
+        """An integer or float in ``low..high``."""
+        value: Any = self._get(key, default, (int, float), "a number")
+        if isinstance(value, bool):
+            raise self.fail(key, "expected a number, got bool")
+        if not low <= value <= high:
+            raise self.fail(key, f"{value} is outside {low:g}..{high:g}")
+        return float(value)
+
+    def tables(self, key: str) -> list[Mapping[str, Any]]:
+        """An array of TOML tables (``[[key]]``), or an empty list."""
+        rows: list[Any] = self._get(key, [], list, "an array of tables")
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise self.fail(key, f"entry {i} is not a table")
+        return rows
 
     def boolean(self, key: str, default: Any = _REQUIRED) -> bool:
         return bool(self._get(key, default, bool, "a boolean"))
@@ -150,6 +199,47 @@ def _read_toml(path: Path) -> dict[str, Any]:
         raise ConfigError(f"{path}: cannot read: {exc.strerror or exc}") from exc
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"{path}: invalid TOML: {exc}") from exc
+
+
+def _parse_ambient(path: Path, table: _Table) -> tuple[AmbientStep, ...]:
+    """The weather program: each step's values in range, light changes at least
+    ``MIN_LIGHT_GAP_S`` apart round the loop (II §5), a period above zero."""
+    rows = table.tables("ambient")
+    if len(rows) > policy.MAX_AMBIENT_STEPS:
+        raise table.fail("ambient", f"more than {policy.MAX_AMBIENT_STEPS} steps")
+    steps: list[AmbientStep] = []
+    for i, row in enumerate(rows):
+        step = _Table(path, row)
+        after = step.number("after", low=0, high=policy.MAX_AMBIENT_AFTER)
+        light = step.optional_integer("light", low=0, high=limits.AMBIENT_PALETTE_MAX)
+        rain = step.optional_integer("rain", low=0, high=limits.AMBIENT_RAIN_MAX)
+        lightning = step.optional_boolean("lightning")
+        try:
+            step.done()
+        except ConfigError as exc:
+            raise ConfigError(f"{exc} (ambient step {i + 1})") from exc
+        steps.append(AmbientStep(after, light, rain, lightning))
+    if not steps:
+        return ()
+    period = sum(s.after for s in steps)
+    if period <= 0:
+        raise table.fail("ambient", "the program's total period must be above zero")
+    at = 0.0
+    light_times: list[float] = []
+    for s in steps:
+        at += s.after
+        if s.light is not None:
+            light_times.append(at)
+    # Each light change against the next, the last against the first one period later.
+    following = [*light_times[1:], light_times[0] + period] if light_times else []
+    for earlier, later in zip(light_times, following, strict=True):
+        if later - earlier < policy.MIN_LIGHT_GAP_S:
+            raise table.fail(
+                "ambient",
+                f"light changes {later - earlier:g} s apart (the loop's wrap included); the "
+                f"client's crossfade needs {policy.MIN_LIGHT_GAP_S:g} s (I §8.20)",
+            )
+    return tuple(steps)
 
 
 def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
@@ -208,6 +298,15 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
         ),
         enabled=table.boolean("enabled", True),
         blocks=table.block_rows("blocks"),
+        sentinels=table.integer("sentinels", 0, low=0, high=policy.MAX_SENTINELS),
+        sentinel_respawn=table.number(
+            "sentinel_respawn",
+            policy.DEFAULT_SENTINEL_RESPAWN,
+            low=1,
+            high=policy.MAX_SPAWN_INTERVAL,
+        ),
+        muncher_every=table.number("muncher_every", 0, low=0, high=policy.MAX_SPAWN_INTERVAL),
+        ambient=_parse_ambient(path, table),
     )
     table.done()
     for index in config.banned_modules:

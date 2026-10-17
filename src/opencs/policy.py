@@ -466,3 +466,31 @@ AIR_SUPPORT_ACKNOWLEDGED = 0
 
 #: Air Support strikes kept for M10's resume check (enemy strikes near a dropped pod). Ours.
 STRIKE_LOG_MAX = 64
+
+# --- The living city: weather, Sentinels, Munchers (I §8.20, I §9.5.2, II §16.2, II §16.2, II §5)
+# ----------
+
+#: The client's palette crossfade takes about 50 s, and a crossfade started during another back to
+#: the pre-fade palette is dropped, so palette changes must be at least this far apart (I §8.20,
+#: observed 2026-10-16). The client's number.
+CROSSFADE_SECONDS = 50.0
+
+#: Our margin on top of the crossfade, and the least gap between two light changes in a city's
+#: program, wrap included (II §5; the 5 s
+#: margin is ours).
+FADE_MARGIN_S = 5.0
+MIN_LIGHT_GAP_S = CROSSFADE_SECONDS + FADE_MARGIN_S
+
+#: Most steps a weather program may have, and the longest delay of a step, in seconds (a week).
+#: Ours (DESIGN §5): bounds on a configuration file, not on any rule.
+MAX_AMBIENT_STEPS = 64
+MAX_AMBIENT_AFTER = 7 * 24 * 3600.0
+
+#: Most resident Sentinels a city may ask for: one per block outside the four home corners' 3x3
+#: tile areas (64 blocks - 4 x 4 tiles on the map). II §16.3 ("one per block").
+MAX_SENTINELS = 48
+
+#: Seconds before a destroyed resident Sentinel is replaced, when a city sets none. Ours (the
+#: shipped B value; II §16). The longest a configuration may set is a day.
+DEFAULT_SENTINEL_RESPAWN = 300.0
+MAX_SPAWN_INTERVAL = 24 * 3600.0
