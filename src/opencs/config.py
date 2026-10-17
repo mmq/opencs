@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from opencs import policy
+from opencs.messages import limits
 
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
@@ -33,7 +34,7 @@ class ServerConfig:
 
 @dataclass(frozen=True, slots=True)
 class CityConfig:
-    """One joinable game's rule set (II §5); weather, block map and NPCs come later."""
+    """One joinable game's rule set (II §5); weather and NPCs come later."""
 
     letter: str
     name: str
@@ -46,6 +47,9 @@ class CityConfig:
     balance_teams: tuple[int, ...]
     banned_modules: tuple[int, ...]
     enabled: bool
+    #: The territory map: ``BLOCK_SIDE`` rows (cell Z 0..7, top to bottom) of ``BLOCK_SIDE`` classes
+    #: 0-3 (cell X 0..7), or None for the client's default, every block worth 1 (II §5).
+    blocks: tuple[tuple[int, ...], ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +116,23 @@ class _Table:
         if len(set(values)) != len(values):
             raise self.fail(key, "must not repeat a value")
         return values
+
+    def block_rows(self, key: str) -> tuple[tuple[int, ...], ...] | None:
+        """A block-class map written as ``BLOCK_SIDE`` strings of ``BLOCK_SIDE`` digits, or None."""
+        rows: list[str] | None = self._get(key, None, list, "a list of strings")
+        if rows is None:
+            return None
+        side = limits.BLOCK_SIDE
+        if len(rows) != side:
+            raise self.fail(key, f"needs {side} rows, found {len(rows)}")
+        parsed: list[tuple[int, ...]] = []
+        for i, row in enumerate(rows):
+            if not isinstance(row, str) or len(row) != side:
+                raise self.fail(key, f"row {i} must be a string of {side} digits")
+            if any(not "0" <= ch <= str(limits.BLOCK_CLASS_MAX) for ch in row):
+                raise self.fail(key, f"row {i} has a class outside 0..{limits.BLOCK_CLASS_MAX}")
+            parsed.append(tuple(int(ch) for ch in row))
+        return tuple(parsed)
 
     def done(self) -> None:
         """Reject any key that was never asked for."""
@@ -186,8 +207,18 @@ def _parse_city(path: Path, data: Mapping[str, Any]) -> CityConfig:
             high=policy.MODULE_INDEX_HIGH,
         ),
         enabled=table.boolean("enabled", True),
+        blocks=table.block_rows("blocks"),
     )
     table.done()
+    if config.blocks is not None:
+        # I §9.2.6: the client's 16-bit income product must not overflow.
+        total = sum(limits.BLOCK_VALUES[c] for row in config.blocks for c in row)
+        if total * config.max_multiplier >= limits.SCORE_PRODUCT_LIMIT:
+            raise table.fail(
+                "blocks",
+                f"grid total {total} x max_multiplier {config.max_multiplier} reaches "
+                f"{limits.SCORE_PRODUCT_LIMIT}, which overflows the client's income",
+            )
     return config
 
 

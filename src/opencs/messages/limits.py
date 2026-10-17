@@ -26,8 +26,23 @@ AMBIENT_RAIN_MAX = 3
 #: Block classes the client's value table holds: 0-3. I §8.20.
 BLOCK_CLASS_MAX = 3
 
+#: The points a block of each class is worth per second of control, before the multiplier: the
+#: client's value table. I §8.22, I §9.2.6.
+BLOCK_VALUES = (1, 2, 5, 10)
+
+#: The client adds territory income as a 16-bit product, so ``sum(controlled values) x multiplier``
+#: must stay below this or SCORE goes down instead of up. I §9.2.6.
+SCORE_PRODUCT_LIMIT = 32768
+
+#: The city is 8 x 8 blocks of 600 ft. I §6.1, I §8.20.
+BLOCK_SIDE = 8
+
 #: Damage weapon classes the client's base-damage table holds: 0-4. I §8.11.
 DAMAGE_CLASS_MAX = 4
 
 #: Module bays a pod has. I §8/I §8.6.
 BAY_COUNT = 9
+
+#: What each weapon class of a damage byte (``byte % 10``) subtracts from a tower or other thing the
+#: server keeps health for: the client's own per-shot table, shared by pods. I §8.11, II §10.
+DAMAGE_BASE = (150, 150, 300, 450, 500)

@@ -26,6 +26,7 @@ from opencs.world.ids import IdRange, IdSpace
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
+from opencs.world.territory import Territory
 from opencs.world.view import ClientView
 
 log = logging.getLogger("opencs.world")
@@ -53,6 +54,8 @@ class City:
 
     def __init__(self, config: CityConfig) -> None:
         self.config = config
+        #: The block-class map every client is sent once, on its first report (I §7.3).
+        self._territory = Territory(config.blocks)
         self._players: dict[int, Player] = {}
         self._ids = IdSpace()
         #: The entities every client that is playing should hold: the pods that have reported
@@ -286,11 +289,12 @@ class City:
         )
 
     def _go_live(self, player: Player, now: float) -> list[Event]:
-        """The player's first ``'b'`` is in: it is told about every pod already live, and they are
-        told about it, once per pair (I §7.2). Players that have not reported yet are
-        introduced when they do."""
+        """The player's first ``'b'`` is in: it is given the territory grid and every entity already
+        live (pods, towers, guppies), and the pods are told about it, once per pair (I §7.2,
+        I §7.3). Players that have not reported yet are introduced when they do."""
         events: list[Event] = []
-        for entity in self._live.values():
+        territory = [self._territory] if self._territory.has_map else []
+        for entity in (*territory, *self._live.values()):
             events += introduce(entity, player.view, now)
         self._live[player.id] = player
         for other in self.players():

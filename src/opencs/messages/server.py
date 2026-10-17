@@ -33,8 +33,8 @@ from opencs.messages.fields import (
 from opencs.wire.codec import BIAS10_MAX, Reader, Writer, bias10_encode
 
 #: Block grid: 8 x 8 cells, whole-grid ``'T'`` carries all 64 (I §8.22).
-BLOCK_COUNT = 64
-BLOCK_SIDE = 8
+BLOCK_SIDE = limits.BLOCK_SIDE
+BLOCK_COUNT = BLOCK_SIDE * BLOCK_SIDE
 
 
 def sanitize_chat(raw: bytes) -> bytes:
