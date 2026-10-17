@@ -72,6 +72,9 @@ def test_star_after_the_delay_when_not_telling_has_not_come() -> None:
     # <Not Telling!> arriving later is ignored: still exactly one prompt.
     h.feed("<Not Telling!>\r")
     assert h.take() == b""
+    # But only once: a second one is an ordinary unknown line at the "*" level.
+    h.feed("<Not Telling!>\r")
+    assert h.take() == b"\r\n*"
     h.advance(5)
     assert h.take() == b""
 

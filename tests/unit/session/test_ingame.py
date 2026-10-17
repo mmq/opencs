@@ -127,3 +127,14 @@ def test_noise_without_headers_is_skipped_silently(junk: bytes) -> None:
     h.feed(frame(b"EN"))
     assert seen == [client.Ping()]
     assert not h.io.closed
+
+
+def test_progress_on_a_partial_frame_restarts_the_stall_clock() -> None:
+    h, seen = in_game()
+    ping, quit_ = frame(b"EN"), frame(b"C")
+    h.feed(ping + quit_[:3])  # a whole frame completed: nothing is stalled yet
+    h.advance(2.0)
+    h.feed(quit_[3:5])  # the partial grows but does not complete
+    h.advance(policy.FRAME_STALL_SECONDS - 1.0)  # 3.0 s after the first feed, 2.0 after the second
+    h.feed(quit_[5:])
+    assert seen == [client.Ping(), client.Quit()]
