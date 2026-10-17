@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from opencs.messages import ClientMessage, DecodeError, decode_client
+from opencs.wire.frame import FrameReader
+
 DIRECTORY = Path(__file__).parent / "captures"
 
 
@@ -32,3 +35,19 @@ def load_capture(name: str) -> list[CapturedFrame]:
         if kind in ("C", "S"):
             frames.append(CapturedFrame(float(t), kind, bytes.fromhex(hexdata)))
     return frames
+
+
+def client_messages(name: str) -> list[tuple[float, ClientMessage]]:
+    """Every decodable client message in one fixture, with its time. Frames that do not decode
+    (I §4.1) are skipped, as the session does."""
+    out: list[tuple[float, ClientMessage]] = []
+    reader = FrameReader()
+    for f in load_capture(name):
+        if f.direction != "C":
+            continue
+        for frame in reader.feed(f.raw):
+            try:
+                out.append((f.t, decode_client(frame.payload)))
+            except DecodeError:
+                continue
+    return out

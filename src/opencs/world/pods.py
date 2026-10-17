@@ -80,9 +80,8 @@ class Pod:
 
     def on_death(self, now: float) -> list[Event]:
         """The client's bare ``'J'`` (I §9.2.9 step 2): ``'J' <id>`` to every client including
-        the victim, which does not finish dying without it. Payout, ``'E'``-``'K'`` and the bounty
-        zero are M6's; they run before this and extend this method. A second ``'J'`` before the
-        respawn is ignored."""
+        the victim, which does not finish dying without it. The payout, the notices and the bounty
+        zero around it are ``world.death``'s. A second ``'J'`` before the respawn is ignored."""
         self._expire(now)
         if self.phase is PodPhase.DEAD:
             return []

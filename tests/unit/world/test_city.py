@@ -88,11 +88,18 @@ def test_the_drop_handshake_through_the_city() -> None:
     pid = joined(c).player_id
     release = Event(server.ReleaseDrop(pid), ToHolders(pid))
     # The first report: nobody else holds the pod yet, so the release is its owner's alone.
-    assert handshake(c, pid, report(4), 1.0) == [Event(server.ReleaseDrop(pid), ToPlayer(pid))]
+    first = handshake(c, pid, report(4), 1.0)
+    assert first[0] == Event(server.ReleaseDrop(pid), ToPlayer(pid))
+    # I §9.2.11, II §11.3
+    assert [type(e.message) for e in first[1:]] == [server.SetBays, server.SetStatus]
     assert c.tick(1.2) == [release]
-    assert handshake(c, pid, report(1), 1.5) == []
+    # Leaving drop state starts the bounty: the holders are told 0 (I §9.2.9).
+    assert handshake(c, pid, report(1), 1.5) == [Event(server.SetBounty(pid, 0), ToHolders(pid))]
     assert c.tick(1.6) == []
-    assert handshake(c, pid, client.Died(), 30.0) == [Event(server.Destroy(pid), ToAll())]
+    assert handshake(c, pid, client.Died(), 30.0) == [
+        Event(server.Destroy(pid), ToAll()),
+        Event(server.SetBounty(pid, 0), ToHolders(pid)),  # after the 'J' (I §9.2.9 step 3)
+    ]
     assert handshake(c, pid, report(4), 31.0) == []  # the fly-over: no answer, and no relay
     assert c.client_message(pid, report(4), 31.5) == []
     assert c.tick(31.2) == []

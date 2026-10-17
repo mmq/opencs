@@ -4,6 +4,8 @@ interleaved by time, must make the city do what the test server did, at the prot
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fixtures.captures import CapturedFrame, load_capture
 from fixtures.delivery import deliveries
 from fixtures.lobbies import city
@@ -75,7 +77,9 @@ def test_each_client_is_introduced_to_the_other_exactly_once_as_the_test_server_
     for pid, name in ((0, P1_LOG), (1, P2_LOG)):
         ours = of_type(got[pid], server.Introduce)
         theirs = of_type(recorded(name), server.Introduce)
-        assert len(ours) == 1 and ours == theirs, name
+        # The test server's G always carried 0; ours carries the pod's bounty as it is (I §9.2.12),
+        # so the bounty field is the one thing that may differ.
+        assert len(ours) == 1 and [replace(m, bounty_div10=0) for m in ours] == theirs, name
 
 
 def test_every_g_is_followed_by_its_a_on_the_same_client() -> None:

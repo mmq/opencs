@@ -26,7 +26,11 @@ def first_b(c: City, pid: int, now: float = 1.0, **kw: int) -> list[tuple[int, S
     """The player's report (state 4, the first of a session) and what it delivers, less the relay
     of the 'b' itself (``test_relay`` has that)."""
     out = deliveries(c, c.client_message(pid, report(4, **kw), now))
-    return [(p, m) for p, m in out if not isinstance(m, server.PodState)]
+    return [
+        (p, m)
+        for p, m in out
+        if not isinstance(m, server.PodState | server.SetBays | server.SetStatus)
+    ]
 
 
 def kinds(msgs: list[ServerMessage]) -> list[tuple[str, int]]:
@@ -195,7 +199,7 @@ class Tower:
 
     entity_id = 8192
 
-    def creating_messages(self) -> list[ServerMessage]:
+    def creating_messages(self, now: float) -> list[ServerMessage]:
         return [server.Destroy(8192)]  # any message will do
 
 
@@ -203,9 +207,9 @@ def test_a_spawn_and_a_late_joiners_sync_use_the_same_path_once_per_client() -> 
     c = City(city("A"))
     a, b = join(c, "AAA"), join(c, "BBB", 1)
     first_b(c, a)
-    out = deliveries(c, c.spawn(Tower()))
+    out = deliveries(c, c.spawn(Tower(), 0.0))
     assert out == [(a, server.Destroy(8192))]  # b has not reported: not yet
-    assert deliveries(c, c.spawn(Tower())) == []  # never a second create
+    assert deliveries(c, c.spawn(Tower(), 0.0)) == []  # never a second create
     synced = first_b(c, b)
     assert [m for m in to(synced, b) if isinstance(m, server.Destroy)] == [server.Destroy(8192)]
     assert c.player(b).view.holds(8192)  # type: ignore[union-attr]

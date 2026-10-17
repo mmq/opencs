@@ -13,59 +13,22 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, ServerMessage, client, server
-from opencs.world import chat, relay
+from opencs.messages import ClientMessage, client, server
+from opencs.world import chat, death, relay
+from opencs.world.combat import damage_to_victim
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
-from opencs.world.pods import Pod, PodPhase
+from opencs.world.player import Player
+from opencs.world.pods import PodPhase
+from opencs.world.scoring import multiplier_floor
 from opencs.world.view import ClientView
 
 log = logging.getLogger("opencs.world")
-
-
-@dataclass(slots=True)
-class Player:
-    """A player in a city: identity, slot, what its client holds and its pod's life."""
-
-    id: int
-    callsign: str
-    team: int
-    index: int  # 0-3 within the team; unique per (team, index), I §6.3
-    view: ClientView
-    pod: Pod = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.pod = Pod(self.id)
-
-    @property
-    def entity_id(self) -> int:
-        return self.id
-
-    def creating_messages(self) -> Sequence[ServerMessage]:
-        """``'G'`` at the pod's last position, then ``'A'``: ``'G'`` leaves the new pod in drop
-        state and a pod in drop state discards every ``'b'`` (I §7.2 steps 2 and 3). A pod that
-        is dead and awaiting its drop is introduced where it last stood without the ``'A'``: every
-        other client has it in drop state since the ``'J'``, so the newcomer's copy waits there
-        too, and the ``'A'`` that releases the pod for them (its bare ``'A'``, or the timeout)
-        reaches the newcomer as a holder (I §7.2)."""
-        placed = self.pod.placed
-        assert placed is not None, "a pod is introduced only after its first 'b' (I §7.2)"
-        introduce = server.Introduce(
-            id=self.id,
-            callsign=self.callsign.encode("ascii"),
-            index=self.index,
-            team=self.team,
-            pos=placed.pos,
-            orient=placed.orient,
-        )
-        if self.pod.phase is PodPhase.DEAD:
-            return (introduce,)
-        return (introduce, server.ReleaseDrop(self.id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,15 +60,25 @@ class City:
         self._live: dict[int, Entity] = {}
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
+        #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
+        #: (I §11.4, II §9.2), counted and logged; the shot is still relayed.
+        self.shooter_mismatches = 0
+        #: Hit reports dropped, not relayed: a damage class the client cannot index (I §8.11), a
+        #: report naming the reporter's own pod (I §9.1.4 corollary).
+        self.unrelayable_damage = 0
+        self.own_pod_hit_reports = 0
         self._handlers: dict[
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
+            client.Status: lambda p, m, now: self._status(p, _as(client.Status, m), now),
+            client.Bays: lambda p, m, now: self._bays(p, _as(client.Bays, m)),
             client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.Grenade: lambda p, m, now: [
                 Event(relay.grenade(_as(client.Grenade, m)), self._playing(but=p.id))
             ],
-            client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m)),
+            client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
+            client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -198,18 +171,36 @@ class City:
             return []
         return handler(player, msg, now)
 
+    def note_shot(self, player_id: int, fired: client.Shot, now: float) -> None:
+        """Log a shot the session declined to pass on (it was over the shot budget): the shot log
+        must see every ``'c'`` even when it is not relayed (II §9.3). The log is
+        capped (``SHOT_LOG_MAX``), so a flood cannot grow it."""
+        player = self._players.get(player_id)
+        if player is not None:
+            player.shots.record(now, fired.shooter)
+
     def tick(self, now: float) -> list[Event]:
-        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7)."""
+        """Timed rules: the drop's repeated ``'A'`` (I §7.1, II §7) and the bounty pushes (I
+        §9.2.12, II §11.2)."""
         events: list[Event] = []
         for player in self.players():
             events += player.pod.tick(now)
+            events += player.bounty.tick(now)
+            player.grace.tick(now)
         return events
 
     def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
         """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2),
         then the relay to the clients that hold it (I §8.24)."""
         first = not player.pod.has_reported
+        phase = player.pod.phase
         events = player.pod.on_report(report, now)
+        if first:
+            player.grace.arm(now)  # a spawn (I §9.1.5)
+        if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is the camera, not the pod
+            player.grace.observe(report.pos, now)
+        if phase is not PodPhase.IN_PLAY and player.pod.phase is PodPhase.IN_PLAY:
+            events += player.bounty.start(now)  # left drop state: accruing (I §9.2.12, II §11.2)
         if first:
             # Nobody else holds this pod yet, so its drop 'A' is for its owner alone; the others
             # are given theirs by the introduction, after their 'G'. ``ToHolders`` resolves after
@@ -220,7 +211,8 @@ class City:
                 else e
                 for e in events
             ]
-            events += self._go_live(player)
+            events += self._go_live(player, now)
+            events += self._start_status(player)
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
             events.append(
                 Event(
@@ -230,7 +222,38 @@ class City:
             )
         return events
 
-    def spawn(self, entity: Entity) -> list[Event]:
+    @property
+    def multiplier_floor(self) -> int:
+        """The multiplier a spawn is raised to in this city (II §12)."""
+        return multiplier_floor(self.config.max_module_level, self.config.max_multiplier)
+
+    def _start_status(self, player: Player) -> list[Event]:
+        """A session's status: ``'D'``-``'B'`` first, then ``'D'``-``'S'``, to the player alone
+        (I §9.2.11, II §11.3, I §7.8). Without ``'D'``-``'B'`` the client's multiplier and SCORE
+        never run (I §9.2.3). It goes with the first ``'b'``, not with the ``'B'``: the client is
+        then past its load (a still-loading client's ring is nearly full of ``'B'`` repeats, I §7.1,
+        II §7), and it is when test servers sent it (I §7.1). ``player.score`` is where M10 puts a
+        saved player's bays, marker and bay points."""
+        return [
+            Event(message, ToPlayer(player.id))
+            for message in player.score.start_message(self.multiplier_floor)
+        ]
+
+    def _status(self, player: Player, report: client.Status, now: float) -> list[Event]:
+        """The client's ``'D'``-``'S'``: mirrored, and answered with the multiplier floor when one
+        is due after a death (II §12)."""
+        pushes = player.score.on_status(
+            report, now, self.multiplier_floor, self.config.max_multiplier
+        )
+        return [Event(m, ToPlayer(player.id)) for m in pushes]
+
+    def _bays(self, player: Player, report: client.Bays) -> list[Event]:
+        """The client's ``'D'``-``'B'``: its bays and battle marker, mirrored (II §11.1)."""
+        if not player.score.on_bays(report):
+            log.warning("player %d reported a bay level the client cannot hold", player.id)
+        return []
+
+    def spawn(self, entity: Entity, now: float) -> list[Event]:
         """A new entity (a pod, tower, drop, mine, Sentinel, guppy or Muncher): every client that
         is playing gets its creating packets through ``introduce``, the function a later joiner's
         sync uses, and the city remembers it for them (I §7.3)."""
@@ -238,7 +261,7 @@ class City:
         events: list[Event] = []
         for player in self.players():
             if player.pod.has_reported:  # its client is past the 'B'
-                events += introduce(entity, player.view)
+                events += introduce(entity, player.view, now)
         return events
 
     def despawn(self, entity_id: int) -> None:
@@ -262,17 +285,17 @@ class City:
             )
         )
 
-    def _go_live(self, player: Player) -> list[Event]:
+    def _go_live(self, player: Player, now: float) -> list[Event]:
         """The player's first ``'b'`` is in: it is told about every pod already live, and they are
         told about it, once per pair (I §7.2). Players that have not reported yet are
         introduced when they do."""
         events: list[Event] = []
         for entity in self._live.values():
-            events += introduce(entity, player.view)
+            events += introduce(entity, player.view, now)
         self._live[player.id] = player
         for other in self.players():
             if other.pod.has_reported:
-                events += introduce(player, other.view)
+                events += introduce(player, other.view, now)
         return events
 
     def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
@@ -288,19 +311,98 @@ class City:
             return []
         return [event]
 
-    def _shot(self, player: Player, fired: client.Shot) -> list[Event]:
-        """A shot, relayed verbatim to every other client (I §8.25, I App. B). An unsafe KIND is
-        dropped and counted: a modified client must not crash the others."""
+    def _shot(self, player: Player, fired: client.Shot, now: float) -> list[Event]:
+        """A shot (I §8.25, II §9.3, I §11, I App. B).
+
+        It is logged on the sender's connection first, whatever the shooter and whether or not it
+        is relayed: an NPC's shot the client simulated is what keeps its hit from being credited
+        to the player (II §9.3). The shooter must be the sender's own pod or a known NPC;
+        a mismatch is logged and the shot still relayed. A shot is relayed verbatim to every other
+        client that has reported, except one whose KIND would crash a client, which is dropped and
+        counted.
+        """
+        player.shots.record(now, fired.shooter)
+        if fired.shooter != player.id and not self._is_known_npc(fired.shooter):
+            self.shooter_mismatches += 1
+            # Warn once; a client that simulates NPCs this city does not know yet (before they
+            # exist) would otherwise fill the log with one line per shot.
+            level = logging.WARNING if self.shooter_mismatches == 1 else logging.DEBUG
+            log.log(
+                level,
+                "player %d reported a shot by %d, which is neither its pod nor a known NPC",
+                player.id,
+                fired.shooter,
+            )
         shot = relay.shot(fired)
         if shot is None:
             self.unsafe_shots += 1
-            log.warning("dropping a shot of KIND %d from player %d", fired.kind, player.id)
+            # Warn once, then DEBUG: a hostile client could otherwise log at the relay rate.
+            level = logging.WARNING if self.unsafe_shots == 1 else logging.DEBUG
+            log.log(level, "dropping a shot of KIND %d from player %d", fired.kind, player.id)
             return []
         return [Event(shot, self._playing(but=player.id))]
 
+    def _hit(self, reporter: Player, hit: client.HitReport, now: float) -> list[Event]:
+        """An ``'I'``: a hit the reporter's simulation registered on ``hit.target`` (I §9.1).
+
+        Damage is an effect and credit is who is paid (II §9.1), so they
+        are decided apart. Credit: one shot of the reporter's is used up per report whatever the
+        target (so an NPC-caused hit on a mine uses up the NPC's shot), and when that shot was the
+        reporter's own pod's, the reporter joins the victim's hit set (II §9.3). Damage: a pod
+        of another player gets the damage byte, whoever is credited and whatever the team (II §9.1).
+        """
+        if hit.target == reporter.id:
+            # The client applies that damage itself and never reports it (I §9.1.4); relaying
+            # one would apply it twice. None has been seen: a modified client.
+            self.own_pod_hit_reports += 1
+            level = logging.WARNING if self.own_pod_hit_reports == 1 else logging.DEBUG  # once
+            log.log(level, "player %d reported a hit on its own pod; ignored", reporter.id)
+            return []
+        credit = reporter.shots.attribute(now)
+        victim = self._players.get(hit.target)
+        if victim is None:
+            return self._hit_entity(reporter, hit, credit.credited)
+        if victim.pod.phase is PodPhase.DEAD or not victim.pod.has_reported:
+            log.debug("hit on player %d, which is not in play; ignored", victim.id)
+            return []
+        if credit.credited:
+            victim.hits.record(reporter.id, now)
+        damage = damage_to_victim(reporter.id, hit.damage)
+        if damage is None:
+            self.unrelayable_damage += 1
+            level = logging.WARNING if self.unrelayable_damage == 1 else logging.DEBUG  # once
+            log.log(level, "dropping damage byte %d from player %d", hit.damage, reporter.id)
+            return []
+        return [Event(damage, ToPlayer(victim.id))]
+
+    def _hit_entity(self, reporter: Player, hit: client.HitReport, credited: bool) -> list[Event]:
+        """A hit on something that is not a player's pod: a tower, Sentinel, Muncher or mine. Their
+        durability is the structures' and NPCs' (M7, M9); until then the report is ignored."""
+        log.debug(
+            "player %d hit entity %d (credited=%s); not ruled yet",
+            reporter.id,
+            hit.target,
+            credited,
+        )
+        return []
+
+    def _is_known_npc(self, entity_id: int) -> bool:
+        """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""
+        return entity_id in self._live and entity_id not in self._players
+
     def _died(self, player: Player, now: float) -> list[Event]:
-        """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""
-        return player.pod.on_death(now)
+        """The client's bare ``'J'``: its pod died. The payout, the notices, the ``'J'`` and the
+        bounty zero are ``death.settle``; a second ``'J'`` before the respawn changes nothing."""
+        died = player.pod.on_death(now)
+        if not died:
+            return []
+        return death.settle(player, self._payees(player, now), died, now)
+
+    def _payees(self, victim: Player, now: float) -> list[Player]:
+        """The players to pay for a death: those in the victim's hit set within the window, still
+        in the city, and not on the victim's team (I §9.2.8, II §11.2)."""
+        found = (self._players.get(pid) for pid in victim.hits.payees(now))
+        return [p for p in found if p is not None and p.team != victim.team]
 
 
 def _as[M: ClientMessage](kind: type[M], msg: ClientMessage) -> M:

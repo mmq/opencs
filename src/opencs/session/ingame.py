@@ -72,6 +72,7 @@ class InGamePhase(Phase):
         self._relay_buckets: dict[type[ClientMessage], TokenBucket] = {
             client.PodState: TokenBucket(*policy.RELAY_LIMIT_POD_STATE, now),
             client.Shot: TokenBucket(*policy.RELAY_LIMIT_SHOT, now),
+            client.HitReport: TokenBucket(*policy.RELAY_LIMIT_HIT, now),
             client.Chat: TokenBucket(*policy.RELAY_LIMIT_CHAT, now),
             client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
         }
@@ -214,8 +215,16 @@ class InGamePhase(Phase):
                 bucket = self._relay_buckets.get(type(message))
                 if bucket is not None and not bucket.take(self.host.now()):
                     self._over_budget += 1  # dropped: counted with the bad input in ``_process``
+                    if isinstance(message, client.Shot):
+                        self._note_shot(message)  # not relayed, but still a shot (II §9.3)
                     return
                 self._to_city(message)
+
+    def _note_shot(self, shot: client.Shot) -> None:
+        """Let the city log a shot that is dropped unrelayed (II §9.3)."""
+        city = self._city
+        assert city is not None
+        city.note_shot(self._player_id, shot, self.host.now())
 
     def _to_city(self, message: ClientMessage) -> None:
         """Hand a message to the world. An exception in the city is a bug: log it with the

@@ -23,15 +23,15 @@ class Entity(Protocol):
     @property
     def entity_id(self) -> int: ...
 
-    def creating_messages(self) -> Sequence[ServerMessage]:
-        """What a client needs to receive, in order, to hold this entity as it now stands."""
+    def creating_messages(self, now: float) -> Sequence[ServerMessage]:
+        """What a client needs to receive, in order, to hold this entity as it stands at ``now``."""
         ...
 
 
-def introduce(entity: Entity, view: ClientView) -> list[Event]:
+def introduce(entity: Entity, view: ClientView, now: float) -> list[Event]:
     """The packets that make ``view``'s client hold ``entity``, and the note that it now does.
     Empty if it already holds it: never a second create."""
     if view.holds(entity.entity_id):
         return []
     view.hold(entity.entity_id)
-    return [Event(m, ToPlayer(view.player_id)) for m in entity.creating_messages()]
+    return [Event(m, ToPlayer(view.player_id)) for m in entity.creating_messages(now)]
