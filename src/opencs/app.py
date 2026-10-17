@@ -169,6 +169,9 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH, help="server.toml path")
     parser.add_argument("--port", type=_port, help="override the configured port (0 = ephemeral)")
     parser.add_argument("--host", help="override the configured host")
+    parser.add_argument(
+        "--data-dir", type=Path, help="override the configured data directory (the SQLite file)"
+    )
     return parser.parse_args(argv)
 
 
@@ -180,7 +183,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"opencs: {exc}", file=sys.stderr)
         return 2
-    overrides = {k: v for k, v in (("host", args.host), ("port", args.port)) if v is not None}
+    overrides = {
+        k: v
+        for k, v in (("host", args.host), ("port", args.port), ("data_dir", args.data_dir))
+        if v is not None
+    }
     config = replace(config, server=replace(config.server, **overrides))
     logging.basicConfig(
         level=config.server.log_level,

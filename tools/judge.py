@@ -27,6 +27,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -165,9 +166,11 @@ def run_client(
 
 
 class ManagedServer:
-    """``python -m opencs --port 0`` started for the duration of a judging run."""
+    """``python -m opencs --port 0`` started for the duration of a judging run, on a throwaway data
+    directory so the run neither reads nor leaves a database."""
 
     def __init__(self) -> None:
+        self._data = tempfile.TemporaryDirectory(prefix="opencs-judge-")
         self.proc = subprocess.Popen(
             [
                 sys.executable,
@@ -179,6 +182,8 @@ class ManagedServer:
                 "0",
                 "--config",
                 str(CONFIG),
+                "--data-dir",
+                self._data.name,
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -216,6 +221,7 @@ class ManagedServer:
                 self.proc.kill()
                 self.proc.wait()
         self._drain.join(timeout=5)
+        self._data.cleanup()
 
 
 def grade(port: int, selected: list[int], stage: int, play: str) -> tuple[int, str]:
