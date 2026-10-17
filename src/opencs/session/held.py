@@ -22,6 +22,8 @@ class _Held:
     record: ResumeRecord
     #: When the player was told it is held (back in the Chamber): starts the typing window.
     told_at: float | None = None
+    #: The source address of the connection that dropped (see ``policy.MAX_HELD_PER_ADDRESS``).
+    address: str = "?"
 
     def expires_at(self) -> float:
         if self.told_at is not None:
@@ -36,9 +38,21 @@ class HeldGames:
         self._clock = clock
         self._held: dict[str, _Held] = {}
 
-    def hold(self, record: ResumeRecord) -> None:
+    def hold(self, record: ResumeRecord, address: str = "?") -> None:
         """Keep ``record``; a newer drop of the same identity replaces the older."""
-        self._held[record.identity] = _Held(record)
+        self._held[record.identity] = _Held(record, address=address)
+
+    def has_room(self, address: str, identity: str) -> bool:
+        """True if a drop of ``identity`` from ``address`` may hold a slot: the address has fewer
+        than ``MAX_HELD_PER_ADDRESS`` other live slots (the identity's own is replaced, not added).
+        Only a record that can be resumed holds a seat, so only those count."""
+        self._purge()
+        others = sum(
+            1
+            for key, h in self._held.items()
+            if h.address == address and h.record.eligible and key != identity
+        )
+        return others < policy.MAX_HELD_PER_ADDRESS
 
     def get(self, identity: str) -> ResumeRecord | None:
         """The live record of ``identity``, None if there is none or it has run out."""

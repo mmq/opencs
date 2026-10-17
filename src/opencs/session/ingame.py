@@ -195,10 +195,16 @@ class InGamePhase(Phase):
         services = self.host.services
         member = self.host.member
         account = member is not None and member.account is not None
+        # A source already holding its share of slots holds no more (MAX_HELD_PER_ADDRESS).
+        crowded = (
+            account
+            and member is not None
+            and not services.held.has_room(self.host.address, member.key)
+        )
         services.router.unregister(city.config.letter, self._player_id)
         try:
             dropped = city.line_drop(
-                self._player_id, self.host.now(), fight_at=fight_at, hold=account
+                self._player_id, self.host.now(), fight_at=fight_at, hold=account and not crowded
             )
             services.router.deliver(city, dropped.events)
             services.persistence.flush(city)
@@ -212,8 +218,14 @@ class InGamePhase(Phase):
             self.host.log.info("line dropped; nothing is kept for this player")
         elif not account:
             self.host.log.info("line dropped; JOINGENIE cannot resume (%s)", record.reason or "ok")
+        elif crowded and record.eligible:
+            self.host.log.warning(
+                "line dropped; nothing held: %s already holds %d games",
+                self.host.address,
+                policy.MAX_HELD_PER_ADDRESS,
+            )
         else:
-            services.held.hold(record)
+            services.held.hold(record, self.host.address)
             self.host.log.info(
                 "line dropped; %s",
                 "held for /RESUME" if record.eligible else f"counted as a death ({record.reason})",

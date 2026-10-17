@@ -259,3 +259,38 @@ def test_a_guests_drop_resets_the_emptied_city() -> None:
     city.orders.place_tower(0, WirePos.from_world(900, 20, 900), False, world.clock.now())
     h.session.closed()
     assert city.orders.towers == {}
+
+
+# --- the limit on one address ------------------------------------------------------------------
+
+
+def three_from_one_address(world: World, address: str = "9.9.9.9") -> list[Harness]:
+    hs = []
+    for name, team in (("ALICE", 0), ("BOB", 1), ("CAROL", 2)):
+        h = play(world, "A", team, f"{name},SECRET", address=address)
+        fly(h)
+        hs.append(h)
+    return hs
+
+
+def test_a_third_drop_from_one_address_holds_no_slot() -> None:
+    world = make_world()
+    alice_, bob, carol = three_from_one_address(world)
+    alice_.session.closed()
+    bob.session.closed()
+    assert [k for k, _ in world.services.held.slots("A")] == ["acct:ALICE", "acct:BOB"]
+    carol.session.closed()
+    assert held(world, "acct:CAROL") is None
+    assert [k for k, _ in world.services.held.slots("A")] == ["acct:ALICE", "acct:BOB"]
+    assert world.services.cities["A"].players() == []  # all three are out of the city
+
+
+def test_the_limit_is_per_address() -> None:
+    world = make_world()
+    alice_, bob, _ = three_from_one_address(world)
+    other = play(world, "A", 3, "DAVE,SECRET", address="8.8.8.8")
+    fly(other)
+    alice_.session.closed()
+    bob.session.closed()
+    other.session.closed()
+    assert held(world, "acct:DAVE") is not None

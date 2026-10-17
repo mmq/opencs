@@ -578,6 +578,13 @@ SILENCE_SECONDS = 15.0
 #: the drop (D4). The manual's payout window, reused (I §9.2.8, II §11.2).
 BATTLE_WINDOW = 20.0
 
+#: How many games one source address may have held for `/RESUME` at once (DESIGN §1 goal 4, §5;
+#: II §13 item 4, II §17). A first login registers an account (S8), so without a limit one machine
+#: could hold a team seat per throwaway account for ten minutes each and fill a city for everyone.
+#: Ours: two covers a player who drops twice, or a household sharing an address. A further drop from
+#: that address is an ordinary leave and holds nothing.
+MAX_HELD_PER_ADDRESS = 2
+
 #: How long the attacks on a pod are remembered: the fight window before the last byte of a line
 #: that went quiet, plus the silence limit before it was noticed, plus a tick of slack (D4, D8).
 ATTACK_HISTORY = BATTLE_WINDOW + SILENCE_SECONDS + 5.0

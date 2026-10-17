@@ -68,6 +68,11 @@ class Session:
         """False once the session has asked to close (or the socket ended)."""
         return self._active
 
+    @property
+    def address(self) -> str:
+        """The peer's address, "?" if unknown."""
+        return self.log.context.address
+
     def now(self) -> float:
         return self.services.clock.now()
 
