@@ -225,6 +225,7 @@ class City:
         then the relay to the clients that hold it (I §8.24)."""
         first = not player.pod.has_reported
         phase = player.pod.phase
+        self._check_loadout(player, report)
         events = player.pod.on_report(report, now)
         if first:
             player.grace.arm(now)  # a spawn (I §9.1.5)
@@ -252,6 +253,16 @@ class City:
                 )
             )
         return events
+
+    def _check_loadout(self, player: Player, report: client.PodState) -> None:
+        """Cross-check the installed-module ledger with the weight this ``'b'`` reports (I §9.3.4,
+        II §13). A disagreement that outlasts the grace is logged, once per episode, and never acted
+        on."""
+        mismatch = player.loadout.report(report.weight)
+        if mismatch is not None:
+            first = player.loadout.disagreeing == policy.LOADOUT_GRACE_REPORTS + 1
+            level = logging.WARNING if first else logging.DEBUG
+            log.log(level, "LOADOUT MISMATCH player %d: %s", player.id, mismatch)
 
     @property
     def multiplier_floor(self) -> int:
@@ -447,6 +458,7 @@ class City:
         died = player.pod.on_death(now)
         if not died:
             return []
+        player.loadout.clear()  # the client empties every bay on its death (I §9.3.4, II §13)
         return death.settle(player, self._payees(player, now), died, now)
 
     def _payees(self, victim: Player, now: float) -> list[Player]:

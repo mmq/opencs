@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from opencs.messages import ServerMessage, server
 from opencs.world.combat import HitSet, ShotLog
 from opencs.world.grace import Grace
+from opencs.world.loadout import Loadout
 from opencs.world.pods import Pod, PodPhase
 from opencs.world.scoring import Bounty, PlayerScore
 from opencs.world.view import ClientView
@@ -33,6 +34,8 @@ class Player:
     bounty: Bounty = field(init=False)
     #: The spawn grace period as the client keeps it (I §9.1.5); mirrored, rules unchanged.
     grace: Grace = field(init=False)
+    #: The modules this pod carries, as far as the server's messages say (I §9.3.4, II §13).
+    loadout: Loadout = field(init=False)
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
@@ -41,6 +44,7 @@ class Player:
         self.score = PlayerScore()
         self.bounty = Bounty(self.id)
         self.grace = Grace(self.id, self.team)
+        self.loadout = Loadout()
 
     @property
     def entity_id(self) -> int:
