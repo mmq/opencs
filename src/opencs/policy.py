@@ -80,6 +80,31 @@ DEFAULT_CITY_LETTER = "B"
 MAP_NUMBER_LOW = 1
 MAP_NUMBER_HIGH = 9
 
+# --- Identity (II §3, II §3; DESIGN §5) ------------------------------------
+
+#: The login name of a stock install, compared case-insensitively: no password, assigned callsign.
+#: I §5.1, II §3.
+GUEST_ACCOUNT_NAME = "JOINGENIE"
+
+#: Longest and shortest account name, and longest password, accepted on a login line. Ours: the
+#: spec fixes the line's shape (``NAME,PASSWORD``) but no lengths. The line itself is bounded by
+#: ``MAX_LINE_BYTES``.
+MAX_ACCOUNT_NAME_LENGTH = 32
+MAX_PASSWORD_LENGTH = 64
+
+#: PBKDF2-HMAC-SHA256 work factor and salt size. Ours (DESIGN §5 "salted PBKDF2"). 100 000 rounds
+#: is about 30 ms, which blocks the event loop once per login; raise it when logins move to a
+#: thread.
+PBKDF2_ITERATIONS = 100_000
+PBKDF2_SALT_BYTES = 16
+
+#: The first and last single-digit suffix of a duplicate callsign (``JOINGEN2`` .. ``JOINGEN9``;
+#: II §3: the 8th character is replaced by a digit), then two-digit suffixes
+#: (``JOINGE10`` .. ``JOINGE99``) when those run out. The 9th duplicate and beyond are ours, see
+#: II §3.
+CALLSIGN_FIRST_SUFFIX = 2
+CALLSIGN_LAST_SUFFIX = 99
+
 # --- Wire (I §5.2, I §4.1; DESIGN §5) ------------------------------------------------------------
 
 #: Longest inbound Chamber line kept, in bytes; longer lines are discarded and counted. The
