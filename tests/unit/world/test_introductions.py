@@ -8,6 +8,7 @@ from fixtures.delivery import deliveries, to
 from fixtures.lobbies import city
 from fixtures.pods import report
 from fixtures.spec_vectors import FULL_FRAMES
+from opencs import policy
 from opencs.messages import ServerMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
 from opencs.world.city import City, JoinResult
@@ -147,7 +148,25 @@ def test_a_dead_pod_is_introduced_where_it_last_stood_not_at_the_fly_over() -> N
     g = to(out, b)[1]
     assert isinstance(g, server.Introduce) and g.id == a
     assert (g.pos.x_off, g.pos.y) == (111, 212)
-    assert to(out, b)[2] == server.ReleaseDrop(a)  # the normal 'A' flow applies
+    assert len(to(out, b)) == 2  # no 'A' yet: the pod is dead for everyone else too
+    # Its bare 'A' later releases it on every holder, the newcomer included.
+    assert deliveries(c, c.client_message(a, client.DropMe(), 6.0)) == [
+        (a, server.ReleaseDrop(a)),
+        (b, server.ReleaseDrop(a)),
+    ]
+
+
+def test_the_dead_pods_timeout_release_also_reaches_the_newcomer() -> None:
+    c = City(city("A"))
+    a, b = join(c, "AAA"), join(c, "BBB", 1)
+    first_b(c, a)
+    c.client_message(a, report(0), 2.0)
+    c.client_message(a, client.Died(), 3.0)
+    c.client_message(a, report(4), 4.0)
+    first_b(c, b, now=5.0)
+    out = deliveries(c, c.tick(3.0 + policy.DROP_REQUEST_TIMEOUT))
+    out = [(p, m) for p, m in out if m == server.ReleaseDrop(a)]  # b's own drop ticks too
+    assert out == [(a, server.ReleaseDrop(a)), (b, server.ReleaseDrop(a))]
 
 
 def test_leaving_sends_h_to_every_other_holder_and_to_no_one_else() -> None:

@@ -49,21 +49,23 @@ class Player:
     def creating_messages(self) -> Sequence[ServerMessage]:
         """``'G'`` at the pod's last position, then ``'A'``: ``'G'`` leaves the new pod in drop
         state and a pod in drop state discards every ``'b'`` (I §7.2 steps 2 and 3). A pod that
-        is dead and awaiting its drop is introduced where it last stood; the normal ``'A'`` flow
-        then applies (I §7.2)."""
+        is dead and awaiting its drop is introduced where it last stood without the ``'A'``: every
+        other client has it in drop state since the ``'J'``, so the newcomer's copy waits there
+        too, and the ``'A'`` that releases the pod for them (its bare ``'A'``, or the timeout)
+        reaches the newcomer as a holder (I §7.2)."""
         placed = self.pod.placed
         assert placed is not None, "a pod is introduced only after its first 'b' (I §7.2)"
-        return (
-            server.Introduce(
-                id=self.id,
-                callsign=self.callsign.encode("ascii"),
-                index=self.index,
-                team=self.team,
-                pos=placed.pos,
-                orient=placed.orient,
-            ),
-            server.ReleaseDrop(self.id),
+        introduce = server.Introduce(
+            id=self.id,
+            callsign=self.callsign.encode("ascii"),
+            index=self.index,
+            team=self.team,
+            pos=placed.pos,
+            orient=placed.orient,
         )
+        if self.pod.phase is PodPhase.DEAD:
+            return (introduce,)
+        return (introduce, server.ReleaseDrop(self.id))
 
 
 @dataclass(frozen=True, slots=True)
