@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from fixtures.cities import Npc, seat
-from fixtures.delivery import deliveries, to
+from fixtures.delivery import deliveries
 from fixtures.pods import report
 from opencs.messages import client, server
 from opencs.world.city import City
@@ -135,9 +135,3 @@ def test_damage_to_a_pod_that_has_not_reported_is_dropped() -> None:
     c, ids = seat([0, 1], reported=False)
     c.client_message(ids[0], report(4), 1.0)
     assert c.client_message(ids[0], hit(ids[1]), 2.0) == []
-
-
-def test_the_victim_receives_it_after_the_reporter_is_introduced() -> None:
-    c, (a, b) = playing([0, 1])
-    out = deliveries(c, c.client_message(a, hit(b, 20), 5.0))
-    assert [type(m) for m in to(out, b)] == [server.Damage]

@@ -13,78 +13,22 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, ServerMessage, client, server
-from opencs.world import chat, relay, scoring
-from opencs.world.combat import HitSet, ShotLog, damage_to_victim
+from opencs.messages import ClientMessage, client, server
+from opencs.world import chat, death, relay
+from opencs.world.combat import damage_to_victim
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
-from opencs.world.grace import Grace
 from opencs.world.ids import IdRange, IdSpace
-from opencs.world.pods import Pod, PodPhase
-from opencs.world.scoring import Bounty, PlayerScore, multiplier_floor
+from opencs.world.player import Player
+from opencs.world.pods import PodPhase
+from opencs.world.scoring import multiplier_floor
 from opencs.world.view import ClientView
 
 log = logging.getLogger("opencs.world")
-
-
-@dataclass(slots=True)
-class Player:
-    """A player in a city: identity, slot, what its client holds and its pod's life."""
-
-    id: int
-    callsign: str
-    team: int
-    index: int  # 0-3 within the team; unique per (team, index), I §6.3
-    view: ClientView
-    pod: Pod = field(init=False)
-    #: The shots this player's connection reported, for attributing its hit reports (II §9.3).
-    shots: ShotLog = field(init=False)
-    #: Who hit this player's pod lately, for the bounty payout at its death (I §9.2).
-    hits: HitSet = field(init=False)
-    #: The server's mirror of this client's SCORE, multiplier, bays and marker (II §11.1, I §10).
-    score: PlayerScore = field(init=False)
-    #: This pod's bounty (I §9.2).
-    bounty: Bounty = field(init=False)
-    #: The spawn grace period as the client keeps it (I §9.1.5); mirrored, rules unchanged.
-    grace: Grace = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.pod = Pod(self.id)
-        self.shots = ShotLog(self.id)
-        self.hits = HitSet()
-        self.score = PlayerScore()
-        self.bounty = Bounty(self.id)
-        self.grace = Grace(self.id, self.team)
-
-    @property
-    def entity_id(self) -> int:
-        return self.id
-
-    def creating_messages(self) -> Sequence[ServerMessage]:
-        """``'G'`` at the pod's last position, then ``'A'``: ``'G'`` leaves the new pod in drop
-        state and a pod in drop state discards every ``'b'`` (I §7.2 steps 2 and 3). A pod that
-        is dead and awaiting its drop is introduced where it last stood without the ``'A'``: every
-        other client has it in drop state since the ``'J'``, so the newcomer's copy waits there
-        too, and the ``'A'`` that releases the pod for them (its bare ``'A'``, or the timeout)
-        reaches the newcomer as a holder (I §7.2)."""
-        placed = self.pod.placed
-        assert placed is not None, "a pod is introduced only after its first 'b' (I §7.2)"
-        introduce = server.Introduce(
-            id=self.id,
-            callsign=self.callsign.encode("ascii"),
-            index=self.index,
-            team=self.team,
-            pos=placed.pos,
-            orient=placed.orient,
-            bounty_div10=self.bounty.shown,
-        )
-        if self.pod.phase is PodPhase.DEAD:
-            return (introduce,)
-        return (introduce, server.ReleaseDrop(self.id))
 
 
 @dataclass(frozen=True, slots=True)
@@ -435,44 +379,12 @@ class City:
         return entity_id in self._live and entity_id not in self._players
 
     def _died(self, player: Player, now: float) -> list[Event]:
-        """The client's bare ``'J'``: its pod died (I §9.2.9). In this order:
-
-        1. Every non-teammate in the victim's 20 s hit set is paid the victim's entire bounty times
-           its own multiplier. The client credits itself, so this is the server's record only.
-        2. Each payee is sent ``'E'``-``'K'``, earned or not. The wire order is the spec's listing:
-           these before the ``'J'``.
-        3. The victim's mirror takes the client's silent reset (multiplier 1, marker down one).
-        4. ``'J'`` goes to every client, the victim's too.
-        5. Only then the bounty is zeroed and pushed (the payees' clients read their copy of it
-           when the ``'J'`` lands), and the hit set is cleared.
-
-        A second ``'J'`` before the respawn changes nothing.
-        """
+        """The client's bare ``'J'``: its pod died. The payout, the notices, the ``'J'`` and the
+        bounty zero are ``death.settle``; a second ``'J'`` before the respawn changes nothing."""
         died = player.pod.on_death(now)
         if not died:
             return []
-        bounty = player.bounty.value(now)
-        events: list[Event] = []
-        for payee in self._payees(player, now):
-            paid = scoring.payout(payee.id, bounty, payee.score.multiplier)
-            earned = scoring.is_earned_kill(player.score, payee.score)
-            payee.score.server_credit += paid.points
-            if earned:
-                payee.score.marker += 1  # the client does this itself on the notice
-            log.info(
-                "player %d paid %d (bounty %d x %d) for the death of %d; %s kill",
-                payee.id,
-                paid.points,
-                paid.bounty,
-                paid.multiplier,
-                player.id,
-                "earned" if earned else "not earned",
-            )
-            events.append(Event(server.KillNotice(earned), ToPlayer(payee.id)))
-        player.score.on_own_death(now)
-        player.grace.arm(now)  # the client's new-life reset re-arms it (I §9.1.5)
-        player.hits.clear()
-        return events + died + player.bounty.zero()
+        return death.settle(player, self._payees(player, now), died, now)
 
     def _payees(self, victim: Player, now: float) -> list[Player]:
         """The players to pay for a death: those in the victim's hit set within the window, still
