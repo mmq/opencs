@@ -2,3 +2,7 @@
 
 Must not know about sockets or what any message means (DESIGN §3).
 """
+
+from opencs.wire.errors import WireError
+
+__all__ = ["WireError"]
