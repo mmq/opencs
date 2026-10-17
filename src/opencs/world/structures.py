@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum, auto
 
 from opencs import policy
 from opencs.messages import ServerMessage, WirePos, limits, server
@@ -25,6 +26,14 @@ def damage_of(damage_byte: int) -> int | None:
     if weapon > limits.DAMAGE_CLASS_MAX:
         return None
     return limits.DAMAGE_BASE[weapon]
+
+
+class TowerHit(Enum):
+    """What one hit report did to a tower."""
+
+    IGNORED = auto()  # a weapon class past the client's table (I §8.11)
+    STANDS = auto()
+    DESTROYED = auto()
 
 
 @dataclass(slots=True)
@@ -55,10 +64,10 @@ class Tower:
         A late joiner gets the same message as first sent (I §7.3)."""
         return (server.SpawnTower(0, self.entity_id, self.team, self.pos, 1 if self.mega else 0),)
 
-    def take_damage(self, damage_byte: int) -> bool:
-        """Apply one hit report's damage byte. True when it destroys the tower."""
+    def take_damage(self, damage_byte: int) -> TowerHit:
+        """Apply one hit report's damage byte."""
         amount = damage_of(damage_byte)
         if amount is None:
-            return False
+            return TowerHit.IGNORED
         self.hp -= amount
-        return self.hp <= 0
+        return TowerHit.DESTROYED if self.hp <= 0 else TowerHit.STANDS

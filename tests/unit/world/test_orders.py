@@ -204,7 +204,7 @@ def test_an_order_from_a_client_that_has_not_reported_is_ignored() -> None:
 def test_the_megatower_flag_is_exactly_one() -> None:
     c, (a, _) = playing([0, 1])
     c.client_message(a, order(at_tile(2, 2), mega=2), 5.0)
-    guppy = c._logistics.guppy(0)
+    guppy = c.orders.logistics.guppy(0)
     assert guppy is not None and guppy.queue[0].mega is False
     c.client_message(a, order(at_tile(2, 2, 40), mega=1), 6.0)
     assert guppy.queue[1].mega is True

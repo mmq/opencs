@@ -178,7 +178,7 @@ def test_a_joiner_caught_up_to_a_drop_point_is_sent_home_once_the_guppy_is_home_
     out = arrive(c, j)  # J's copy reports its arrival at the point
     assert out == [(j, server.MobileCreate(GUPPY, HOME))]  # to J alone
     assert arrive(c, j) == []  # J's copy is home: counted in, silent
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
     # And it is counted in at the right leg: the next order is flown and reported by everyone.
     assert ks(order(c, a, 2, 40.0), j) == [server.MobileCreate(GUPPY, dest(2))]
     assert towers(arrive(c, j), j)
@@ -194,7 +194,7 @@ def test_a_joining_clients_report_never_delivers_or_starts_anything() -> None:
     j, _ = join(c)
     out = arrive(c, j)  # create report while joining: only the catch-up
     assert towers(out, a) == [] and towers(out, j) == []
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
 
 
 # --- the originals leave ---
@@ -215,7 +215,7 @@ def test_after_the_originals_leave_the_joiner_alone_completes_legs() -> None:
     out = arrive(c, j, 28.0)  # home: job 2 goes out
     assert ks(out, j) == [server.MobileCreate(GUPPY, dest(2))]
     assert towers(arrive(c, j, 29.0), j)
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
 
 
 # --- a client's count is bounded by the legs it was sent (I §9.4.1) ---
@@ -232,10 +232,10 @@ def test_a_report_beyond_the_legs_sent_is_ignored_and_does_not_advance_the_count
     assert (count.owed, count.reports) == (1, 2)  # and the way home was sent
     arrive(c, a)  # home
     assert (count.owed, count.reports) == (0, 3)
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
     assert arrive(c, a) == []  # nothing is owed: a modified client reporting early
     assert (count.owed, count.reports) == (0, 3)  # the count did not run ahead
-    assert c._logistics.ignored_reports == 1
+    assert c.orders.logistics.ignored_reports == 1
 
 
 def test_early_reports_cannot_pre_report_a_leg_that_has_not_been_sent() -> None:
@@ -249,10 +249,10 @@ def test_early_reports_cannot_pre_report_a_leg_that_has_not_been_sent() -> None:
     # a's reports delivered what was sent to it (one tower, the way home, then the next job...)
     # but never more legs than it was told about.
     count = c.player(a).view.legs[GUPPY]  # type: ignore[union-attr]
-    guppy = c._logistics.guppy(0)
+    guppy = c.orders.logistics.guppy(0)
     assert guppy is not None
     assert count.reports <= guppy.legs
-    assert c._logistics.ignored_reports >= 1
+    assert c.orders.logistics.ignored_reports >= 1
     # b has been sent the same legs and is unaffected: its own reports are all honored.
     sent_to_b = c.player(b).view.legs[GUPPY].owed  # type: ignore[union-attr]
     assert sent_to_b == guppy.legs
@@ -273,6 +273,6 @@ def test_a_late_joiners_real_peak_is_never_ignored() -> None:
     assert count.owed == 1
     arrive(c, j)  # home: counted in
     assert count.owed == 0
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
     assert arrive(c, j) == []  # one more than it was sent
-    assert c._logistics.ignored_reports == 1
+    assert c.orders.logistics.ignored_reports == 1

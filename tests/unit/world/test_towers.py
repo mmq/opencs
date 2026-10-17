@@ -27,7 +27,7 @@ def hit(target: int, damage: int) -> client.HitReport:
 
 
 def place(c: City, team: int = 0, mega: bool = False, now: float = 2.0) -> int:
-    out = deliveries(c, c.place_tower(team, POS, mega, now))
+    out = deliveries(c, c.orders.place_tower(team, POS, mega, now))
     (spawn,) = {m for _, m in out}
     assert isinstance(spawn, server.SpawnTower)
     return spawn.id
@@ -35,7 +35,7 @@ def place(c: City, team: int = 0, mega: bool = False, now: float = 2.0) -> int:
 
 def test_a_tower_is_spawned_for_every_client_that_has_reported() -> None:
     c, (a, b) = playing([0, 1])
-    out = deliveries(c, c.place_tower(0, POS, False, 2.0))
+    out = deliveries(c, c.orders.place_tower(0, POS, False, 2.0))
     tower_id = policy.STRUCTURE_IDS[0]
     expected = server.SpawnTower(0, tower_id, 0, POS, 0)
     assert out == [(a, expected), (b, expected)]
@@ -43,14 +43,14 @@ def test_a_tower_is_spawned_for_every_client_that_has_reported() -> None:
 
 def test_a_megatower_is_flagged_and_the_team_is_the_orderers() -> None:
     c, (a, _b) = playing([0, 2])
-    out = deliveries(c, c.place_tower(2, POS, True, 2.0))
+    out = deliveries(c, c.orders.place_tower(2, POS, True, 2.0))
     assert to(out, a)[0] == server.SpawnTower(0, policy.STRUCTURE_IDS[0], 2, POS, 1)
 
 
 def test_a_client_still_loading_is_not_sent_the_tower_but_gets_it_when_it_reports() -> None:
     c, (a, b) = seat([0, 1], reported=False)
     c.client_message(a, report(4), 1.0)
-    out = deliveries(c, c.place_tower(0, POS, False, 2.0))
+    out = deliveries(c, c.orders.place_tower(0, POS, False, 2.0))
     assert to(out, b) == [] and len(to(out, a)) == 1
     later = deliveries(c, c.client_message(b, report(4), 3.0))
     towers = [m for m in to(later, b) if isinstance(m, server.SpawnTower)]
@@ -115,6 +115,8 @@ def test_a_damage_class_past_the_clients_table_is_ignored() -> None:
     for n in range(19):
         assert c.client_message(a, hit(tower, 0), 50.0 + n) == []
     assert deliveries(c, c.client_message(a, hit(tower, 0), 80.0))
+    # Counted in the tower's own counter, not the pod-damage relay's.
+    assert c.orders.ignored_tower_damage == 80 and c.unrelayable_damage == 0
 
 
 def test_a_destroyed_tower_is_forgotten_a_late_joiner_is_not_given_it_and_its_id_is_released() -> (
@@ -165,11 +167,11 @@ def test_territory_income_follows_the_towers_the_server_knows() -> None:
     c, ids = seat([0, 1], blocks=blocks)
     for pid in ids:
         c.client_message(pid, report(0), 1.0)
-    assert c.territory_income() == {}
-    c.place_tower(0, POS, False, 2.0)
-    assert c.territory_income() == {0: 10}
+    assert c.orders.territory_income() == {}
+    c.orders.place_tower(0, POS, False, 2.0)
+    assert c.orders.territory_income() == {0: 10}
     rival = place(c, team=1, now=3.0)  # a rival in the same block: disputed
-    assert c.territory_income() == {}
+    assert c.orders.territory_income() == {}
     for n in range(20):
         c.client_message(ids[0], hit(rival, 0), 5.0 + n)  # the rival falls: team 0 holds it again
-    assert c.territory_income() == {0: 10}
+    assert c.orders.territory_income() == {0: 10}

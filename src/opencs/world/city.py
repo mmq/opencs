@@ -17,26 +17,16 @@ from dataclasses import dataclass
 
 from opencs import policy
 from opencs.config import CityConfig
-from opencs.messages import ClientMessage, WirePos, client, server
+from opencs.messages import ClientMessage, client, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
 from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
-from opencs.world.logistics import (
-    Action,
-    CatchUp,
-    Create,
-    Deliver,
-    Dispatch,
-    Logistics,
-    TowerJob,
-    in_enemy_no_drop_zone,
-)
+from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
 from opencs.world.scoring import multiplier_floor
-from opencs.world.structures import Tower, damage_of
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
 
@@ -72,10 +62,8 @@ class City:
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
-        #: Every tower standing, by id (a subset of ``_live``): what hit reports reduce (II §10).
-        self._towers: dict[int, Tower] = {}
-        #: The team guppies and their job queues (II §14).
-        self._logistics = Logistics()
+        #: Tower orders, the team guppies and the standing towers (I §9.4).
+        self.orders = Orders(self, self._territory)
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -97,11 +85,13 @@ class City:
             ],
             client.Shot: lambda p, m, now: self._shot(p, _as(client.Shot, m), now),
             client.HitReport: lambda p, m, now: self._hit(p, _as(client.HitReport, m), now),
-            client.TowerOrder: lambda p, m, now: self._tower_order(
+            client.TowerOrder: lambda p, m, now: self.orders.tower_order(
                 p, _as(client.TowerOrder, m), now
             ),
-            client.ModuleOrder: lambda p, m, now: self._module_order(p, _as(client.ModuleOrder, m)),
-            client.LegArrived: lambda p, m, now: self._leg_arrived(
+            client.ModuleOrder: lambda p, m, now: self.orders.module_order(
+                p, _as(client.ModuleOrder, m)
+            ),
+            client.LegArrived: lambda p, m, now: self.orders.leg_arrived(
                 p, _as(client.LegArrived, m), now
             ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
@@ -177,8 +167,7 @@ class City:
         """Nobody is here: the next game starts fresh (S13)."""
         self._ids = IdSpace()
         self._live.clear()
-        self._towers.clear()
-        self._logistics = Logistics()
+        self.orders.reset()
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -290,6 +279,19 @@ class City:
             if player.pod.has_reported:  # its client is past the 'B'
                 events += introduce(entity, player.view, now)
         return events
+
+    def allocate_structure_id(self) -> int | None:
+        """A free id for a tower (II §8)."""
+        return self._ids.allocate(IdRange.STRUCTURE, self._earliest_start())
+
+    def release_structure_id(self, entity_id: int, now: float) -> None:
+        self._ids.release(IdRange.STRUCTURE, entity_id, now)
+
+    def refuse_order(self, player_id: int) -> list[Event]:
+        """A tower order the session did not pass on (over the order budget): see
+        ``Orders.refuse_order``."""
+        player = self._players.get(player_id)
+        return [] if player is None else self.orders.refuse_order(player)
 
     def despawn(self, entity_id: int) -> None:
         """The entity is gone: later joiners are not given it. Clients are told by the caller."""
@@ -408,9 +410,9 @@ class City:
     ) -> list[Event]:
         """A hit on something that is not a player's pod. A tower loses hit points (II §10); a
         Sentinel, Muncher or mine is M9's, and until then the report is ignored."""
-        tower = self._towers.get(hit.target)
+        tower = self.orders.towers.get(hit.target)
         if tower is not None:
-            return self._hit_tower(reporter, tower, hit, now)
+            return self.orders.hit_tower(reporter, tower, hit, now)
         log.debug(
             "player %d hit entity %d (credited=%s); not ruled yet",
             reporter.id,
@@ -418,129 +420,6 @@ class City:
             credited,
         )
         return []
-
-    def _hit_tower(
-        self, reporter: Player, tower: Tower, hit: client.HitReport, now: float
-    ) -> list[Event]:
-        """Subtract the damage byte's table entry, whoever fired and whatever their team (II §9.1).
-        A weapon class past the client's table is ignored."""
-        if damage_of(hit.damage) is None:
-            self.unrelayable_damage += 1
-            level = logging.WARNING if self.unrelayable_damage == 1 else logging.DEBUG  # once
-            log.log(level, "dropping damage byte %d from player %d", hit.damage, reporter.id)
-            return []
-        if not tower.take_damage(hit.damage):
-            return []
-        return self._destroy_tower(tower, now)
-
-    def _tower_order(self, player: Player, order: client.TowerOrder, now: float) -> list[Event]:
-        """A tower order (I §9.4.3, I §9.4.3): refused with ``'O'`` 1 inside the 3x3 tiles around an
-        enemy home corner and 2 when the team's queue is full (the client refunds its point on
-        either); otherwise ``'O'`` 0 to the orderer alone (I App. B) and a job for the team's
-        guppy."""
-        if not player.pod.has_reported:
-            return []
-        if in_enemy_no_drop_zone(player.team, order.pos):
-            return [Event(server.OrderReply(policy.ORDER_BAD_DROP_POINT), ToPlayer(player.id))]
-        if self._logistics.queue_full(player.team):
-            return [Event(server.OrderReply(policy.ORDER_QUEUE_FULL), ToPlayer(player.id))]
-        job = TowerJob(player.team, order.pos, order.mega == 1, order.priority != 0, player.id)
-        events = [Event(server.OrderReply(policy.ORDER_ACCEPTED), ToPlayer(player.id))]
-        return events + self._perform(self._logistics.order(job), now)
-
-    def refuse_order(self, player_id: int) -> list[Event]:
-        """A tower order the session would not pass on (over the order budget): answered ``'O'`` 2
-        so the client refunds the point it spent on sending it (I §8.17, I §8.7); nothing is
-        queued."""
-        player = self._players.get(player_id)
-        if player is None or not player.pod.has_reported:
-            return []
-        return [Event(server.OrderReply(policy.ORDER_QUEUE_FULL), ToPlayer(player.id))]
-
-    def _leg_arrived(self, player: Player, arrival: client.LegArrived, now: float) -> list[Event]:
-        """A client's copy of a guppy completed a leg (I §9.4.1). Only guppies this client holds
-        are counted: a Muncher's report (M9) or a made-up id is ignored."""
-        count = player.view.legs.get(arrival.id)
-        if count is None:
-            return []
-        return self._perform(self._logistics.report(arrival.id, player.id, count), now)
-
-    def _module_order(self, player: Player, order: client.ModuleOrder) -> list[Event]:
-        """Module orders are M8's; until then the client is answered "no stock" so it is not left
-        waiting (I §8.7)."""
-        try:
-            reply = server.ModuleReply(order.module, policy.MODULE_ORDER_UNAVAILABLE)
-        except ValueError:  # not a catalog index: a modified client
-            return []
-        return [Event(reply, ToPlayer(player.id))]
-
-    def _perform(self, actions: Sequence[Action], now: float) -> list[Event]:
-        """Turn the guppy's decisions into events for the clients that should hear them."""
-        events: list[Event] = []
-        for action in actions:
-            match action:
-                case Create(guppy):
-                    events += self.spawn(guppy, now)
-                case Deliver(job):
-                    events += self.place_tower(job.team, job.pos, job.mega, now)
-                case Dispatch(guppy, dest):
-                    # Only clients that count legs for it; one still joining is sent no 'K' for
-                    # this guppy until its copy has reported (I §7.3 step 2).
-                    for p in self.players():
-                        count = p.view.legs.get(guppy.entity_id)
-                        if count is not None and not count.joining:
-                            count.owed += 1  # it will report this leg (I §9.4.1)
-                            events.append(
-                                Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id))
-                            )
-                case CatchUp(guppy, player_id, dest):
-                    if (to := self._players.get(player_id)) is not None:
-                        to.view.legs[guppy.entity_id].owed += 1
-                    events.append(
-                        Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(player_id))
-                    )
-        return events
-
-    def place_tower(self, team: int, pos: WirePos, mega: bool, now: float) -> list[Event]:
-        """A tower lands for ``team`` at its ordered point: every playing client is sent its ``'M'``
-        and a later joiner is given it by the sync (I §7.3). No id left: nothing is placed."""
-        tower_id = self._ids.allocate(IdRange.STRUCTURE, self._earliest_start())
-        if tower_id is None:
-            log.warning("no free structure id; a tower for team %d was not placed", team)
-            return []
-        tower = Tower.new(tower_id, team, pos, mega)
-        self._towers[tower_id] = tower
-        log.info("tower %d placed for team %d in block %s", tower_id, team, tower.block)
-        events = self.spawn(tower, now)
-        self.log_territory()
-        return events
-
-    def _destroy_tower(self, tower: Tower, now: float) -> list[Event]:
-        """``'J'`` to every client that holds it, then forget it: a later joiner is not given its
-        create, and its id is released for reuse (I §6.2, II §8, II §10). The holders are named now:
-        forgetting it leaves ``ToHolders`` nobody to reach."""
-        events = [
-            Event(server.Destroy(tower.entity_id), ToPlayer(p.id))
-            for p in self.players()
-            if p.view.holds(tower.entity_id)
-        ]
-        self.despawn(tower.entity_id)
-        del self._towers[tower.entity_id]
-        self._ids.release(IdRange.STRUCTURE, tower.entity_id, now)
-        log.info("tower %d of team %d destroyed", tower.entity_id, tower.team)
-        self.log_territory()
-        return events
-
-    def territory_income(self) -> dict[int, int]:
-        """Team -> the points per second (before multipliers) its controlled blocks are worth, from
-        the towers the server knows. The clients compute their own income; this is for the
-        server's log and, in M9, for the free Muncher's target (I §9.2.6)."""
-        territory = self._territory
-        controlled = territory.controllers((t.block, t.team) for t in self._towers.values())
-        return territory.income(controlled)
-
-    def log_territory(self) -> None:
-        log.info("territory income per second by team: %s", self.territory_income())
 
     def _is_known_npc(self, entity_id: int) -> bool:
         """An entity the city has spawned that is not a player's pod (a Sentinel, say)."""

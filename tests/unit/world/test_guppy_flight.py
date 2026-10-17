@@ -79,7 +79,7 @@ def test_duplicate_reports_of_a_leg_do_nothing_and_each_client_counts_its_own_le
     assert arrive(c, a) == []  # A: leg 1, now a duplicate
     assert arrive(c, a) == []  # leg 2, home: acts, but the guppy is idle so nothing is sent
     assert arrive(c, b) == []  # B's leg 2: a duplicate
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
 
 
 def test_a_leg_acts_on_whichever_client_reports_it_first() -> None:
@@ -90,7 +90,7 @@ def test_a_leg_acts_on_whichever_client_reports_it_first() -> None:
     assert sent_to(out, a, server.SpawnTower)
     arrive(c, a)
     arrive(c, a)
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
 
 
 def test_an_order_made_while_the_guppy_flies_home_waits_for_the_home_report() -> None:
@@ -102,7 +102,7 @@ def test_an_order_made_while_the_guppy_flies_home_waits_for_the_home_report() ->
     assert sent_to(out, a, server.MobileCreate) == []  # not redirected mid-leg
     out = arrive(c, a)  # home reported
     assert sent_to(out, a, server.MobileCreate) == [server.MobileCreate(GUPPY, dest(2))]
-    assert c._logistics.ignored_reports == 0
+    assert c.orders.logistics.ignored_reports == 0
 
 
 def test_a_waiting_order_is_started_straight_after_a_delivery_without_a_trip_home() -> None:
@@ -159,7 +159,7 @@ def test_a_report_for_a_leg_ahead_of_the_one_in_force_is_ignored_and_counted() -
     arrive(c, a)  # delivered
     arrive(c, a)  # leg 2 home
     assert arrive(c, a) == []  # a fourth report: leg 3 does not exist
-    assert c._logistics.ignored_reports == 1
+    assert c.orders.logistics.ignored_reports == 1
 
 
 def test_a_report_for_a_guppy_the_client_does_not_hold_or_a_muncher_is_ignored() -> None:
@@ -188,7 +188,7 @@ def test_a_reset_forgets_the_towers_so_they_feed_no_territory_income() -> None:
     order(c, a, 1)
     arrive(c, a)
     arrive(c, a)  # delivered
-    assert c._towers  # a tower stands
+    assert c.orders.towers  # a tower stands
     c.leave(a, 7.0)
     c.leave(b, 7.0)  # the city empties and is reset
-    assert c._towers == {} and c.territory_income() == {}
+    assert c.orders.towers == {} and c.orders.territory_income() == {}

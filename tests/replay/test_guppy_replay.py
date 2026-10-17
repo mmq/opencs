@@ -227,7 +227,7 @@ def run(stream: list[Order], *, join_at: float | None = None) -> Outcome:
         replay.tick(t)
         replay.clock.advance(STEP)
     outcome = replay.outcome
-    outcome.ignored = replay.city._logistics.ignored_reports
+    outcome.ignored = replay.city.orders.logistics.ignored_reports
     outcome.stalled = len(outcome.towers) != outcome.accepted
     if replay.joiner is not None:
         view = replay.city.player(replay.joiner).view  # type: ignore[union-attr]
