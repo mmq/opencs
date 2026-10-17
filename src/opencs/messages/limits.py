@@ -14,6 +14,10 @@ MAX_CHAT_BYTES = 230
 #: The ``'a'`` sender id that prints a system line (``- text``) and needs no pod. I §8.23.
 SYSTEM_SENDER = 100
 
+#: The chat styles the client sends: 0 the open channel, 1 the team channel. I §8.23.
+CHAT_STYLE_OPEN = 0
+CHAT_STYLE_TEAM = 1
+
 #: Highest ``'R'`` palette (subs 0, 1) and rain (subs 2, 3) argument: the client indexes its tables
 #: with them unchecked. I §8.20, I §4.1, I §8.20, I §8.22, I §8.25.
 AMBIENT_PALETTE_MAX = 4

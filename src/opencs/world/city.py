@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from opencs import policy
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, ServerMessage, client, server
-from opencs.world import relay
+from opencs.world import chat, relay
 from opencs.world.entities import Entity, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer
 from opencs.world.ids import IdRange, IdSpace
@@ -97,6 +97,7 @@ class City:
             type[ClientMessage], Callable[[Player, ClientMessage, float], list[Event]]
         ] = {
             client.PodState: lambda p, m, now: self._pod_state(p, _as(client.PodState, m), now),
+            client.Chat: lambda p, m, now: self._chat(p, _as(client.Chat, m)),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
         }
@@ -227,6 +228,14 @@ class City:
             if other.id in self._live:
                 events += introduce(player, other.view)
         return events
+
+    def _chat(self, player: Player, typed: client.Chat) -> list[Event]:
+        """A line the player typed, echoed to its audience (I §8.23)."""
+        event = chat.chat_line(player.id, player.team, typed)
+        if event is None:
+            log.debug("dropping chat of style %d from player %d", typed.style, player.id)
+            return []
+        return [event]
 
     def _died(self, player: Player, now: float) -> list[Event]:
         """The seam M6 extends with payout and bounty before the ``'J'`` (I §9.2.9, II §11.2)."""
