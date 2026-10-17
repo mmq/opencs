@@ -76,6 +76,7 @@ src/opencs/
     login.py             GEnie logon (I §5.1)
     chamber.py           lobby text session (I §5.2-§5.5, II §4)
     ingame.py            binary session: decode → city calls; quit handshake (I §5.5)
+    persistence.py       loads a record before a join, writes what a city reports changed (II §11.3)
   lobby/
     lobby.py             Lobby: members, locations, city choice, teams (S9)
     commands.py          parsing /PLAY, /CITY, … (pure)
@@ -91,7 +92,8 @@ src/opencs/
     death.py             a death: payout, 'E'-'K' notices, 'J', bounty zero (I §9.2.9, II §11.2)
     player.py            Player: identity, slot and every per-player record (I §6.3)
     grace.py             the spawn-grace mirror of the client's rule (I §9.1.5)
-    scoring.py           bounty, multiplier floor, status messages (I §9.2, I §9.2.5)
+    scoring.py           bounty, multiplier floor, the client's score mirror (I §9.2, II §11.1)
+    progress.py          a player's persistent record and the rules for saving it (II §11.3)
     territory.py         block classes (I §8.22, S4)
     weather.py           a city's weather condition, program and transitions (I §8.20)
     logistics.py         guppies and orders (I §9.4, I §9.4.3)
@@ -106,8 +108,8 @@ src/opencs/
     npcs/munchers.py     Munchers (I §9.5.2)
   routing.py             Audience → sessions
   store/
-    base.py              AccountStore, ProgressStore, ResumeStore protocols
-    sqlite.py            SQLite implementation, schema, migrations
+    base.py              AccountStore, ProgressStore protocols (resume records are in memory, M10b)
+    sqlite.py            SQLite implementation, versioned forward-only migrations
     memory.py            in-memory implementation (tests)
 config/
   server.toml            port, data directory, limits, logging
