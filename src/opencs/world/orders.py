@@ -180,11 +180,11 @@ class Orders:
                 )
                 return []
             case TowerHit.DESTROYED:
-                return self._destroy_tower(tower, now)
+                return self.destroy_tower(tower, now)
             case TowerHit.STANDS:
                 return []
 
-    def _destroy_tower(self, tower: Tower, now: float) -> list[Event]:
+    def destroy_tower(self, tower: Tower, now: float) -> list[Event]:
         """``'J'`` to every client that holds it, then forget it: a later joiner is not given its
         create, and its id is released for reuse (I §6.2, II §8, II §10). The holders are named now:
         forgetting it leaves ``ToHolders`` nobody to reach."""

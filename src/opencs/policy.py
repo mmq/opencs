@@ -441,3 +441,26 @@ LOADOUT_GRACE_REPORTS = 2
 #: ``RELAY_LIMIT_*`` (DESIGN §5): an eject spawns a ``'P'`` and a pickup a ``'Q'`` destroy for every
 #: other client. A pod has nine bays, so the burst covers ejecting them all. Ours.
 RELAY_LIMIT_MODULE_OPS = (12, 4.0)
+
+#: "Within one block" for the effect modules: within this many feet, straight-line across the
+#: ground, of the sender's last reported position, measured to each tower's or mine's ordered point
+#: (the client never reports where one comes to rest). The manual says only "within one block";
+#: a block is 600 ft. I §9.3.5, II §16.1; a guess.
+ONE_BLOCK_FEET = 600
+
+#: How long a tower stays immune to Muncher attack after Immunize. I §9.3.5, II §16.1 (the manual's
+#: 30 minutes); M9's Muncher consults it.
+IMMUNIZE_SECONDS = 1800.0
+
+#: Most mines a city holds; past it the oldest is destroyed. A mine lasts until swept (I §9.3.5),
+#: so without a bound a client sending ``'E'``-``'M'`` at its rate limit would grow the city
+#: forever. Ours (DESIGN §5).
+MAX_MINES = 200
+
+#: Per-session limit on effect requests and Air Support, a token bucket ``(burst, per second)``, as
+#: ``RELAY_LIMIT_*`` (DESIGN §5): each can broadcast (``'J'``, ``'F'``, ``'R'``) or queue a guppy
+#: job. A one-shot module is used up per request, so honest play is far slower. Ours.
+RELAY_LIMIT_EFFECT = (6, 2.0)
+
+#: The ``'E'``-``'A'`` reply code: 0 = "GUPPY: Rgr, Air Support. CLEAR AREA!". I §9.3.5, II §16.1.
+AIR_SUPPORT_ACKNOWLEDGED = 0

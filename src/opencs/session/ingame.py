@@ -77,6 +77,8 @@ class InGamePhase(Phase):
             client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
             client.TowerOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
             client.ModuleOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
+            client.EffectRequest: TokenBucket(*policy.RELAY_LIMIT_EFFECT, now),
+            client.AirSupport: TokenBucket(*policy.RELAY_LIMIT_EFFECT, now),
             client.PickupRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
             client.EjectRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
         }

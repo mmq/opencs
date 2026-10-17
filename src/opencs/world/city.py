@@ -20,6 +20,7 @@ from opencs.config import CityConfig
 from opencs.messages import ClientMessage, client, server
 from opencs.world import chat, death, relay
 from opencs.world.combat import damage_to_victim
+from opencs.world.effects import Effects
 from opencs.world.entities import Entity, inform, introduce
 from opencs.world.events import Event, ToHolders, ToPlayer, ToPlayers
 from opencs.world.ids import IdRange, IdSpace
@@ -74,6 +75,8 @@ class City:
             ModuleRules(config.max_module_level, frozenset(config.banned_modules)),
             self.drops,
         )
+        #: The effect modules (I §9.3.5, II §16.1).
+        self.effects = Effects(self, self.orders)
         #: Shots dropped because their KIND would crash a client (I §8.25).
         self.unsafe_shots = 0
         #: Shots whose shooter was neither the sender's pod nor a known NPC: a detection signal
@@ -115,6 +118,9 @@ class City:
             ),
             client.ModuleUsedUp: lambda p, m, now: self._module_used_up(
                 p, _as(client.ModuleUsedUp, m)
+            ),
+            client.EffectRequest: lambda p, m, now: self.effects.request(
+                p, _as(client.EffectRequest, m).effect, now
             ),
             client.DropMe: lambda p, m, now: p.pod.on_drop_request(now),
             client.Died: lambda p, m, now: self._died(p, now),
