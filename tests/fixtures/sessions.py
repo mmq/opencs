@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from fixtures.lobbies import city
 from opencs.clock import ManualClock
 from opencs.config import CityConfig
-from opencs.connlog import ConnectionLog
+from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.messages import ServerMessage
@@ -95,7 +95,7 @@ def make_world(
 def connect(world: World, conn_id: int | None = None) -> Harness:
     io = FakeIO()
     n = conn_id if conn_id is not None else len(world.sessions) + 1
-    log = ConnectionLog(logging.getLogger("test.session"), n)
+    log = ConnectionLog(logging.getLogger("test.session"), ConnectionContext(n))
     harness = Harness(Session(io, world.services, log), io, world)
     world.sessions.append(harness)
     return harness

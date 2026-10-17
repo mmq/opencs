@@ -13,6 +13,10 @@ ROOT = Path(opencs.__file__).parent
 ALLOWED: dict[str, set[str]] = {
     "wire": {"policy"},
     "messages": {"wire", "policy"},
+    "store": {"policy"},
+    "lobby": {"wire", "policy", "config", "store"},
+    "session": {"wire", "messages", "lobby", "store", "policy", "config", "clock", "connlog"},
+    "net": {"wire", "messages", "policy", "clock", "connlog"},
 }
 
 
@@ -39,3 +43,12 @@ def test_packages_import_only_allowed_layers() -> None:
                     continue
                 top = parts[1]
                 assert top == package or top in allowed, f"{path.name} imports {name}"
+
+
+def test_the_guard_covers_the_layers_the_design_forbids() -> None:
+    # net knows nothing of session, lobby or world; session nothing of net; lobby of neither.
+    assert not {"session", "lobby", "world"} & ALLOWED["net"]
+    assert "net" not in ALLOWED["session"]
+    assert not {"net", "session"} & ALLOWED["lobby"]
+    assert not {"net", "session", "lobby", "world"} & ALLOWED["wire"]
+    assert not {"net", "session", "lobby", "world"} & ALLOWED["messages"]

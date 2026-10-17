@@ -30,6 +30,29 @@ MAX_PORT = 65535
 #: City ticks per second. I §7.1, II §7: 5 per second.
 TICK_HZ = 5
 
+# --- Connections (DESIGN §3.3, §5) --------------------------------------------------------------
+
+#: Connections accepted in total and from one address; more are closed at once. Ours (DESIGN §5
+#: "connections in total and per address"): a city holds 16 and there are 3, so 64 is every seat
+#: plus those in the Chamber; 8 per address lets several clients share a host or a NAT.
+MAX_CONNECTIONS = 64
+MAX_CONNECTIONS_PER_ADDRESS = 8
+
+#: Items (raw writes or messages) a connection may have queued for sending before it is closed.
+#: Ours (DESIGN §3.3): the client handles about 50 packets a second (I §3), so this is over
+#: twenty seconds of backlog for a client that has stopped reading.
+OUTBOX_LIMIT = 1024
+
+#: Session ticks per second per connection (DESIGN §3.4): fine enough for the 0.3 s login prompt
+#: delay. Ours.
+SESSION_TICK_HZ = 10
+
+#: Bytes read from a socket at once. Ours.
+READ_CHUNK = 4096
+
+#: Seconds a closing connection may take to flush its queue before it is cut. Ours.
+CLOSE_FLUSH_TIMEOUT = 5.0
+
 # --- Cities (II §5, I §9.2, II §5) ----------------------
 
 #: Longest city name, in characters. Ours (the test server's limit); the spec is silent.
