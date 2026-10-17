@@ -83,6 +83,27 @@ DEFAULT_CITY_LETTER = "B"
 MAP_NUMBER_LOW = 1
 MAP_NUMBER_HIGH = 9
 
+# --- Lobby text (II §4.4, "Relay hygiene") ------------------------------------------
+
+#: Client text colors (``0x05 D<n>``): server text D2, headings D6, chat D4, errors D3, each block
+#: ending with D0, the client's own color. Owner's choice 2026-10-08 (II §4.4).
+COLOR_TEXT = 2
+COLOR_HEADING = 6
+COLOR_CHAT = 4
+COLOR_ERROR = 3
+COLOR_RESET = 0
+
+#: The seven usable ``D`` digits (7-9 are black on black; I §5.2), shown by ``/COLORS``.
+USABLE_COLORS = tuple(range(7))
+
+#: Longest relayed chat text, in characters. Ours (II §4.3: "keep lines short"; the test server's
+#: value).
+CHAT_MAX_CHARS = 72
+
+#: How long after a bare ``/CITY`` a bare city letter counts as the button's second half and gets
+#: the hint line (II §4.2: "within 2 min"), in seconds.
+CITY_HINT_WINDOW = 120.0
+
 # --- Identity (II §3, II §3; DESIGN §5) ------------------------------------
 
 #: The login name of a stock install, compared case-insensitively: no password, assigned callsign.
