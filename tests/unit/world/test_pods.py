@@ -132,3 +132,19 @@ def test_a_late_bare_a_after_the_timeout_is_still_answered() -> None:
     pod.on_report(report(0), 0.0)
     pod.on_death(10.0)
     assert pod.on_drop_request(10.0 + policy.DROP_REQUEST_TIMEOUT + 5) == [RELEASE]
+
+
+def test_after_the_bare_a_ticks_stay_quiet_when_the_last_report_was_not_state_4() -> None:
+    """I §7.1, II §7: 'A' repeats only for as long as the reports still say 4."""
+    pod = Pod(5)
+    pod.on_report(report(0), 0.0)
+    pod.on_death(1.0)
+    assert pod.on_drop_request(2.0) == [RELEASE]  # answered once
+    assert pod.tick(2.2) == []  # the last report said 0, not 4
+
+
+def test_after_the_give_up_ticks_stay_quiet_when_the_last_report_was_not_state_4() -> None:
+    pod = Pod(5)
+    pod.on_report(report(0), 0.0)
+    pod.on_death(1.0)
+    assert pod.tick(1.0 + policy.DROP_REQUEST_TIMEOUT) == []
