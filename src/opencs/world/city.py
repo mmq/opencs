@@ -38,6 +38,7 @@ from opencs.world.npcs.sentinels import Sentinels
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
+from opencs.world.progress import ProgressChanged, SavedProgress
 from opencs.world.scoring import multiplier_floor
 from opencs.world.territory import Territory
 from opencs.world.view import ClientView
@@ -75,6 +76,9 @@ class City:
         self._territory = Territory(config.blocks)
         self._players: dict[int, Player] = {}
         self._ids = IdSpace()
+        #: Records that changed since ``take_progress``, by identity: the world cannot write them,
+        #: so it says what to write (ADR 2) and the session layer persists it.
+        self._unsaved: dict[str, ProgressChanged] = {}
         #: The entities every client that is playing should hold: the pods that have reported
         #: (I §7.2 step 1). A late joiner is synced from this (I §7.3).
         self._live: dict[int, Entity] = {}
@@ -143,8 +147,21 @@ class City:
 
     # --- joining and leaving -----------------------------------------------------------------
 
-    def join(self, callsign: str, team: int, now: float) -> JoinResult | JoinRefused:
-        """Seat a player: an id, the lowest free index in its team (I §6.3) and the ``'B'``."""
+    def join(
+        self,
+        callsign: str,
+        team: int,
+        now: float,
+        *,
+        identity: str | None = None,
+        saved: SavedProgress | None = None,
+    ) -> JoinResult | JoinRefused:
+        """Seat a player: an id, the lowest free index in its team (I §6.3) and the ``'B'``.
+
+        ``identity`` is the key its record is kept under (None: nothing is kept) and ``saved`` the
+        stored record it starts from (None: a new identity). The client is restored to it when it
+        sends its first ``'b'`` (I §9.2.11, II §11.3); starting the game rolls the last SCORE into
+        the career, which is a change to save (``take_progress``)."""
         if len(self._players) >= self.config.capacity:
             return JoinRefused(f"CITY {self.config.letter} IS FULL")
         taken = {p.index for p in self._players.values() if p.team == team}
@@ -172,7 +189,15 @@ class City:
         except Exception:
             self._ids.release(IdRange.PLAYER, player_id, now)
             raise
-        player = Player(player_id, callsign, team, index, ClientView(player_id, now))
+        player = Player(
+            player_id,
+            callsign,
+            team,
+            index,
+            ClientView(player_id, now),
+            identity=identity,
+            saved=saved,
+        )
         player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
         # A fresh client already shows its own default palette (I §8.20), which is a client fact,
         # not the city's starting condition: it is sent one only once the weather differs from it.
@@ -180,6 +205,7 @@ class City:
         if not self._players:
             self._start_game(now)
         self._players[player_id] = player
+        self._note_progress(player)
         return JoinResult(player_id, team, player.index, hello)
 
     def leave(self, player_id: int, now: float) -> list[Event]:
@@ -236,7 +262,30 @@ class City:
         if handler is None:
             log.debug("ignoring %s from player %d", type(msg).__name__, player_id)
             return []
-        return handler(player, msg, now)
+        events = handler(player, msg, now)
+        self._note_progress(player)
+        return events
+
+    def take_progress(self) -> list[ProgressChanged]:
+        """The records that changed since the last call, newest per identity, for the session layer
+        to persist (II §11.3). Cleared by the call."""
+        changed, self._unsaved = list(self._unsaved.values()), {}
+        return changed
+
+    def all_progress(self) -> list[ProgressChanged]:
+        """Every kept player's record as it stands, whether it changed or not: a graceful shutdown
+        saves them all (M12)."""
+        return [
+            ProgressChanged(p.identity, p.progress.snapshot())
+            for p in self.players()
+            if p.identity is not None
+        ]
+
+    def _note_progress(self, player: Player) -> None:
+        """Remember the player's record if it changed, for ``take_progress``."""
+        record = player.progress.take_unsaved()
+        if record is not None and player.identity is not None:
+            self._unsaved[player.identity] = ProgressChanged(player.identity, record)
 
     def note_shot(self, player_id: int, fired: client.Shot, now: float) -> None:
         """Log a shot the session declined to pass on (it was over the shot budget): the shot log
@@ -294,7 +343,7 @@ class City:
                 for e in events
             ]
             events += self._go_live(player, now)
-            events += start_status(player, self.multiplier_floor)
+            events += start_status(player, self.multiplier_floor, now)
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
             events.append(
                 Event(
@@ -396,7 +445,10 @@ class City:
         if not died:
             return []
         player.loadout.clear()  # the client empties every bay on its death (I §9.3.4, II §13)
-        return death.settle(player, self._payees(player, now), died, now)
+        events = death.settle(player, self._payees(player, now), died, now)
+        # The client lowered its marker silently, so the record takes the mirror's (II §11.3).
+        player.progress.on_own_death(player.score.marker)
+        return events
 
     def _payees(self, victim: Player, now: float) -> list[Player]:
         """The players to pay for a death: those in the victim's hit set within the window, still

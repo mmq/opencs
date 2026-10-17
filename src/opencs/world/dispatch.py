@@ -98,23 +98,30 @@ def score_handlers(
     def status(player: Player, msg: ClientMessage, now: float) -> list[Event]:
         """The client's ``'D'``-``'S'``: mirrored, and answered with the multiplier floor when one
         is due after a death (II §12)."""
-        pushes = player.score.on_status(_as(client.Status, msg), now, floor, max_multiplier)
+        report = _as(client.Status, msg)
+        player.progress.on_status(report.score, report.bay_points, now)
+        pushes = player.score.on_status(report, now, floor, max_multiplier)
         return [Event(m, ToPlayer(player.id)) for m in pushes]
 
     def bays(player: Player, msg: ClientMessage, now: float) -> list[Event]:
         """The client's ``'D'``-``'B'``: its bays and battle marker, mirrored (II §11.1)."""
-        if not player.score.on_bays(_as(client.Bays, msg)):
+        report = _as(client.Bays, msg)
+        if player.score.on_bays(report):
+            player.progress.on_bays(report.levels, report.marker)
+        else:
             log.warning("player %d reported a bay level the client cannot hold", player.id)
         return []
 
     return {client.Status: status, client.Bays: bays}
 
 
-def start_status(player: Player, floor: int) -> list[Event]:
+def start_status(player: Player, floor: int, now: float) -> list[Event]:
     """A session's status: ``'D'``-``'B'`` first, then ``'D'``-``'S'``, to the player alone (I
     §9.2.11, II §11.3, I §7.8). Without ``'D'``-``'B'`` the client's multiplier and SCORE never run
     (I §9.2.3). It goes with the first ``'b'``, not with the ``'B'``: the client is then past its
     load (a still-loading client's ring is nearly full of ``'B'`` repeats, I §7.1, II §7), and it is
-    when test servers sent it (I §7.1). ``player.score`` is where M10 puts a saved player's bays,
-    marker and bay points."""
+    when test servers sent it (I §7.1). ``player.score`` holds the restored player's bays, marker
+    and bay points (``Player`` builds it from the stored record), and the restore guard starts here
+    (II §11.3)."""
+    player.progress.restored(now)
     return [Event(message, ToPlayer(player.id)) for message in player.score.start_message(floor)]
