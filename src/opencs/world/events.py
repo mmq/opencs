@@ -41,9 +41,12 @@ class ToTeam:
 @dataclass(frozen=True, slots=True)
 class ToHolders:
     """Every client whose view holds this entity, i.e. has been told it exists (``'A'`` for a pod,
-    a Muncher's ``'K'``; I App. B, I §7.3). ``except_player`` leaves one holder out: a relayed
-    ``'b'`` goes to everyone who holds the pod but its owner, whose own echo would drag it to a
-    stale position."""
+    a Muncher's ``'K'``; I App. B, I §7.3). Holders are those at *delivery*: the router resolves
+    this after the whole city call, against the views as that call left them. A call that changes
+    who holds an entity and also says something about it to the holders as they were (a leave, a
+    first report) must name them with ``ToPlayer`` instead. ``except_player`` leaves one holder
+    out: a relayed ``'b'`` goes to everyone who holds the pod but its owner, whose own echo would
+    drag it to a stale position."""
 
     entity_id: int
     except_player: int | None = None

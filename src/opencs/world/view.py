@@ -3,7 +3,8 @@
 The client keeps a registry it never unlinks from and answers a second create for the same id with a
 duplicate, so the server must remember which entities each client holds: whom it has been introduced
 to, which towers it has seen. Audiences like ``ToHolders`` resolve against this, and a late joiner's
-sync is built from it. M4 holds only the player's own pod; M5 adds introductions.
+sync is built from it. It holds the client's own pod, the pods it has been introduced to and any
+other entity whose create it was sent.
 """
 
 from __future__ import annotations

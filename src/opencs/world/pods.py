@@ -44,6 +44,12 @@ class Pod:
         self._died_at = 0.0
 
     @property
+    def has_reported(self) -> bool:
+        """True once the client's first ``'b'`` is in: it is past the ``'B'`` and playing (I §7.2
+        step 1)."""
+        return self.last is not None
+
+    @property
     def reported_state(self) -> int | None:
         """The state byte of the last ``'b'``, or None before the first."""
         return None if self.last is None else self.last.state

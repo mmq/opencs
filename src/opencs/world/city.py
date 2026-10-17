@@ -206,12 +206,18 @@ class City:
     def _pod_state(self, player: Player, report: client.PodState, now: float) -> list[Event]:
         """A ``'b'``: the pod's own handshake, then, on its first, the introductions (I §7.2),
         then the relay to the clients that hold it (I §8.24)."""
-        first = player.pod.last is None
+        first = not player.pod.has_reported
         events = player.pod.on_report(report, now)
         if first:
             # Nobody else holds this pod yet, so its drop 'A' is for its owner alone; the others
-            # are given theirs by the introduction, after their 'G'.
-            events = [Event(e.message, ToPlayer(player.id)) for e in events]
+            # are given theirs by the introduction, after their 'G'. ``ToHolders`` resolves after
+            # this call, when the introductions below have made them holders, so it is named.
+            events = [
+                Event(e.message, ToPlayer(player.id))
+                if isinstance(e.message, server.ReleaseDrop)
+                else e
+                for e in events
+            ]
             events += self._go_live(player)
         if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
             events.append(
@@ -223,13 +229,13 @@ class City:
         return events
 
     def spawn(self, entity: Entity) -> list[Event]:
-        """A new entity (M7-M9: tower, drop, mine, Sentinel, guppy, Muncher): every client that is
-        playing gets its creating packets through ``introduce``, the function a later joiner's
+        """A new entity (a pod, tower, drop, mine, Sentinel, guppy or Muncher): every client that
+        is playing gets its creating packets through ``introduce``, the function a later joiner's
         sync uses, and the city remembers it for them (I §7.3)."""
         self._live[entity.entity_id] = entity
         events: list[Event] = []
         for player in self.players():
-            if player.id in self._live:  # has reported: its client is past the 'B'
+            if player.pod.has_reported:  # its client is past the 'B'
                 events += introduce(entity, player.view)
         return events
 
@@ -248,7 +254,7 @@ class City:
             events += introduce(entity, player.view)
         self._live[player.id] = player
         for other in self.players():
-            if other.id in self._live:
+            if other.pod.has_reported:
                 events += introduce(player, other.view)
         return events
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fixtures.delivery import deliveries, to
 from fixtures.lobbies import city
 from fixtures.pods import report
@@ -9,6 +11,8 @@ from fixtures.spec_vectors import FULL_FRAMES
 from opencs.messages import ServerMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
 from opencs.world.city import City, JoinResult
+from opencs.world.events import Event, ToAll, ToPlayer
+from opencs.world.pods import Pod
 
 
 def join(c: City, callsign: str, team: int = 0, now: float = 0.0) -> int:
@@ -190,3 +194,21 @@ def test_a_spawn_and_a_late_joiners_sync_use_the_same_path_once_per_client() -> 
     d = join(c, "DDD", 2)
     assert not [m for m in to(first_b(c, d), d) if isinstance(m, server.Destroy)]
     assert not c.player(a).view.holds(8192)  # type: ignore[union-attr]
+
+
+def test_only_the_release_a_is_narrowed_to_the_owner_on_a_first_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Another event a pod might one day return on its first report keeps its own audience.
+    other = Event(server.Destroy(7), ToAll())
+    real = Pod.on_report
+
+    def on_report(self: Pod, rep: client.PodState, now: float) -> list[Event]:
+        return [*real(self, rep, now), other]
+
+    monkeypatch.setattr(Pod, "on_report", on_report)
+    c = City(city("A"))
+    a = join(c, "AAA")
+    events = c.client_message(a, report(4), 1.0)
+    assert Event(server.ReleaseDrop(a), ToPlayer(a)) in events
+    assert other in events

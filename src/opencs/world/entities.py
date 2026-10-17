@@ -3,8 +3,8 @@
 The client's registry has no duplicate check for a pod's ``'G'`` and never unlinks, so each client
 must be told about each entity once. ``introduce`` is that one path: it is what a spawn uses for
 every client already here and what a late joiner's sync uses for every entity already live, so the
-two can never disagree. A pod is introduced with ``'G'`` + ``'A'``; M7-M9 add towers, drops, mines,
-Sentinels, guppies and Munchers by giving them the same two members.
+two can never disagree. A pod is introduced with ``'G'`` + ``'A'``; any other kind (tower, drop,
+mine, Sentinel, guppy, Muncher) joins by implementing the same two members.
 """
 
 from __future__ import annotations
