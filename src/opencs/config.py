@@ -31,6 +31,8 @@ class ServerConfig:
     cities_dir: Path
     log_level: str
     default_city: str  # II §4.2: the city a bare /PLAY picks when all are empty
+    #: Upper case; empty turns guests off (II §3).
+    guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +161,13 @@ class _Table:
                 raise self.fail(key, f"{item} is outside {low}..{high}")
         return tuple(value)
 
+    def str_list(self, key: str, default: Any) -> tuple[str, ...]:
+        value: list[Any] = self._get(key, default, (list, tuple), "a list")
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise self.fail(key, f"expected a list of non-empty strings, found {item!r}")
+        return tuple(value)
+
     def unique_nonempty(self, key: str, values: tuple[int, ...]) -> tuple[int, ...]:
         """Reject an empty tuple or one with repeats (a typo that should fail at startup)."""
         if not values:
@@ -256,6 +265,10 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
         cities_dir=base / table.string("cities_dir", policy.DEFAULT_CITIES_DIR),
         log_level=table.string("log_level", policy.DEFAULT_LOG_LEVEL).upper(),
         default_city=table.string("default_city", policy.DEFAULT_CITY_LETTER),
+        guest_names=tuple(
+            name.strip().upper()
+            for name in table.str_list("guest_names", policy.DEFAULT_GUEST_NAMES)
+        ),
     )
     table.done()
     if config.log_level not in LOG_LEVELS:

@@ -98,6 +98,10 @@ class PlayerScore:
     #: itself, and its own figure, readable from its next ``'D'``-``'S'``, is the truth (I §9.2.9
     #: step 2).
     server_credit: int = 0
+    #: Multiplier points the client has spent on tower orders since its last ``'D'``-``'S'``, net of
+    #: refunds (I §9.4.2: a tower costs 1, a MegaTower 2, every ``'O'`` refusal refunds 1). A
+    #: ``'D'``-``'S'`` carries the live value, so this is what the mirror has not yet seen.
+    tower_spent: int = 0
     #: When the pod last died and the multiplier floor has not yet been applied (II §12).
     floor_pending_since: float | None = field(default=None, repr=False)
 
@@ -111,6 +115,20 @@ class PlayerScore:
         """The lowest bay level of the nine. An empty bay (level 0, ``X``) counts as the lowest and
         fills first (I §9.2.7), so it is 0 here."""
         return min(self.bays)
+
+    @property
+    def live_multiplier(self) -> int:
+        """The multiplier the client most likely has now: the last report less what tower orders
+        have spent since (II §13 item 2). At least 1: the client's own floor."""
+        return max(1, self.multiplier - max(0, self.tower_spent))
+
+    def spend(self, points: int) -> None:
+        """The client sent a tower order and spent ``points`` of its multiplier (I §9.4.2)."""
+        self.tower_spent += points
+
+    def refund(self) -> None:
+        """The server refused a tower order: the client gives one point back (I §9.4.2)."""
+        self.tower_spent -= 1
 
     def start_message(self, floor: int) -> list[server.SetBays | server.SetStatus]:
         """What a session starts with: ``'D'``-``'B'`` first, then ``'D'``-``'S'`` (II §11.3, I
@@ -133,6 +151,7 @@ class PlayerScore:
         earlier one may predate our ``'J'`` reaching the client, so its multiplier is not taken (the
         death set the mirror to the client's reset, 1)."""
         self.score, self.bay_points = report.score, report.bay_points
+        self.tower_spent = 0  # the report carries the live multiplier
         died = self.floor_pending_since
         if died is not None and now - died < policy.FLOOR_SETTLE:
             return []
@@ -158,6 +177,7 @@ class PlayerScore:
         multiplier back to 1 and the battle marker down by one. The floor is due once the client
         reports again."""
         self.multiplier = 1
+        self.tower_spent = 0
         self.marker = clamp_marker(self.marker - 1)
         self.floor_pending_since = now
 

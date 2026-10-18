@@ -13,8 +13,10 @@ class ConnectionContext:
     the net layer's lines too.
     """
 
-    def __init__(self, conn_id: int) -> None:
+    def __init__(self, conn_id: int, address: str = "?") -> None:
         self.conn_id = conn_id
+        #: The peer's IP address, which the session layer limits what one source may hold by.
+        self.address = address
         self.callsign = "-"
 
 

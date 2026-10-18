@@ -56,11 +56,19 @@ class _Guard:
 class Progress:
     """One player's record and the rules for changing it from the client's reports."""
 
-    def __init__(self, loaded: SavedProgress | None) -> None:
+    def __init__(
+        self, loaded: SavedProgress | None, *, resumed: tuple[int, int] | None = None
+    ) -> None:
         """Start a game (II §11.3, D2): the last game's SCORE joins the career total and
-        the new game's SCORE is 0. ``loaded`` is the stored record, None for a new identity."""
+        the new game's SCORE is 0. ``loaded`` is the stored record, None for a new identity.
+
+        A ``/RESUME`` is the same game, not a new one (II §13 item 5): ``resumed`` is the held
+        ``(SCORE, bay points)``, which stay as they are and add nothing to the career."""
         base = loaded or NEW_PROGRESS
-        self._record = replace(base, score=0, career=base.career + base.score)
+        if resumed is not None:
+            self._record = replace(base, score=resumed[0], bay_points=resumed[1])
+        else:
+            self._record = replace(base, score=0, career=base.career + base.score)
         self._unsaved = loaded is not None and self._record != loaded
         self._guard: _Guard | None = None
 

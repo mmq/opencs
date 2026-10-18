@@ -106,7 +106,7 @@ class Listener:
             writer,
             self._factory,
             self._clock,
-            ConnectionContext(conn_id),
+            ConnectionContext(conn_id, address),
             sleep=self._sleep,
         )
         self._connections[conn_id] = connection

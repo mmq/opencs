@@ -85,6 +85,7 @@ class Orders:
         enemy home corner and 2 when the team's queue is full (the client refunds its point on
         either); otherwise ``'O'`` 0 to the orderer alone (I App. B) and a job for the team's
         guppy."""
+        player.score.spend(policy.MEGA_TOWER_COST if order.mega == 1 else policy.TOWER_COST)
         if not player.pod.has_reported:
             return []
         if in_enemy_no_drop_zone(player.team, order.pos):
@@ -100,6 +101,8 @@ class Orders:
         answered ``'O'`` 2 so the client refunds the point it spent on sending it; a module order
         ``'E'``-``'P'`` ok = 0, which refunds nothing because it cost nothing (I §9.4.2). Nothing is
         queued."""
+        if isinstance(message, client.TowerOrder):
+            player.score.spend(policy.MEGA_TOWER_COST if message.mega == 1 else policy.TOWER_COST)
         if not player.pod.has_reported:
             return []
         if isinstance(message, client.ModuleOrder):
@@ -268,7 +271,10 @@ class Orders:
 
 
 def _reply(player: Player, result: int) -> Event:
-    """An ``'O'`` to the orderer alone (I App. B)."""
+    """An ``'O'`` to the orderer alone (I App. B). Every refusal gives the client one multiplier
+    point back (I §9.4.2), which its mirror must follow."""
+    if result != policy.ORDER_ACCEPTED:
+        player.score.refund()
     return Event(server.OrderReply(result), ToPlayer(player.id))
 
 

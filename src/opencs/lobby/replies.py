@@ -152,11 +152,43 @@ def who_is(member: Member | None, callsign: str, record: ProgressRecord | None) 
     return lines + (record_lines(record) if record else [body("NO RECORD YET")])
 
 
+def who_is_guest(member: Member) -> list[Line]:
+    """A guest: where, and that it has no saved record (II §4.2, II §11.3)."""
+    return [body(f"{member.callsign}: {where(member)}"), body("A GUEST: NO RECORD IS KEPT")]
+
+
+def score_guest() -> list[Line]:
+    """``/SCORE`` for a guest (II §4.2, II §11.3)."""
+    return [body("GUESTS' PROGRESS IS NOT KEPT: LOG IN WITH NAME,PASSWORD TO KEEP YOURS")]
+
+
 def score(callsign: str, record: ProgressRecord | None) -> list[Line]:
     """The player's own record (II §4.2)."""
     if record is None:
         return [body("NO RECORD YET: PLAY A GAME AND YOUR PROGRESS IS KEPT")]
     return [heading(f"RECORD OF {callsign}"), *record_lines(record)]
+
+
+def resume_held(letter: str, seconds_left: float) -> list[Line]:
+    """Back in the Chamber with a game held: where, and how long there is to type ``/RESUME``
+    (II §13 item 4)."""
+    left = int(seconds_left)
+    return [
+        heading(f"YOUR GAME IN CITY {letter} WAS INTERRUPTED."),
+        heading(f"TYPE /RESUME WITHIN {left // 60}:{left % 60:02d} TO RETURN TO IT."),
+    ]
+
+
+def resume_dead(letter: str, reason: str) -> list[Line]:
+    """The held game was a death: the drop came while the pod was under attack (II §13 item 3)."""
+    return [
+        error(f"YOUR LINE DROPPED IN CITY {letter} DURING A FIGHT ({reason})."),
+        error("THAT COUNTED AS A DEATH: IT CANNOT BE RESUMED."),
+    ]
+
+
+def resume_launch(city: CityConfig) -> list[Line]:
+    return [heading(f"RESUMING IN CITY {city.letter}, {city.name}")]
 
 
 def resume_refused(*, guest: bool) -> list[Line]:

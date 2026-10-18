@@ -37,6 +37,7 @@ from opencs.world.city import City, JoinRefused
 
 if TYPE_CHECKING:
     from opencs.session.session import Session
+    from opencs.world.progress import SavedProgress
 
 
 class Stage(Enum):
@@ -92,6 +93,9 @@ class InGamePhase(Phase):
         self._hello_sent = 0
         self._next_hello = 0.0
         self._first_frame = False
+        #: When the last bytes arrived: a line that goes quiet for ``SILENCE_SECONDS`` after the
+        #: first frame is dropped (II §13 item 1).
+        self._last_bytes_at = now
         # The quit handshake.
         self._quit_scanner = QuitScanner()
         self._quit_deadline = 0.0
@@ -107,16 +111,21 @@ class InGamePhase(Phase):
         city = self.host.services.cities[member.city]
         now = self.host.now()
         persistence = self.host.services.persistence
+        saved: SavedProgress | None = None
+        key: str | None = None
         try:
-            saved = persistence.load(member.key)
-            key: str | None = member.key
+            if member.account is not None:  # guests are not saved (II §11.3)
+                saved, key = persistence.load(member.key), member.key
         except Exception:
             # Without the stored record the player would start from the defaults and then overwrite
             # it: keep nothing for this session instead (I §9.2.11, II §11.3).
             self.host.log.exception("could not read the record of %s; none is kept", member.key)
             saved, key = None, None
+        resume, self.host.resuming = self.host.resuming, None
         try:
-            joined = city.join(member.callsign, member.team, now, identity=key, saved=saved)
+            joined = city.join(
+                member.callsign, member.team, now, identity=key, saved=saved, resume=resume
+            )
         except Exception:
             # A bug in the world: log it with the request and close; nobody is seated (DESIGN §5).
             self.host.log.exception("city %s failed on a join", city.config.letter)
@@ -134,7 +143,11 @@ class InGamePhase(Phase):
         persistence.flush(city)  # the new game rolled the last SCORE into the career
         self.host.services.router.register(city.config.letter, joined.player_id, _Sink(self))
         self.host.log.info(
-            "seated as player %d, team %d index %d", joined.player_id, joined.team, joined.index
+            "seated as player %d, team %d index %d%s",
+            joined.player_id,
+            joined.team,
+            joined.index,
+            "; resuming" if resume is not None and key is not None else "",
         )
         self._hello = joined.hello
         self._hello_size = len(build_frame(server_payload(joined.hello, BYTE_MIN)))
@@ -165,15 +178,87 @@ class InGamePhase(Phase):
             )
 
     def closed(self) -> None:
-        """A line drop mid-game. The record is already saved from the reports so far; the held game
-        for ``/RESUME`` is M10b's."""
-        self._leave_city()
+        """The socket ended. While playing, with the server not the one that closed it, that is a
+        line drop (II §13 item 1). A close the server made for bad input still runs the fight
+        test, since hanging up must not dodge a death, but leaves nothing to resume. After a quit
+        the player is already out."""
+        reason = self.host.close_reason
+        if self.stage is Stage.PLAYING and reason is None:
+            self._line_dropped(self.host.now())
+        elif self.stage is Stage.PLAYING and self._close_runs_fight_test(reason):
+            self._line_dropped(self.host.now(), by_server=True)
+        else:
+            self._leave_city()
         self.stage = Stage.GONE
+
+    @staticmethod
+    def _close_runs_fight_test(reason: str | None) -> bool:
+        """Whether a close the server made is judged like a drop: yes for what the peer caused
+        (bad input, a stalled frame). The seam for M12: a close for shutdown or by an admin is not
+        the player's doing and should return False for its reasons (our rule for a server-side close
+        in a fight; see I §5.5 (unprompted Quit), II §13)."""
+        return True
+
+    def _line_dropped(self, fight_at: float, *, by_server: bool = False) -> None:
+        """The line dropped mid-game (II §13): the city decides whether it was a fight, which
+        is a death, and what record the player leaves; only a real account is held for
+        ``/RESUME`` (D1). ``fight_at`` is when the line went quiet. The record is already saved
+        from the reports so far. ``by_server``: the server closed the connection, so the fight
+        test runs but no record is made."""
+        city = self._city
+        if city is None:
+            return
+        self._city = None
+        services = self.host.services
+        member = self.host.member
+        account = member is not None and member.account is not None and not by_server
+        # A source already holding its share of slots holds no more (MAX_HELD_PER_ADDRESS).
+        crowded = (
+            account
+            and member is not None
+            and not services.held.has_room(self.host.address, member.key)
+        )
+        services.router.unregister(city.config.letter, self._player_id)
+        try:
+            dropped = city.line_drop(
+                self._player_id,
+                self.host.now(),
+                fight_at=fight_at,
+                hold=account and not crowded,
+                keep_record=not by_server,
+            )
+            services.router.deliver(city, dropped.events)
+            services.persistence.flush(city)
+        except Exception:
+            # A bug in the world: the player must still be gone from the city (DESIGN §5).
+            self.host.log.exception("city %s failed on a line drop", city.config.letter)
+            city.leave(self._player_id, self.host.now())
+            return
+        record = dropped.record
+        if by_server:
+            self.host.log.info("closed by the server; the fight test ran, no game is held")
+        elif record is None:
+            self.host.log.info("line dropped; nothing is kept for this player")
+        elif not account:
+            self.host.log.info("line dropped; JOINGENIE cannot resume (%s)", record.reason or "ok")
+        elif crowded and record.eligible:
+            self.host.log.warning(
+                "line dropped; nothing held: %s already holds %d games",
+                self.host.address,
+                policy.MAX_HELD_PER_ADDRESS,
+            )
+        else:
+            services.held.hold(record, self.host.address)
+            self.host.log.info(
+                "line dropped; %s",
+                "held for /RESUME" if record.eligible else f"counted as a death ({record.reason})",
+            )
 
     # --- bytes in ----------------------------------------------------------------------------
 
     def feed(self, data: bytes) -> None:
         now = self.host.now()
+        self._last_bytes_at = now
         quits = self._quit_scanner.feed(data)
         if self.stage is Stage.QUITTING:
             self._count_quits(len(quits), now)
@@ -278,6 +363,16 @@ class InGamePhase(Phase):
             self._tick_quitting(now)
 
     def _tick_playing(self, now: float) -> None:
+        if self._first_frame and now - self._last_bytes_at >= policy.SILENCE_SECONDS:
+            # POD.FUN sent a packet and then nothing: the line is dead though the socket is not
+            # (II §13 item 1). The fight window is counted from when it went quiet.
+            self.host.log.info(
+                "no bytes for %.0f s; the line is taken as dropped", now - self._last_bytes_at
+            )
+            self._line_dropped(self._last_bytes_at)
+            self.stage = Stage.GONE
+            self.host.close("line silent")
+            return
         if (
             not self._first_frame
             and now >= self._next_hello

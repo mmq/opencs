@@ -15,6 +15,7 @@ from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.messages import ServerMessage
 from opencs.routing import Router
+from opencs.session.held import HeldGames
 from opencs.session.persistence import Persistence
 from opencs.session.phases import Services
 from opencs.session.session import Session
@@ -101,21 +102,22 @@ def make_world(
 ) -> World:
     clock = ManualClock(start)
     identity = Identity(MemoryAccountStore(), iterations=FAST_ITERATIONS)
-    lobby = Lobby(cities or (city("A"), city("B"), city("C")), default, random.Random(seed))
     configs = cities or (city("A"), city("B"), city("C"))
-    cities_by_letter = {c.letter: City(c) for c in configs}
+    held = HeldGames(clock)
+    lobby = Lobby(configs, default, random.Random(seed), held)
+    cities_by_letter = {c.letter: City(c, reservations=held) for c in configs}
     router = Router()
     progress = progress or MemoryProgressStore()
     services = Services(
-        identity, lobby, clock, cities_by_letter, router, Persistence(progress, clock)
+        identity, lobby, clock, cities_by_letter, router, Persistence(progress, clock), held
     )
     return World(clock, identity, lobby, services, progress)
 
 
-def connect(world: World, conn_id: int | None = None) -> Harness:
+def connect(world: World, conn_id: int | None = None, address: str = "?") -> Harness:
     io = FakeIO()
     n = conn_id if conn_id is not None else len(world.sessions) + 1
-    log = ConnectionLog(logging.getLogger("test.session"), ConnectionContext(n))
+    log = ConnectionLog(logging.getLogger("test.session"), ConnectionContext(n, address))
     harness = Harness(Session(io, world.services, log), io, world)
     world.sessions.append(harness)
     return harness
@@ -124,26 +126,38 @@ def connect(world: World, conn_id: int | None = None) -> Harness:
 LOGIN = "HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r"
 
 
-def login(world: World, account: str = "JOINGENIE", *, enter: bool = True) -> Harness:
-    """A session taken through the logon to the Chamber's version check (or to the ``*``)."""
-    h = connect(world)
+def login(
+    world: World, account: str = "JOINGENIE", *, enter: bool = True, address: str = "?"
+) -> Harness:
+    """A session taken through the logon to the Chamber's version check (or to the ``*``). A bare
+    name that is not a guest name logs on as that account with password ``PW`` (II §3: only guest
+    names may go without one)."""
+    if "," not in account and account.upper() not in policy.DEFAULT_GUEST_NAMES:
+        account += ",PW"
+    h = connect(world, address=address)
     h.feed(f"AT\r\nHHH\r\r{account}\r<Not Telling!>\r")
     if enter:
         h.feed("M 1380;3\r")
     return h
 
 
-def enter_lobby(world: World, account: str = "JOINGENIE") -> Harness:
+def enter_lobby(world: World, account: str = "JOINGENIE", address: str = "?") -> Harness:
     """A session that is in the Chamber, version check answered, output cleared."""
-    h = login(world, account)
+    h = login(world, account, address=address)
     h.feed("CSTTBT 105 150\r")
     h.take()
     return h
 
 
-def play(world: World, letter: str = "A", team: int = 0) -> Harness:
+def play(
+    world: World,
+    letter: str = "A",
+    team: int = 0,
+    account: str = "JOINGENIE",
+    address: str = "?",
+) -> Harness:
     """A session in the Chamber taken through ``/PLAY`` and ``/GO 0`` into the in-game phase."""
-    h = enter_lobby(world)
+    h = enter_lobby(world, account, address)
     h.feed(f"/PLAY {letter} {policy.TEAM_NAMES[team]}\r")
     h.feed("/GO 0\r")
     h.take()

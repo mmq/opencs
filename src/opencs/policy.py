@@ -186,6 +186,10 @@ CITY_HINT_WINDOW = 120.0
 #: I §5.1, II §3.
 GUEST_ACCOUNT_NAME = "JOINGENIE"
 
+#: The guest names when ``server.toml`` lists none (II §3): the only names more than one
+#: connection may use at once, logged on without a password check and never saved.
+DEFAULT_GUEST_NAMES = (GUEST_ACCOUNT_NAME,)
+
 #: Longest and shortest account name, and longest password, accepted on a login line. Ours: the
 #: spec fixes the line's shape (``NAME,PASSWORD``) but no lengths. The line itself is bounded by
 #: ``MAX_LINE_BYTES``.
@@ -404,6 +408,11 @@ ORDER_ACCEPTED = 0
 ORDER_BAD_DROP_POINT = 1
 ORDER_QUEUE_FULL = 2
 
+#: Multiplier points the client spends when it sends a tower order: a tower 1, a MegaTower 2 (I
+#: §9.4.2, II §13 item 2). Every ``'O'`` refusal refunds one. The client's own rule, not our choice.
+TOWER_COST = 1
+MEGA_TOWER_COST = 2
+
 #: The first guppy id; team ``t``'s guppy is ``GUPPY_BASE_ID + t``, which also picks its color
 #: and its cruise altitude. I §6.2, I §9.4.1, II §14.
 GUPPY_BASE_ID = GUPPY_IDS[0]
@@ -561,3 +570,36 @@ MUNCHER_EDGE_INSET_FEET = 50
 #: Most Munchers in a city at once; a Call Muncher past it is ignored. Ours (DESIGN §5): the module
 #: is used up per request, so honest play never nears it, but each Muncher costs legs of traffic.
 MAX_MUNCHERS = 16
+
+# --- /RESUME (II §13, II §13) ---------------------------------
+
+#: Seconds of no bytes from a client that has already sent a frame before the line is taken as
+#: dropped (D8). Ours: across every capture a live client never went more than 1.0 s between
+#: packets, so 15 s is more than ten times that.
+SILENCE_SECONDS = 15.0
+
+#: A pod is in "a fight you are about to lose" if it was under attack within this many seconds of
+#: the drop (D4). The manual's payout window, reused (I §9.2.8, II §11.2).
+BATTLE_WINDOW = 20.0
+
+#: How many games one source address may have held for `/RESUME` at once (DESIGN §1 goal 4, §5;
+#: II §13 item 4, II §17). A first login registers an account (S8), so without a limit one machine
+#: could hold a team seat per throwaway account for ten minutes each and fill a city for everyone.
+#: Ours: two covers a player who drops twice, or a household sharing an address. A further drop from
+#: that address is an ordinary leave and holds nothing.
+MAX_HELD_PER_ADDRESS = 2
+
+#: How long the attacks on a pod are remembered: the fight window before the last byte of a line
+#: that went quiet, plus the silence limit before it was noticed, plus a tick of slack (D4, D8).
+ATTACK_HISTORY = BATTLE_WINDOW + SILENCE_SECONDS + 5.0
+
+#: An enemy shot, grenade or air strike fired within this many feet of a pod is an attack on it
+#: (D4): the client's own NPC targeting range, so not a number of ours.
+FIGHT_RANGE = 600.0
+
+#: A dropped game is held this long from the drop (D8): the README's "within 10 minutes".
+HOLD_SECONDS = 600.0
+
+#: Seconds from entering the Chamber after a drop in which ``/RESUME`` may be typed (D8): the
+#: manual summary's "within 3 minutes", counted from the re-entry (our reading).
+TYPE_SECONDS = 180.0

@@ -45,7 +45,11 @@ def pod_state(city: City, player: Player, report: client.PodState, now: float) -
             for e in events
         ]
         events += go_live(city, player, now)
-        events += start_status(player, city.multiplier_floor, now)
+        # A resumed game is not entered through the city's entry floor (II §13 item 5).
+        floor = 1 if player.resume is not None else city.multiplier_floor
+        events += start_status(player, floor, now)
+    if player.modules_to_restore and player.pod.phase is PodPhase.IN_PLAY:
+        events += restore_modules(player)  # the pod has landed (II §13)
     if player.pod.phase is not PodPhase.DEAD:  # a fly-over's 'b' is not the pod's place
         events.append(
             Event(
@@ -53,6 +57,17 @@ def pod_state(city: City, player: Player, report: client.PodState, now: float) -
                 ToHolders(player.id, except_player=player.id),
             )
         )
+    return events
+
+
+def restore_modules(player: Player) -> list[Event]:
+    """A resumed pod has landed: one ``'Q'`` sub 5 per module of the held ledger, highest level
+    first (II §13 item 5). Each goes in the ledger as an install pending the weight."""
+    modules, player.modules_to_restore = player.modules_to_restore, []
+    events = []
+    for module in modules:
+        player.loadout.install(module)
+        events.append(Event(server.InstallModule(module), ToPlayer(player.id)))
     return events
 
 

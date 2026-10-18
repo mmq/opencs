@@ -30,8 +30,15 @@ def make(*cities: CityConfig, default: str = "B", seed: int = 1) -> Lobby:
     return Lobby(cities or (city("A"), city("B"), city("C")), default, random.Random(seed))
 
 
-def add(lobby: Lobby, callsign: str, letter: str | None = None, team: int | None = None) -> Member:
-    member = lobby.join(callsign, None, lambda data: None)
+def add(
+    lobby: Lobby,
+    callsign: str,
+    letter: str | None = None,
+    team: int | None = None,
+    *,
+    account: str | None = None,
+) -> Member:
+    member = lobby.join(callsign, account, lambda data: None)
     if letter is not None:
         assert team is not None
         member.city, member.team = letter, team

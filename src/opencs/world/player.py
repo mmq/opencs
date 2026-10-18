@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from opencs.messages import ServerMessage, server
+from opencs.world.attacks import Attacks
 from opencs.world.combat import HitSet, ShotLog
 from opencs.world.grace import Grace
 from opencs.world.loadout import Loadout
@@ -13,6 +15,9 @@ from opencs.world.pods import Pod, PodPhase
 from opencs.world.progress import Progress, SavedProgress
 from opencs.world.scoring import Bounty, PlayerScore, clamp_marker
 from opencs.world.view import ClientView
+
+if TYPE_CHECKING:
+    from opencs.world.resume import ResumeRecord
 
 
 @dataclass(slots=True)
@@ -28,6 +33,8 @@ class Player:
     identity: str | None = None
     #: The stored record this player starts from, None for a new identity (II §11.3).
     saved: SavedProgress | None = None
+    #: The held game this player is resuming, None for a new one (II §13 item 5).
+    resume: ResumeRecord | None = None
     pod: Pod = field(init=False)
     #: The shots this player's connection reported, for attributing its hit reports (II §9.3).
     shots: ShotLog = field(init=False)
@@ -43,12 +50,19 @@ class Player:
     grace: Grace = field(init=False)
     #: The modules this pod carries, as far as the server's messages say (I §9.3.4, II §13).
     loadout: Loadout = field(init=False)
+    #: Modules a resume gives back, highest level first, once the pod has landed (I §9.3.4, II §13).
+    modules_to_restore: list[int] = field(default_factory=list)
+    #: When and how this pod was last under attack (II §13 item 3).
+    attacks: Attacks = field(init=False)
 
     def __post_init__(self) -> None:
         self.pod = Pod(self.id)
         self.shots = ShotLog(self.id)
         self.hits = HitSet()
-        self.progress = Progress(self.saved)
+        held = self.resume
+        self.progress = Progress(
+            self.saved, resumed=None if held is None else (held.score, held.bay_points)
+        )
         # The client is restored to the record: its bays and marker, its bay points and a SCORE of
         # 0 for the new game (I §9.2.11, II §11.3).
         record = self.progress.record
@@ -58,9 +72,13 @@ class Player:
             bays=record.bays,
             marker=clamp_marker(record.marker),
         )
+        if held is not None:
+            self.score.multiplier = held.multiplier
+            self.modules_to_restore = list(held.modules)
         self.bounty = Bounty(self.id)
         self.grace = Grace(self.id, self.team)
         self.loadout = Loadout()
+        self.attacks = Attacks()
 
     @property
     def entity_id(self) -> int:

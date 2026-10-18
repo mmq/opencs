@@ -19,6 +19,7 @@ from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import TextPhase
 from opencs.session.ratelimit import TokenBucket
 from opencs.wire.text import arm_line
+from opencs.world.resume import ResumeRecord
 
 if TYPE_CHECKING:
     from opencs.session.session import Session
@@ -58,6 +59,8 @@ class ChamberPhase(TextPhase):
         self._deadline = 0.0
         self._member: Member | None = None
         self._placement: Placement | None = None
+        #: The held game a launch in progress is returning to (II §13 item 5).
+        self._resuming: ResumeRecord | None = None
         self._city_list_at: float | None = None
         self._handlers = self._handler_table()
         self._late_reply_possible = False
@@ -95,7 +98,7 @@ class ChamberPhase(TextPhase):
         elif self._state is State.LAUNCH and now >= self._deadline:
             self.host.log.info("no /GO reply in %.0f s; staying in the Chamber", policy.GO_WAIT)
             self._state = State.LOBBY
-            self._placement = None
+            self._placement = self._resuming = None
             self._say(replies.denied("NO REPLY TO THE LAUNCH REQUEST: STAYING IN THE CHAMBER"))
 
     # --- lines -----------------------------------------------------------------------------
@@ -154,6 +157,21 @@ class ChamberPhase(TextPhase):
     def _open_lobby(self) -> None:
         self._state = State.LOBBY
         self.host.io.send_raw(arm_line("A") + replies.render(replies.welcome(self.member.callsign)))
+        self._tell_held_game()
+
+    def _tell_held_game(self) -> None:
+        """Back in the Chamber with a game held for this account: say so, which starts the
+        window in which ``/RESUME`` may be typed (II §13 item 4)."""
+        if self.member.account is None:
+            return
+        held = self.host.services.held
+        record = held.entered_chamber(self.member.key)
+        if record is None:
+            return
+        if record.eligible:
+            self._say(replies.resume_held(record.city, held.seconds_left(self.member.key)))
+        else:
+            self._say(replies.resume_dead(record.city, record.reason))
 
     def _say(self, lines: list[replies.Line], *, restore_buttons: bool = False) -> None:
         data = replies.render(lines)
@@ -178,9 +196,7 @@ class ChamberPhase(TextPhase):
             commands.WhoIs: self._who_is,
             commands.Score: self._score,
             commands.Play: lambda c: self._play(c.letter, c.team),
-            commands.Resume: lambda c: self._say(
-                replies.resume_refused(guest=self.member.account is None)
-            ),
+            commands.Resume: lambda c: self._resume(),
             commands.Colors: lambda c: self._say(replies.colors()),
             commands.Quit: lambda c: self._quit(),
             commands.Go: lambda c: self.host.log.info(
@@ -196,6 +212,9 @@ class ChamberPhase(TextPhase):
         if found is None:
             self._say(replies.who_is(None, command.callsign, None))
             return
+        if found.account is None:
+            self._say(replies.who_is_guest(found))
+            return
         try:
             record = self.host.services.persistence.record(found.key)
         except Exception:
@@ -206,6 +225,9 @@ class ChamberPhase(TextPhase):
 
     def _score(self, command: commands.Score) -> None:
         """``/SCORE``: the player's own record (II §4.2)."""
+        if self.member.account is None:
+            self._say(replies.score_guest())
+            return
         try:
             record = self.host.services.persistence.record(self.member.key)
         except Exception:
@@ -247,18 +269,45 @@ class ChamberPhase(TextPhase):
 
     # --- launch ----------------------------------------------------------------------------
 
+    def _resume(self) -> None:
+        """``/RESUME``: launch into the held city and team (II §4.2, II §13, II §13 items 4 and 5).
+        The record stays held until the game takes it, so a launch that fails can be tried again."""
+        if self.member.account is None:
+            self._say(replies.resume_refused(guest=True))
+            return
+        held = self.host.services.held
+        record = held.get(self.member.key)
+        if record is None:
+            self._say(replies.resume_refused(guest=False))
+            return
+        if not record.eligible:
+            held.discard(self.member.key)
+            self._say(replies.resume_dead(record.city, record.reason))
+            return
+        city = self.host.services.lobby.city(record.city)
+        if city is None:
+            self._say(replies.denied(f"CITY {record.city} IS CLOSED: THE GAME CANNOT BE RESUMED"))
+            return
+        self._resuming = record
+        self._begin_launch(Placement(city, record.team), replies.resume_launch(city))
+
+    def _begin_launch(self, placement: Placement, lines: list[replies.Line]) -> None:
+        """Ask the client to select the city (I §5.4) and wait for its ``/GO``."""
+        self._placement = placement
+        self._state = State.LAUNCH
+        self._deadline = self.host.now() + policy.GO_WAIT
+        city = placement.city
+        self.host.io.send_raw(replies.render(lines) + arm_line(f"E {city.map} {city.map}"))
+
     def _play(self, letter: str | None, team: int | None) -> None:
-        result = self.host.services.lobby.place(letter, team)
+        result = self.host.services.lobby.place(letter, team, exclude=self.member.key)
         if isinstance(result, Denied):
             self._say(replies.denied(result.reason))
             return
-        self._placement = result
-        self._state = State.LAUNCH
-        self._deadline = self.host.now() + policy.GO_WAIT
         lines = [replies.body(result.note)] if result.note else []
-        self.host.io.send_raw(
-            replies.render(lines) + arm_line(f"E {result.city.map} {result.city.map}")
-        )
+        if self.host.services.held.discard(self.member.key) is not None:
+            lines.insert(0, replies.body("YOUR HELD GAME IS GIVEN UP: STARTING A NEW ONE"))
+        self._begin_launch(result, lines)
 
     def _launch_line(self, command: commands.Command) -> None:
         placement = self._placement
@@ -268,12 +317,20 @@ class ChamberPhase(TextPhase):
                 self._say(replies.denied("LAUNCH IN PROGRESS"))
             return
         self._state = State.LOBBY
+        resuming, self._resuming = self._resuming, None
         self._placement = None
         if command.status == 0:
             if self.host.services.lobby.enter(self.member, placement):
                 self.host.log.info(
-                    "launching into city %s team %s", placement.city.letter, placement.team
+                    "launching into city %s team %s%s",
+                    placement.city.letter,
+                    placement.team,
+                    " (resuming)" if resuming else "",
                 )
+                if resuming is not None:
+                    # The game takes the record; the join below needs its slot to be the player's.
+                    self.host.services.held.discard(resuming.identity)
+                    self.host.resuming = resuming
                 self.host.io.send_raw(arm_line("C"))
                 self.host.to_ingame()
             else:

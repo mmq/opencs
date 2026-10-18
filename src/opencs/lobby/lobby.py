@@ -8,8 +8,9 @@ Team choice is lobby logic (S9); a pod's index within its team is the world's (M
 from __future__ import annotations
 
 import random
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from opencs import policy
 from opencs.config import CityConfig
@@ -55,14 +56,35 @@ class Denied:
     reason: str
 
 
+class Reservations(Protocol):
+    """The slots held for players whose line dropped (II §13 item 4, D9): they count as
+    occupied for room and balancing, except to their owner."""
+
+    def slots(self, letter: str) -> Sequence[tuple[str, int]]:
+        """``(identity key, team)`` of each slot held in the city with this letter."""
+        ...
+
+
+class _NoReservations:
+    def slots(self, letter: str) -> Sequence[tuple[str, int]]:
+        return ()
+
+
 class Lobby:
     """Members, cities and team assignment."""
 
-    def __init__(self, cities: Iterable[CityConfig], default_city: str, rng: random.Random) -> None:
+    def __init__(
+        self,
+        cities: Iterable[CityConfig],
+        default_city: str,
+        rng: random.Random,
+        reservations: Reservations | None = None,
+    ) -> None:
         self._cities = {c.letter: c for c in cities if c.enabled}
         self._default = default_city
         self._rng = rng
         self._members: list[Member] = []
+        self._reservations: Reservations = reservations or _NoReservations()
 
     # --- members ---------------------------------------------------------------------------
 
@@ -112,50 +134,62 @@ class Lobby:
         """Players in a city."""
         return sum(1 for m in self._members if m.city == letter)
 
-    def _team_count(self, letter: str, team: int) -> int:
-        return sum(1 for m in self._members if m.city == letter and m.team == team)
+    def _held_teams(self, letter: str, exclude: str | None) -> list[int]:
+        """The team of each slot held in a city for someone but ``exclude``."""
+        return [t for key, t in self._reservations.slots(letter) if key != exclude]
 
-    def _open_teams(self, city: CityConfig) -> list[int]:
-        """Teams with room, or none if the city is at capacity (II §6, S9)."""
-        if self.count(city.letter) >= city.capacity:
+    def _team_count(self, letter: str, team: int, exclude: str | None = None) -> int:
+        """Players on a team, and the slots held for it: both occupy a seat (II §13 item 4, II
+        §17)."""
+        seated = sum(1 for m in self._members if m.city == letter and m.team == team)
+        return seated + self._held_teams(letter, exclude).count(team)
+
+    def _open_teams(self, city: CityConfig, exclude: str | None = None) -> list[int]:
+        """Teams with room, or none if the city is at capacity (II §6, S9).
+        Held slots count as occupied, ``exclude`` being the identity whose own slot does not."""
+        held = len(self._held_teams(city.letter, exclude))
+        if self.count(city.letter) + held >= city.capacity:
             return []
         return [
             t
             for t in range(policy.TEAM_COUNT)
-            if self._team_count(city.letter, t) < policy.MAX_PLAYERS_PER_TEAM
+            if self._team_count(city.letter, t, exclude) < policy.MAX_PLAYERS_PER_TEAM
         ]
 
-    def has_room(self, city: CityConfig) -> bool:
-        return bool(self._open_teams(city))
+    def has_room(self, city: CityConfig, exclude: str | None = None) -> bool:
+        return bool(self._open_teams(city, exclude))
 
     # --- /PLAY -----------------------------------------------------------------------------
 
-    def place(self, letter: str | None, team: int | None) -> Placement | Denied:
+    def place(
+        self, letter: str | None, team: int | None, *, exclude: str | None = None
+    ) -> Placement | Denied:
         """Choose the city and team for a ``/PLAY`` (II §4.2).
 
         With no letter: the most populated city with room; ties, and all-empty, go to the default
-        city when it is among them. With a letter: that city if enabled and not full.
+        city when it is among them. With a letter: that city if enabled and not full. Held slots
+        count as occupied, except the one held for ``exclude`` (the identity placing itself).
         """
         if letter is None:
-            return self._place_anywhere(team)
+            return self._place_anywhere(team, exclude)
         city = self.city(letter)
         if city is None:
             return Denied(f"NO SUCH CITY: {letter}")
-        if not self.has_room(city):
+        if not self.has_room(city, exclude):
             return Denied(f"CITY {letter} IS FULL")
-        return self._place_in(city, team)
+        return self._place_in(city, team, exclude)
 
-    def _place_anywhere(self, team: int | None) -> Placement | Denied:
-        roomy = [c for c in self.cities() if self.has_room(c)]
+    def _place_anywhere(self, team: int | None, exclude: str | None) -> Placement | Denied:
+        roomy = [c for c in self.cities() if self.has_room(c, exclude)]
         if not roomy:
             return Denied("ALL CITIES ARE FULL")
         busiest = max(self.count(c.letter) for c in roomy)
         tied = [c for c in roomy if self.count(c.letter) == busiest]
         city = next((c for c in tied if c.letter == self._default), tied[0])
-        return self._place_in(city, team)
+        return self._place_in(city, team, exclude)
 
-    def _place_in(self, city: CityConfig, requested: int | None) -> Placement:
-        open_teams = self._open_teams(city)
+    def _place_in(self, city: CityConfig, requested: int | None, exclude: str | None) -> Placement:
+        open_teams = self._open_teams(city, exclude)
         note = ""
         if city.team_policy == "request-or-balance" and requested in open_teams:
             assert requested is not None
@@ -170,15 +204,16 @@ class Lobby:
         if city.team_policy == "random":
             chosen = self._rng.choice(candidates)
         else:
-            chosen = min(candidates, key=lambda t: (self._team_count(city.letter, t), t))
+            chosen = min(candidates, key=lambda t: (self._team_count(city.letter, t, exclude), t))
         if note:
             note += f": YOU ARE ON {policy.TEAM_NAMES[chosen]}"
         return Placement(city, chosen, note)
 
     def enter(self, member: Member, placement: Placement) -> bool:
         """Put ``member`` in the placed city and team; False if the place filled meanwhile (the
-        launch takes up to ``GO_WAIT`` seconds, during which others may join)."""
-        if placement.team not in self._open_teams(placement.city):
+        launch takes up to ``GO_WAIT`` seconds, during which others may join). The slot held for
+        this member's own identity is its to take (II §13 item 4, II §17)."""
+        if placement.team not in self._open_teams(placement.city, member.key):
             return False
         member.city = placement.city.letter
         member.team = placement.team
