@@ -84,6 +84,7 @@ class InGamePhase(Phase):
             client.PickupRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
             client.EjectRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
         }
+        self._frame_bucket = TokenBucket(*policy.FRAME_LIMIT, now)
         self._over_budget = 0
         self._stalled_since: float | None = None
         self._city: City | None = None
@@ -286,6 +287,9 @@ class InGamePhase(Phase):
         failed = self._reader.bad_frames - self._bad_seen
         self._bad_seen = self._reader.bad_frames
         for frame in frames:
+            if not self._frame_bucket.take(now):
+                failed += 1  # over the frame rate: dropped undecoded, counted as bad input
+                continue
             try:
                 message = decode_client(frame.payload)
             except DecodeError as exc:

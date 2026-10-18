@@ -528,3 +528,42 @@ def test_module_and_effect_messages_that_name_nothing_never_raise_out_of_the_ses
     h.feed(frame(report(1, y=229)))  # still alive and playing afterward
     assert not h.io.closed
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+# --- the frame rate ----------------------------------------------------------------------------
+
+
+def pings(n: int) -> bytes:
+    return raw_frame(A3_PING) * n
+
+
+def replies(h: Harness) -> int:
+    return sum(isinstance(m, server.PingReply) for m in sent(h))
+
+
+def test_frames_past_the_burst_are_dropped_and_counted_as_bad_input() -> None:
+    h = play(make_world())
+    sent(h)
+    burst = policy.FRAME_LIMIT[0]
+    h.feed(pings(burst))
+    assert replies(h) == burst
+    assert phase(h)._bad.total == 0
+    h.feed(pings(1))  # the first one over, in the same instant
+    assert replies(h) == 0
+    assert phase(h)._bad.total == 1
+
+
+def test_a_flood_of_frames_closes_the_connection() -> None:
+    h = play(make_world())
+    h.feed(pings(policy.FRAME_LIMIT[0] + policy.MAX_BAD_INPUT + 1))
+    assert h.io.closed_with == ["too much bad input"]
+
+
+def test_the_real_clients_rate_is_never_limited() -> None:
+    h = play(make_world())
+    sent(h)
+    for _ in range(20):  # 20 s at the client's ceiling of ~50 packets a second
+        h.feed(pings(50))
+        h.advance(1.0)
+    assert phase(h)._bad.total == 0 and not h.io.closed
+    assert replies(h) == 1000
