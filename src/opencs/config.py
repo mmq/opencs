@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,7 @@ class AdminConfig:
     start without one."""
 
     port: int | None = None
-    token: str | None = None
+    token: str | None = field(default=None, repr=False)  # never printed
     token_env: str = policy.ADMIN_TOKEN_ENV
 
 

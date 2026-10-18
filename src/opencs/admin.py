@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from opencs import policy
 from opencs.clock import Clock
 from opencs.config import AdminConfig, ConfigError
-from opencs.control import Control
+from opencs.control import COMMAND_NAMES, Control
 from opencs.session.ratelimit import TokenBucket
 
 log = logging.getLogger("opencs.admin")
@@ -145,11 +145,13 @@ class AdminServer:
                 log.warning("admin connection from %s over its command rate; closing", host)
                 await self._say(writer, ["too many commands: closing"])
                 return
-            log.info("admin command from %s: %s", host, line.split(" ", 1)[0].lower())
+            word = line.split(" ", 1)[0].lower()
+            word = word if word in COMMAND_NAMES else "(unknown command)"  # may be a token
+            log.info("admin command from %s: %s", host, word)
             try:
                 reply = self._control.execute(line)
             except Exception:
-                log.exception("admin command %r failed", line.split(" ", 1)[0])
+                log.exception("admin command %s failed", word)
                 reply = ["error: the command failed (see the log)"]
             await self._say(writer, reply)
 

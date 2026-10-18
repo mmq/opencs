@@ -40,6 +40,11 @@ HELP = (
 )
 
 
+#: The words ``Control.execute`` answers; the admin channel logs a word only if it is one of these,
+#: so a token typed again after logging in (an unknown word) never reaches the log.
+COMMAND_NAMES = ("status", "announce", "kick", "guppy", "shutdown", "reload", "help")
+
+
 def announce(services: Services, text: str, router: Router | None = None) -> int:
     """Put ``text`` on every player's screen: an ``'a'`` from sender 100 (I §8.23) to each client
     in a game that has started playing, a plain line to each pilot in the Chamber. The text is

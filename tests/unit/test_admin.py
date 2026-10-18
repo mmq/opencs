@@ -20,7 +20,7 @@ from opencs.app import Seams, serve
 from opencs.cities import CityManager
 from opencs.clock import ManualClock
 from opencs.config import AdminConfig, ConfigError
-from opencs.control import Control
+from opencs.control import COMMAND_NAMES, Control
 from opencs.messages import server
 from opencs.store.memory import memory_stores
 
@@ -380,5 +380,59 @@ def test_a_server_whose_admin_port_has_no_token_refuses_to_start(
         seams = Seams(environ={}, stores=memory_stores())
         with pytest.raises(ConfigError, match="no token"):
             await serve(config, stop=stop, seams=seams)
+
+    run(scenario())
+
+
+# --- what must not reach the log or a stranger ---------------------------------------------------
+
+
+def test_a_token_typed_again_after_logging_in_is_not_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        async with running() as (_, port, _):
+            c = await login(port)
+            await c.command(TOKEN)  # an unknown word: the token pasted a second time
+            assert (await c.command("status"))[0].startswith("uptime:")
+
+    with caplog.at_level(logging.DEBUG):
+        run(scenario())
+    assert "correct" not in caplog.text and "horse" not in caplog.text
+    assert "admin command from 127.0.0.1: status" in caplog.text
+
+
+def test_every_logged_command_word_is_a_command_control_answers() -> None:
+    world = make_world()
+    ctl = control(world, asyncio.Event())
+    for name in COMMAND_NAMES:
+        assert not ctl.execute(name)[0].startswith("unknown command")
+
+
+def test_the_config_never_prints_its_token() -> None:
+    assert "secret-token-value" not in repr(AdminConfig(port=1, token="secret-token-value"))
+
+
+def test_a_peer_that_is_not_loopback_is_closed_with_no_greeting() -> None:
+    class Writer:
+        def __init__(self) -> None:
+            self.written = b""
+            self.closed = False
+
+        def get_extra_info(self, name: str) -> tuple[str, int]:
+            return ("10.0.0.5", 1)
+
+        def write(self, data: bytes) -> None:
+            self.written += data
+
+        def close(self) -> None:
+            self.closed = True
+
+    async def scenario() -> None:
+        world = make_world()
+        admin = AdminServer(control(world, asyncio.Event()), TOKEN, ManualClock())
+        writer = Writer()
+        await admin._handle(asyncio.StreamReader(), writer)  # type: ignore[arg-type]
+        assert writer.closed and writer.written == b""
 
     run(scenario())
