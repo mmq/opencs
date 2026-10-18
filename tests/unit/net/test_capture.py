@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 from fixtures.captures import load_capture_file
@@ -95,6 +96,42 @@ def test_a_capture_stops_at_its_cap_with_a_note(tmp_path: Path) -> None:
     assert capture.path is not None
     assert capture.path.stat().st_size <= 300 + len(found[-1]) + 1
     assert 3 < len(found) < 12  # it recorded some, then stopped (50 reads were offered)
+
+
+def _old(directory: Path, name: str, size: int, mtime: int) -> Path:
+    path = directory / name
+    path.write_bytes(b"x" * size)
+    os.utime(path, (mtime, mtime))
+    return path
+
+
+def test_the_oldest_files_go_when_the_directory_would_pass_its_cap(tmp_path: Path) -> None:
+    oldest = _old(tmp_path, "2026-01-01-000000_001-A.txt", 400, 1_000)
+    middle = _old(tmp_path, "2026-01-02-000000_002-B.txt", 400, 2_000)
+    newest = _old(tmp_path, "2026-01-03-000000_003-C.txt", 400, 3_000)
+    keeper = _old(tmp_path, "notes.txt", 5_000, 500)  # not ours: never touched
+    context = ConnectionContext(7)
+    context.callsign = "ALPHA"
+    factory = CaptureFactory(tmp_path, frozenset(), 500, lambda: "2026-10-18-120000", 1_500)
+    capture = factory.new(context, 100.0)
+    context.stream = STREAM_CHAMBER
+    capture.client_bytes(b"hi", 100.0)
+    assert capture.path is not None and capture.path.exists()
+    # 1200 bytes held + 500 for the new file passes 1500: the oldest goes, and only it (800 + 500).
+    assert not oldest.exists() and middle.exists() and newest.exists() and keeper.exists()
+
+
+def test_a_cap_smaller_than_one_file_still_makes_room_for_a_cap_sized_file(
+    tmp_path: Path,
+) -> None:
+    old = _old(tmp_path, "2026-01-01-000000_001-A.txt", 400, 1_000)
+    context = ConnectionContext(7)
+    context.callsign = "ALPHA"
+    factory = CaptureFactory(tmp_path, frozenset(), 5_000, lambda: "2026-10-18-120000", 1_000)
+    capture = factory.new(context, 100.0)
+    context.stream = STREAM_CHAMBER
+    capture.client_bytes(b"hi", 100.0)
+    assert not old.exists() and capture.path is not None and capture.path.exists()
 
 
 def test_only_listed_callsigns_are_captured(tmp_path: Path) -> None:

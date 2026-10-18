@@ -39,6 +39,11 @@ MAX_LOG_BACKUPS = 100
 DEFAULT_CAPTURE_MAX_BYTES = 4_000_000
 MAX_CAPTURE_BYTES = 1_000_000_000
 
+#: The capture directory holds at most this many bytes of capture files (DESIGN §6): before a new
+#: file is made the oldest are removed (and logged) until a full one fits, so captures left on for
+#: everyone cannot fill the disk through reconnects. Ours: fifty full-size files.
+CAPTURE_DIR_MAX_BYTES = 200_000_000
+
 #: Capture files go here by default, relative to the config file. Ours.
 DEFAULT_CAPTURE_DIR = "../captures"
 
