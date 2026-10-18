@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from fixtures.pods import report
-from fixtures.sessions import Harness, World, enter_lobby, make_world, play
+from fixtures.sessions import Harness, World, connect, enter_lobby, make_world, play
 from opencs import policy
 from opencs.messages import ClientMessage, client, client_payload, server
 from opencs.session.chamber import ChamberPhase
@@ -135,3 +135,12 @@ def test_the_registry_lists_live_sessions_by_callsign() -> None:
     assert registry.all() == [other.session]
     assert isinstance(other.session.phase, ChamberPhase)
     assert not isinstance(other.session.phase, InGamePhase)
+
+
+def test_at_the_logon_a_removal_just_closes_with_no_chamber_text() -> None:
+    world = make_world()
+    h = connect(world)
+    h.feed("HHH")
+    h.take()
+    h.session.remove("SERVER SHUTTING DOWN", close=True)
+    assert h.take() == b"" and h.io.closed

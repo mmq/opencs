@@ -65,6 +65,17 @@ MAX_PORT = 65535
 #: City ticks per second. I §7.1, II §7: 5 per second.
 TICK_HZ = 5
 
+# --- Operations (DESIGN §6) ----------------------------------------------------------------------
+
+#: A graceful shutdown waits this long for connections to flush and close, then aborts the rest
+#: (DESIGN §6: a shutdown never hangs). Ours: longer than ``CLOSE_FLUSH_TIMEOUT`` (a connection
+#: that does not read is cut by that first), so the deadline only matters when something else is
+#: stuck.
+SHUTDOWN_DEADLINE = 10.0
+
+#: After aborting, how long to wait for the aborted connections to finish unwinding. Ours.
+SHUTDOWN_ABORT_GRACE = 2.0
+
 # --- Connections (DESIGN §3.3, §5) --------------------------------------------------------------
 
 #: Connections accepted in total and from one address; more are closed at once. Ours (DESIGN §5

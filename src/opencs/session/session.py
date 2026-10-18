@@ -96,7 +96,8 @@ class Session:
         (I §5.5, I §8.5), which sends its client back to the Chamber exactly as its own quit does:
         the player leaves cleanly (progress saved, nothing held for ``/RESUME``, no fight test,
         since this is not the player's doing) and, unless ``close``, the connection carries on as a
-        Chamber session. Anywhere else the notice is a line of text and the connection closes."""
+        Chamber session. In the Chamber the notice is a line of text and the connection closes; at
+        the logon it just closes."""
         if not self._active:
             return
         phase = self.phase
@@ -106,7 +107,7 @@ class Session:
                 phase.remove(notice)
             if not close:
                 return
-        else:
+        elif isinstance(phase, ChamberPhase):  # the logon has no Chamber to print a line in
             self.io.send_raw(replies.render(replies.denied(notice)))
         self.close(notice)
 

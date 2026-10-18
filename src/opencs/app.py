@@ -9,7 +9,7 @@ import random
 import signal
 import sys
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +17,7 @@ from opencs import policy
 from opencs.clock import Clock, MonotonicClock
 from opencs.config import AppConfig, ConfigError, load_config
 from opencs.connlog import ConnectionContext, ConnectionLog
+from opencs.control import SHUTDOWN_NOTICE, announce, remove_everyone
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.logsetup import configure_logging
@@ -92,38 +93,51 @@ async def run_city(
             log.exception("city %s failed on a tick", city.config.letter)
 
 
+@dataclass(frozen=True, slots=True)
+class Seams:
+    """What tests substitute for the real thing. ``stores`` replaces the SQLite file, ``clock`` and
+    ``rng`` the real ones; ``services`` is built by the caller so it can look inside (it owns its
+    stores, so ``stores`` and ``rng`` are then unused). ``tick_sleep`` paces the city and session
+    tickers, which a test pulses by hand instead of waiting; ``shutdown_deadline`` is how long a
+    shutdown waits for connections before aborting them."""
+
+    stores: Stores | None = None
+    clock: Clock | None = None
+    rng: random.Random | None = None
+    services: Services | None = None
+    tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    shutdown_deadline: float = policy.SHUTDOWN_DEADLINE
+
+
 async def serve(
     config: AppConfig,
     *,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None = None,
-    stores: Stores | None = None,
-    clock: Clock | None = None,
-    rng: random.Random | None = None,
-    services: Services | None = None,
-    tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    seams: Seams = Seams(),  # noqa: B008  (frozen, so one shared default is safe)
 ) -> None:
-    """Listen on the configured address until ``stop`` is set, then close every connection.
+    """Listen on the configured address until ``stop`` is set, then shut down gracefully: every
+    player is told, taken out of its game and saved, and the connections are closed within the
+    shutdown deadline (DESIGN §6).
 
     ``ready`` receives the first bound socket's port once listening (port 0 binds an ephemeral
     one). A host naming several addresses binds several sockets; each is logged. Accounts and
-    progress go to the SQLite file in ``data_dir`` unless ``stores`` says otherwise. ``stores``,
-    ``clock`` and ``rng`` are for tests, as are ``services`` (built by the caller, so it can look
-    inside, and owns its stores; ``stores`` and ``rng`` are then unused) and ``tick_sleep``, the
-    pacing of the city and session tickers (a test pulses it by hand instead of waiting).
+    progress go to the SQLite file in ``data_dir`` unless ``seams`` says otherwise.
     """
-    clock = clock or (services.clock if services else MonotonicClock())
+    services = seams.services
+    clock = seams.clock or (services.clock if services else MonotonicClock())
     database: SqliteStore | None = None
     if services is None:
+        stores = seams.stores
         if stores is None:  # the real thing: accounts and progress in data_dir (DESIGN §2)
             stores, database = open_stores(config.server.data_dir)
             log.info("database %s", config.server.data_dir / policy.DATABASE_FILE_NAME)
-        services = build_services(config, stores=stores, clock=clock, rng=rng)
+        services = build_services(config, stores=stores, clock=clock, rng=seams.rng)
     try:
-        await _listen(config, services, clock, stop, ready, tick_sleep)
+        await _listen(config, services, clock, stop, ready, seams)
     finally:
         # Connections are closed by now, and each saved its player as it left; this saves anyone
-        # still seated (M12 makes shutdown graceful on top of it).
+        # still seated, and whatever a failed save left waiting for a retry.
         services.persistence.save_all(services.cities.values())
         if database is not None:
             database.close()
@@ -145,21 +159,44 @@ def _capture_factory(config: AppConfig) -> CaptureFactory | None:
     )
 
 
+async def _shutdown(
+    services: Services,
+    listener: Listener,
+    tickers: Sequence[asyncio.Task[None]],
+    deadline: float,
+) -> None:
+    """Stop accepting, tell everyone, end every session (a game with the unprompted ``'C'``; each
+    player is saved as it leaves), save whoever is still seated, stop the tickers, and close the
+    connections, aborting any that outlast ``deadline`` (DESIGN §6)."""
+    log.info("shutting down")
+    listener.stop_accepting()
+    announce(services, SHUTDOWN_NOTICE)
+    remove_everyone(services, SHUTDOWN_NOTICE)
+    services.persistence.save_all(services.cities.values())
+    for ticker in tickers:
+        ticker.cancel()
+    await asyncio.gather(*tickers, return_exceptions=True)
+    await listener.stop(deadline)
+
+
 async def _listen(
     config: AppConfig,
     services: Services,
     clock: Clock,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None,
-    tick_sleep: Callable[[float], Awaitable[None]],
+    seams: Seams,
 ) -> None:
-    """Listen until ``stop`` is set, ticking the cities, then close every connection."""
+    """Listen until ``stop`` is set, ticking the cities, then shut down gracefully."""
     listener = Listener(
-        build_session_factory(services), clock, sleep=tick_sleep, capture=_capture_factory(config)
+        build_session_factory(services),
+        clock,
+        sleep=seams.tick_sleep,
+        capture=_capture_factory(config),
     )
     server = await listener.start(config.server.host, config.server.port)
     tickers = [
-        asyncio.create_task(run_city(city, services.router, clock, tick_sleep))
+        asyncio.create_task(run_city(city, services.router, clock, seams.tick_sleep))
         for city in services.cities.values()
     ]
     bound = [sock.getsockname()[:2] for sock in server.sockets]
@@ -171,10 +208,7 @@ async def _listen(
     try:
         await stop.wait()
     finally:
-        for ticker in tickers:
-            ticker.cancel()
-        await asyncio.gather(*tickers, return_exceptions=True)
-        await listener.stop()
+        await _shutdown(services, listener, tickers, seams.shutdown_deadline)
 
 
 async def _run(config: AppConfig) -> None:
