@@ -30,9 +30,10 @@ from fixtures.lobbies import city
 from opencs import policy
 from opencs.messages import DecodeError, client, decode_client, decode_server, server
 from opencs.wire.frame import FrameReader
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.hits import Hits
 from opencs.world.player import Player
+from opencs.world.seating import JoinResult
 
 HURT, HIGH_Y = 150, 50
 

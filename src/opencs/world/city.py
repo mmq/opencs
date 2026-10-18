@@ -14,9 +14,7 @@ from __future__ import annotations
 import logging
 import random
 from collections.abc import Sequence
-from dataclasses import dataclass
 
-from opencs import policy
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, client, server
 from opencs.world import chat, death, relay
@@ -46,28 +44,11 @@ from opencs.world.resume import (
     drop_player,
 )
 from opencs.world.scoring import multiplier_floor
+from opencs.world.seating import Applicant, JoinRefused, JoinResult, seat
 from opencs.world.territory import Territory
-from opencs.world.view import ClientView
-from opencs.world.weather import CLIENT_CONDITION, WEATHER_KEY, Weather
+from opencs.world.weather import Weather
 
 log = logging.getLogger("opencs.world")
-
-
-@dataclass(frozen=True, slots=True)
-class JoinResult:
-    """A player joined. ``hello`` is the ``'B'`` to send it (I §7.1)."""
-
-    player_id: int
-    team: int
-    index: int
-    hello: server.Session
-
-
-@dataclass(frozen=True, slots=True)
-class JoinRefused:
-    """A join that cannot be honored."""
-
-    reason: str
 
 
 class City:
@@ -192,54 +173,23 @@ class City:
         back as they were. A new account has no stored row yet and resumes all the same; only a
         player nothing is kept for (``identity`` None: the record could not be read) starts anew."""
         held = [t for key, t in self._reservations.slots(self.config.letter) if key != identity]
-        if len(self._players) + len(held) >= self.config.capacity:
-            return JoinRefused(f"CITY {self.config.letter} IS FULL")
-        taken = {p.index for p in self._players.values() if p.team == team}
-        free = [i for i in range(policy.MAX_PLAYERS_PER_TEAM) if i not in taken]
-        if not free or len(taken) + held.count(team) >= policy.MAX_PLAYERS_PER_TEAM:
-            return JoinRefused(f"{policy.TEAM_NAMES[team]} IS FULL")
-        player_id = self._ids.allocate(IdRange.PLAYER, self._earliest_start())
-        if player_id is None:
-            return JoinRefused("NO FREE PLAYER ID")
-        index = free[0]
-        cfg = self.config
-        try:
-            # Build the 'B' before seating anyone: if it cannot be built, nobody is seated.
-            hello = server.Session(
-                self_id=player_id,
-                index=index,
-                team=team,
-                callsign=callsign.encode("ascii"),
-                network=policy.NETWORK_NAME.encode("ascii"),
-                city=cfg.name.encode("ascii"),
-                max_mult=cfg.max_multiplier,
-                tower_output=cfg.tower_output,
-                max_module_level=cfg.max_module_level,
-            )
-        except Exception:
-            self._ids.release(IdRange.PLAYER, player_id, now)
-            raise
-        player = Player(
-            player_id,
-            callsign,
-            team,
-            index,
-            ClientView(player_id, now),
-            identity=identity,
-            saved=saved,
-            resume=resume if identity is not None else None,
+        seated = seat(
+            self.config,
+            self._players,
+            held,
+            self._ids,
+            self._earliest_start(),
+            Applicant(callsign, team, identity, saved, resume),
+            now,
         )
-        if player.resume is not None:
-            player.score.multiplier = min(player.score.multiplier, cfg.max_multiplier)
-        player.view.hold(player_id)  # the client creates its own pod from 'B' (I §7.1)
-        # A fresh client already shows its own default palette (I §8.20), which is a client fact,
-        # not the city's starting condition: it is sent one only once the weather differs from it.
-        player.view.tell(WEATHER_KEY, CLIENT_CONDITION)
+        if isinstance(seated, JoinRefused):
+            return seated
+        player, hello = seated
         if not self._in_game:
             self._start_game(now)
-        self._players[player_id] = player
+        self._players[player.id] = player
         self._ledger.note(player)
-        return JoinResult(player_id, team, player.index, hello)
+        return JoinResult(player.id, team, player.index, hello)
 
     def leave(self, player_id: int, now: float, *, keep_alive: bool = False) -> list[Event]:
         """A player left (quit or line drop): free its id and delete its pod on the clients that

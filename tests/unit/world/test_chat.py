@@ -10,8 +10,9 @@ from fixtures.spec_vectors import FULL_FRAMES
 from opencs.messages import ServerMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
 from opencs.world import chat
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.events import Event, ToAll, ToPlayer, ToTeam
+from opencs.world.seating import JoinResult
 
 
 def table() -> tuple[City, list[int]]:

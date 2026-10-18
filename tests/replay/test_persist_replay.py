@@ -34,8 +34,9 @@ from opencs.store.base import ProgressRecord
 from opencs.store.memory import MemoryProgressStore
 from opencs.wire.frame import FrameReader
 from opencs.world import player as player_module
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.progress import Progress, SavedProgress
+from opencs.world.seating import JoinResult
 
 KEY = "acct:REPLAY"
 STALE = client.Status(0, 1, 0)  # what a client builds from its empty data image

@@ -33,7 +33,8 @@ from opencs.session.ratelimit import TokenBucket
 from opencs.wire.codec import BYTE_MIN
 from opencs.wire.frame import Frame, FrameReader, build_frame
 from opencs.wire.text import QuitScanner
-from opencs.world.city import City, JoinRefused
+from opencs.world.city import City
+from opencs.world.seating import JoinRefused
 
 if TYPE_CHECKING:
     from opencs.session.session import Session

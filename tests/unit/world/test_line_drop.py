@@ -10,9 +10,10 @@ from fixtures.drops import at, drop, game, player
 from fixtures.lobbies import city
 from fixtures.pods import report
 from opencs.messages import WirePos, client, server
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.orders import Strike
 from opencs.world.resume import ResumeRecord
+from opencs.world.seating import JoinResult
 
 SPOT = WirePos.from_world(2000, 20, 3000)
 

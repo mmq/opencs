@@ -17,7 +17,8 @@ from opencs.routing import Router
 from opencs.store.base import ProgressRecord
 from opencs.store.memory import memory_stores
 from opencs.wire.frame import build_frame
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
+from opencs.world.seating import JoinResult
 
 SHIPPED = Path(__file__).parents[2] / "config" / "server.toml"
 

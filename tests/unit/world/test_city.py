@@ -8,8 +8,9 @@ from fixtures.lobbies import city
 from fixtures.pods import report
 from opencs.messages import ClientMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
-from opencs.world.city import City, JoinRefused, JoinResult
+from opencs.world.city import City
 from opencs.world.events import Event, ToAll, ToHolders, ToPlayer
+from opencs.world.seating import JoinRefused, JoinResult
 
 # I App. A.1: the first frame of a real session (city "CYBERCITY ONE"), tag 11.
 A3_B_FRAME = bytes.fromhex(
