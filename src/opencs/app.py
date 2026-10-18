@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
-from opencs import policy
+from opencs import __version__, policy
 from opencs.admin import AdminServer, resolve_token
 from opencs.cities import CityManager
 from opencs.clock import Clock, MonotonicClock
@@ -282,6 +282,7 @@ def _port(text: str) -> int:
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="opencs", description="OpenCS game server")
+    parser.add_argument("--version", action="version", version=f"opencs {__version__}")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH, help="server.toml path")
     parser.add_argument("--port", type=_port, help="override the configured port (0 = ephemeral)")
     parser.add_argument("--host", help="override the configured host")

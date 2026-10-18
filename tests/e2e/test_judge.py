@@ -31,3 +31,30 @@ def test_judge_checks_1_and_2_pass_login_and_city_selection() -> None:
         re.MULTILINE,
     )
     assert "FAIL" not in result.stdout
+
+
+SMOKE = ROOT / "tools" / "smoke.sh"
+
+
+def test_smoke_script_is_executable_and_runs_all_nineteen_checks() -> None:
+    """Static: the operator's one command must select every check and refuse a short pass."""
+    text = SMOKE.read_text()
+    assert SMOKE.stat().st_mode & 0o111
+    assert "tools/judge.py" in text
+    assert "--checks 1-19" in text
+    assert "-ne 19" in text
+
+
+@pytest.mark.judge
+def test_smoke_script_passes_against_a_fresh_server() -> None:
+    result = subprocess.run(
+        [str(SMOKE)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=TIMEOUT,
+        cwd=ROOT,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert len(re.findall(r"^ok +\d+ ", result.stdout, re.MULTILINE)) == 19
+    assert "smoke: ok (19 of 19 checks passed)" in result.stdout

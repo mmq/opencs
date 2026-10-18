@@ -12,3 +12,6 @@ CYBER/
 *.CBD
 *.CRS
 *.GRS
+*.CFG
+/logs/
+*.db

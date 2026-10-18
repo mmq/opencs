@@ -1,8 +1,8 @@
 # Operating OpenCS
 
 How to run, configure, watch, back up and upgrade the server. Players' instructions are in the player
-guide (M13); the structure is in `DESIGN.md`. Every limit named here is a value in `src/opencs/policy.py`,
-with its reason beside it.
+guide (`PLAYING.md`); installing on a new machine is in `DEPLOYMENT.md`; the structure is in
+`DESIGN.md`. Every limit named here is a value in `src/opencs/policy.py`, with its reason beside it.
 
 ## Running
 
@@ -31,11 +31,14 @@ After=network.target
 User=opencs
 WorkingDirectory=/opt/opencs
 # The admin token is a secret: keep it out of server.toml and out of the process list.
-EnvironmentFile=/etc/opencs/environment            # OPENCS_ADMIN_TOKEN=<at least 16 characters>
+# The file holds OPENCS_ADMIN_TOKEN=<at least 16 characters>.
+EnvironmentFile=-/etc/opencs/environment
 ExecStart=/opt/opencs/.venv/bin/python -m opencs --config /etc/opencs/server.toml --data-dir /var/lib/opencs
-ExecReload=/bin/kill -HUP $MAINPID                 # re-read the city files
-KillSignal=SIGTERM                                  # a graceful stop: players are saved
-TimeoutStopSec=30                                   # more than the 10 s shutdown deadline
+# Re-read the city files.
+ExecReload=/bin/kill -HUP $MAINPID
+# A graceful stop: players are saved. The timeout is more than the 10 s shutdown deadline.
+KillSignal=SIGTERM
+TimeoutStopSec=30
 Restart=on-failure
 ProtectSystem=strict
 ReadWritePaths=/var/lib/opencs /var/log/opencs /var/lib/opencs-captures
