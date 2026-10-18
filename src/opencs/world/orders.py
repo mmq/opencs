@@ -169,10 +169,12 @@ class Orders:
         others = [c for p in self._host.players() if (c := p.view.legs.get(arrival.id)) is not None]
         return self._perform(self.logistics.report(arrival.id, player.id, count, others), now)
 
-    def guppy_home(self, team: int, now: float) -> list[Event]:
+    def guppy_home(self, team: int, now: float) -> list[Event] | None:
         """The operator's failsafe: warp the team's guppy home and reset every client's count of
-        its legs (see ``Logistics.warp_home``). Empty if the team has no guppy."""
-        return self._perform(self.logistics.warp_home(team), now)
+        its legs (see ``Logistics.warp_home``). None if the team has no guppy; an empty list if it
+        was reset but no client holds it."""
+        actions = self.logistics.warp_home(team)
+        return None if actions is None else self._perform(actions, now)
 
     def _perform(self, actions: Sequence[Action], now: float) -> list[Event]:
         """Turn the guppy's decisions into events for the clients that should hear them."""

@@ -57,7 +57,7 @@ def test_a_warp_sends_l_home_to_every_holder_and_nobody_else() -> None:
     c, a, b = stranded()
     outsider = c.join("LATE", 1, 7.0)  # not yet introduced to the guppy
     assert not isinstance(outsider, type(None))
-    out = deliveries(c, c.guppy_home(0, 8.0))
+    out = deliveries(c, c.guppy_home(0, 8.0) or [])
     assert [(pid, m) for pid, m in out if isinstance(m, server.MobileWarp)] == [
         (a, server.MobileWarp(GUPPY, HOME)),
         (b, server.MobileWarp(GUPPY, HOME)),
@@ -86,8 +86,16 @@ def test_after_the_warp_the_clients_arrival_reports_restart_the_work_in_order() 
 
 def test_a_guppy_that_never_existed_is_not_warped() -> None:
     c, _, _ = playing()
-    assert c.guppy_home(0, 8.0) == []
-    assert c.guppy_home(3, 8.0) == []
+    assert c.guppy_home(0, 8.0) is None
+    assert c.guppy_home(3, 8.0) is None
+
+
+def test_a_guppy_nobody_holds_is_reset_and_says_so() -> None:
+    c, a, _b = playing()
+    order(c, a, 1)
+    for p in c.players():
+        p.view.legs.clear()  # no client holds a copy of the guppy
+    assert c.guppy_home(0, 8.0) == []  # it exists and was reset, with no client to tell
 
 
 def test_other_teams_guppies_are_untouched() -> None:
@@ -95,6 +103,5 @@ def test_other_teams_guppies_are_untouched() -> None:
     for pid in (a, b):
         c.client_message(pid, report(0), 1.0)
     c.client_message(b, client.TowerOrder(point(1), 0, 0), 5.0)
-    out = deliveries(c, c.guppy_home(0, 8.0))  # team 0 has no guppy
-    assert out == []
+    assert c.guppy_home(0, 8.0) is None  # team 0 has no guppy
     assert c.orders.logistics.guppy(1) is not None

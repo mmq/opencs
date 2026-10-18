@@ -366,7 +366,7 @@ class City:
         player = self._players.get(player_id)
         return [] if player is None else self.orders.refuse_order(player, message)
 
-    def guppy_home(self, team: int, now: float) -> list[Event]:
+    def guppy_home(self, team: int, now: float) -> list[Event] | None:
         """An operator warps a team's guppy home (M12): see ``Orders.guppy_home``."""
         return self.orders.guppy_home(team, now)
 

@@ -194,6 +194,14 @@ def test_guppy_home_warps_the_teams_guppy_for_every_holder(team: str) -> None:
     assert world.services.cities["A"].orders.logistics.guppy(0) is not None
 
 
+def test_guppy_home_of_a_guppy_nobody_holds_says_it_was_reset() -> None:
+    world, ctl, sinks = guppy_world()
+    for p in world.services.cities["A"].players():
+        p.view.legs.clear()
+    assert ctl.execute("guppy red home") == ["city A: RED guppy warped home, 0 client(s) told"]
+    assert all(s.got == [] for s in sinks.values())
+
+
 def test_guppy_home_with_no_guppy_or_a_bad_team() -> None:
     _, ctl, sinks = guppy_world()
     assert ctl.execute("guppy blue home") == ["no BLUE guppy exists in any city"]

@@ -214,7 +214,7 @@ class Logistics:
     def guppy(self, team: int) -> Guppy | None:
         return self._guppies.get(team)
 
-    def warp_home(self, team: int) -> list[Action]:
+    def warp_home(self, team: int) -> list[Action] | None:
         """The failsafe for a guppy stranded by leg reports that fell out of step (II §14; our
         leg-report rules; see I §9.4.1): put it back at its corner as if it had just been created.
 
@@ -222,10 +222,10 @@ class Logistics:
         that of a new guppy awaiting its create leg: leg 1 in force, nothing acted on. The
         caller resets every client's count to match (``LegCount`` reports 0, owed 1, in step),
         since each client reports the arrival of a warp at once (I §8.14), which is then
-        that create leg. Nothing if the team has no guppy yet."""
+        that create leg. None if the team has no guppy yet."""
         guppy = self._guppies.get(team)
         if guppy is None or guppy.phase is Phase.ABSENT:
-            return []
+            return None
         if guppy.job is not None:
             guppy.queue.insert(0, guppy.job)
             guppy.job = None

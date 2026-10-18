@@ -195,7 +195,7 @@ class Control:
         lines = []
         for letter, city in sorted(self._services.cities.items()):
             events = city.guppy_home(team, now)
-            if events:
+            if events is not None:
                 self._services.router.deliver(city, events)
                 lines.append(
                     f"city {letter}: {policy.TEAM_NAMES[team]} guppy warped home, "
