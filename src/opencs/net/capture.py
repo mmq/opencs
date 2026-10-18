@@ -11,8 +11,9 @@ A capture is a text file, one line per event, exactly the format of ``tests/fixt
 
 ``t`` is seconds since the connection began, three decimals. Frames are taken from the net layer
 at the two boundaries: the client's bytes as they arrive (reassembled into frames with the
-production ``FrameReader``) and the server's frames after the tag is applied. The GEnie logon is
-never recorded, since its lines carry passwords. A capture is bounded: at ``max_bytes`` it writes a
+production ``FrameReader``) and the server's frames after the tag is applied. What the client types
+at the GEnie logon is never recorded, since its lines carry passwords; the server's own prompts may
+appear (they hold nothing secret). A capture is bounded: at ``max_bytes`` it writes a
 note and stops. It is optional and best-effort: a file that cannot be written ends the capture and
 is logged, never the connection.
 """
