@@ -19,6 +19,7 @@ from opencs import policy
 from opencs.clock import Clock
 from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.messages import ServerMessage, server_payload
+from opencs.net.capture import Capture
 from opencs.wire.codec import BYTE_MAX, BYTE_MIN
 from opencs.wire.frame import build_frame
 
@@ -80,7 +81,7 @@ type Outbound = bytes | ServerMessage | _Close
 class Connection:
     """The I/O of one client."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  (one argument per collaborator, each optional but the first five)
         self,
         reader: StreamReader,
         writer: StreamWriter,
@@ -91,8 +92,10 @@ class Connection:
         outbox_limit: int = policy.OUTBOX_LIMIT,
         flush_timeout: float = policy.CLOSE_FLUSH_TIMEOUT,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        capture: Capture | None = None,
     ) -> None:
         self.context = context
+        self._capture = capture
         self._reader = reader
         self._writer = writer
         self._factory = factory
@@ -207,6 +210,8 @@ class Connection:
         with contextlib.suppress(Exception):
             self._writer.close()
             await self._writer.wait_closed()
+        if self._capture is not None:
+            self._capture.close()
         self._log.info("closed")
         self.finished.set()
 
@@ -222,6 +227,8 @@ class Connection:
                 return
             if self._closing or self._aborted or self._session is None:
                 continue  # closing: the session has stopped listening
+            if self._capture is not None:
+                self._capture.client_bytes(data, self._clock.now())
             self._guard(self._session.feed, data)
             self._guard(self._session.tick, self._clock.now())
 
@@ -242,6 +249,10 @@ class Connection:
                     return
                 data = self._frame(item)
                 if data:
+                    if self._capture is not None:
+                        self._capture.server_data(
+                            data, framed=not isinstance(item, bytes), now=self._clock.now()
+                        )
                     self._writer.write(data)
             if self._aborted:
                 return

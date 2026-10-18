@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from opencs import policy
-from opencs.messages import ClientMessage, WirePos, client, server
+from opencs.messages import ClientMessage, WirePos, WireXZ, client, server
 from opencs.messages.catalog import EFFECT_MODULES, is_module_index
 from opencs.messages.fields import GRENADE_KIND
 from opencs.world.events import Event, ToPlayer, ToPlayers
@@ -27,9 +27,12 @@ from opencs.world.logistics import (
     Create,
     Deliver,
     Dispatch,
+    Guppy,
     Logistics,
     ModuleJob,
     TowerJob,
+    WarpHome,
+    home_point,
     in_enemy_no_drop_zone,
     in_home_zone,
 )
@@ -37,6 +40,7 @@ from opencs.world.modules import Drops, ModuleRules, drop_point
 from opencs.world.player import Player
 from opencs.world.structures import Tower, TowerHit
 from opencs.world.territory import Territory
+from opencs.world.view import LegCount
 
 log = logging.getLogger("opencs.world")
 
@@ -165,6 +169,13 @@ class Orders:
         others = [c for p in self._host.players() if (c := p.view.legs.get(arrival.id)) is not None]
         return self._perform(self.logistics.report(arrival.id, player.id, count, others), now)
 
+    def guppy_home(self, team: int, now: float) -> list[Event] | None:
+        """The operator's failsafe: warp the team's guppy home and reset every client's count of
+        its legs (see ``Logistics.warp_home``). None if the team has no guppy; an empty list if it
+        was reset but no client holds it."""
+        actions = self.logistics.warp_home(team)
+        return None if actions is None else self._perform(actions, now)
+
     def _perform(self, actions: Sequence[Action], now: float) -> list[Event]:
         """Turn the guppy's decisions into events for the clients that should hear them."""
         events: list[Event] = []
@@ -179,15 +190,9 @@ class Orders:
                 case Deliver(AirSupportJob() as job):
                     events += self._strike(job, now)
                 case Dispatch(guppy, dest):
-                    # Only clients that count legs for it; one still joining is sent no 'K' for
-                    # this guppy until its copy has reported (I §7.3 step 2).
-                    for p in self._host.players():
-                        count = p.view.legs.get(guppy.entity_id)
-                        if count is not None and not count.joining:
-                            count.owed += 1  # it will report this leg (I §9.4.1)
-                            events.append(
-                                Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id))
-                            )
+                    events += self._dispatch(guppy, dest)
+                case WarpHome(guppy):
+                    events += self._warp_home(guppy)
                 case CatchUp(guppy, player_id, dest):
                     for p in self._host.players():
                         if p.id == player_id:
@@ -195,6 +200,31 @@ class Orders:
                     events.append(
                         Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(player_id))
                     )
+        return events
+
+    def _dispatch(self, guppy: Guppy, dest: WireXZ) -> list[Event]:
+        """``'K'`` to the clients that count legs for the guppy; one still joining is sent none
+        until its copy has reported (I §7.3 step 2)."""
+        events: list[Event] = []
+        for p in self._host.players():
+            count = p.view.legs.get(guppy.entity_id)
+            if count is not None and not count.joining:
+                count.owed += 1  # it will report this leg (I §9.4.1)
+                events.append(Event(server.MobileCreate(guppy.entity_id, dest), ToPlayer(p.id)))
+        return events
+
+    def _warp_home(self, guppy: Guppy) -> list[Event]:
+        """``'L'`` to every holder. Its copy is teleported and reports the arrival at once: a
+        create leg, so its count starts again, in step, owing that one report."""
+        events: list[Event] = []
+        for p in self._host.players():
+            if guppy.entity_id in p.view.legs:
+                p.view.legs[guppy.entity_id] = LegCount(owed=1)
+                events.append(
+                    Event(
+                        server.MobileWarp(guppy.entity_id, home_point(guppy.team)), ToPlayer(p.id)
+                    )
+                )
         return events
 
     def _strike(self, job: AirSupportJob, now: float) -> list[Event]:

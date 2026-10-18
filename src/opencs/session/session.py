@@ -10,10 +10,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from opencs.connlog import ConnectionLog
+from opencs.lobby import replies
 from opencs.lobby.identity import Pilot
 from opencs.lobby.lobby import Member
 from opencs.session.chamber import ChamberPhase
-from opencs.session.ingame import InGamePhase
+from opencs.session.ingame import InGamePhase, Stage
 from opencs.session.io import SessionIO
 from opencs.session.login import LoginPhase
 from opencs.session.phases import Phase, Services
@@ -32,9 +33,13 @@ class Session:
         #: The held game the Chamber launched this session for, taken by the in-game phase.
         self.resuming: ResumeRecord | None = None
         self._active = True
+        #: A line to show in the Chamber when the player is back from a game the server ended
+        #: (an admin kick), so the reason outlives the in-game ``'a'`` line.
+        self.notice: str | None = None
         #: Why the server closed the connection, None while it has not (a drop by the peer).
         self.close_reason: str | None = None
         self._released = False
+        services.sessions.add(self)
         self.phase: Phase = LoginPhase(self)
         self._guard(self.phase.enter)
 
@@ -55,6 +60,7 @@ class Session:
         self._active = False
         if not self._released:
             self._released = True
+            self.services.sessions.remove(self)
             self._guard(self.phase.closed)
             self.leave_lobby()
             if self.pilot is not None:
@@ -83,6 +89,27 @@ class Session:
             self.close_reason = reason
             self.log.info("closing: %s", reason)
             self.io.close(reason)
+
+    def remove(self, notice: str, *, close: bool) -> None:
+        """The server takes this connection out of what it is doing: an admin kick, or shutdown
+        (``close``). A player in a game gets the notice as a system line and an unprompted ``'C'``
+        (I §5.5, I §8.5), which sends its client back to the Chamber exactly as its own quit does:
+        the player leaves cleanly (progress saved, nothing held for ``/RESUME``, no fight test,
+        since this is not the player's doing) and, unless ``close``, the connection carries on as a
+        Chamber session. In the Chamber the notice is a line of text and the connection closes; at
+        the logon it just closes."""
+        if not self._active:
+            return
+        phase = self.phase
+        if isinstance(phase, InGamePhase):
+            if phase.stage is Stage.PLAYING:
+                self.notice = notice
+                phase.remove(notice)
+            if not close:
+                return
+        elif isinstance(phase, ChamberPhase):  # the logon has no Chamber to print a line in
+            self.io.send_raw(replies.render(replies.denied(notice)))
+        self.close(notice)
 
     def set_pilot(self, pilot: Pilot) -> None:
         self.pilot = pilot
@@ -132,6 +159,7 @@ class Session:
     def _switch(self, phase: Phase) -> None:
         self.log.info("phase %s -> %s", type(self.phase).__name__, type(phase).__name__)
         self.phase = phase
+        self.log.context.stream = phase.STREAM
         phase.enter()
 
     def _guard[**P](self, fn: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> None:

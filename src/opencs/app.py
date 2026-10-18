@@ -5,19 +5,27 @@ cleanly on a signal.
 import argparse
 import asyncio
 import logging
+import os
 import random
 import signal
+import sqlite3
 import sys
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 from opencs import policy
+from opencs.admin import AdminServer, resolve_token
+from opencs.cities import CityManager
 from opencs.clock import Clock, MonotonicClock
-from opencs.config import AppConfig, ConfigError, load_config
+from opencs.config import AppConfig, ConfigError, ConfigFile, load_config
 from opencs.connlog import ConnectionContext, ConnectionLog
+from opencs.control import SHUTDOWN_NOTICE, Control, remove_everyone
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
+from opencs.logsetup import configure_logging
+from opencs.net.capture import CaptureFactory
 from opencs.net.connection import ConnectionIO, SessionFactory
 from opencs.net.listener import Listener
 from opencs.routing import Router
@@ -32,6 +40,11 @@ from opencs.store.sqlite import SqliteStore, open_stores
 from opencs.world.city import City
 
 log = logging.getLogger("opencs.app")
+
+
+class StartupError(Exception):
+    """A startup step failed; the message says which one and why, ready to print (exit code 1)."""
+
 
 DEFAULT_CONFIG_PATH = Path("config") / "server.toml"
 
@@ -73,20 +86,26 @@ def build_session_factory(services: Services) -> SessionFactory:
     return factory
 
 
-async def run_city(
-    city: City,
-    router: Router,
-    clock: Clock,
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-) -> None:
-    """Tick one city ``TICK_HZ`` times a second and deliver what it says (DESIGN §3.3). A bug in
-    the city's rules is logged and the next tick runs (DESIGN §5). ``sleep`` is for tests."""
-    while True:
-        await sleep(1 / policy.TICK_HZ)
-        try:
-            router.deliver(city, city.tick(clock.now()))
-        except Exception:
-            log.exception("city %s failed on a tick", city.config.letter)
+@dataclass(frozen=True, slots=True)
+class Seams:
+    """What tests substitute for the real thing. ``stores`` replaces the SQLite file, ``clock`` and
+    ``rng`` the real ones; ``services`` is built by the caller so it can look inside (it owns its
+    stores, so ``stores`` and ``rng`` are then unused). ``tick_sleep`` paces the city and session
+    tickers, which a test pulses by hand instead of waiting; ``shutdown_deadline`` is how long a
+    shutdown waits for connections before aborting them."""
+
+    stores: Stores | None = None
+    clock: Clock | None = None
+    rng: random.Random | None = None
+    services: Services | None = None
+    tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+    shutdown_deadline: float = policy.SHUTDOWN_DEADLINE
+    #: The environment the admin token is looked up in (``os.environ`` when None).
+    environ: Mapping[str, str] | None = None
+    #: Receives the admin channel's bound port once it listens.
+    admin_ready: Callable[[int], None] | None = None
+    #: Paces the countdown of ``shutdown <seconds>``.
+    delay: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
 async def serve(
@@ -94,37 +113,92 @@ async def serve(
     *,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None = None,
-    stores: Stores | None = None,
-    clock: Clock | None = None,
-    rng: random.Random | None = None,
-    services: Services | None = None,
-    tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    config_file: ConfigFile | None = None,
+    seams: Seams = Seams(),  # noqa: B008  (frozen, so one shared default is safe)
 ) -> None:
-    """Listen on the configured address until ``stop`` is set, then close every connection.
+    """Listen on the configured address until ``stop`` is set, then shut down gracefully: every
+    player is told, taken out of its game and saved, and the connections are closed within the
+    shutdown deadline (DESIGN §6).
 
     ``ready`` receives the first bound socket's port once listening (port 0 binds an ephemeral
     one). A host naming several addresses binds several sockets; each is logged. Accounts and
-    progress go to the SQLite file in ``data_dir`` unless ``stores`` says otherwise. ``stores``,
-    ``clock`` and ``rng`` are for tests, as are ``services`` (built by the caller, so it can look
-    inside, and owns its stores; ``stores`` and ``rng`` are then unused) and ``tick_sleep``, the
-    pacing of the city and session tickers (a test pulses it by hand instead of waiting).
+    progress go to the SQLite file in ``data_dir`` unless ``seams`` says otherwise.
     """
-    clock = clock or (services.clock if services else MonotonicClock())
+    services = seams.services
+    clock = seams.clock or (services.clock if services else MonotonicClock())
     database: SqliteStore | None = None
     if services is None:
+        stores = seams.stores
         if stores is None:  # the real thing: accounts and progress in data_dir (DESIGN §2)
-            stores, database = open_stores(config.server.data_dir)
+            try:
+                stores, database = open_stores(config.server.data_dir)
+            except (OSError, sqlite3.Error) as exc:
+                raise StartupError(
+                    f"cannot open the database in {config.server.data_dir}: "
+                    f"{getattr(exc, 'strerror', None) or exc}"
+                ) from exc
             log.info("database %s", config.server.data_dir / policy.DATABASE_FILE_NAME)
-        services = build_services(config, stores=stores, clock=clock, rng=rng)
+        services = build_services(config, stores=stores, clock=clock, rng=seams.rng)
     try:
-        await _listen(config, services, clock, stop, ready, tick_sleep)
+        await _listen(config, services, clock, stop, ready, config_file, seams)
     finally:
         # Connections are closed by now, and each saved its player as it left; this saves anyone
-        # still seated (M12 makes shutdown graceful on top of it).
+        # still seated, and whatever a failed save left waiting for a retry.
         services.persistence.save_all(services.cities.values())
         if database is not None:
             database.close()
     log.info("stopped")
+
+
+def _wall_stamp() -> str:
+    """The wall-clock start of a capture, for its file name: ``YYYY-MM-DD-HHMMSS``."""
+    return datetime.now().strftime("%Y-%m-%d-%H%M%S")
+
+
+def _capture_factory(config: AppConfig) -> CaptureFactory | None:
+    """The wire capture the config asks for, or None (DESIGN §6)."""
+    capture = config.server.capture
+    if not capture.enabled:
+        return None
+    return CaptureFactory(
+        capture.directory, frozenset(capture.callsigns), capture.max_bytes, _wall_stamp
+    )
+
+
+async def _shutdown(
+    services: Services,
+    listener: Listener,
+    cities: CityManager,
+    deadline: float,
+) -> None:
+    """Stop accepting, end every session with the notice (a game with a system line and the
+    unprompted ``'C'``, the Chamber with a line; each player is saved as it leaves), save whoever
+    is still seated, stop the tickers, and close the connections, aborting any that outlast
+    ``deadline`` (DESIGN §6)."""
+    log.info("shutting down")
+    listener.stop_accepting()
+    remove_everyone(services, SHUTDOWN_NOTICE)
+    services.persistence.save_all(services.cities.values())
+    await cities.stop()
+    await listener.stop(deadline)
+
+
+def _on_sighup(cities: CityManager, config_file: ConfigFile | None) -> Callable[[], None]:
+    """Reload the city configuration on SIGHUP, where the platform has it. Returns the function
+    that takes the handler away again."""
+    if config_file is None or not hasattr(signal, "SIGHUP"):
+        return lambda: None
+    loop = asyncio.get_running_loop()
+
+    def reload() -> None:
+        log.info("SIGHUP: reloading the city configuration")
+        cities.reload_file(config_file.path, config_file.server)  # logs its own outcome
+
+    def remove() -> None:
+        loop.remove_signal_handler(signal.SIGHUP)
+
+    loop.add_signal_handler(signal.SIGHUP, reload)
+    return remove
 
 
 async def _listen(
@@ -133,36 +207,66 @@ async def _listen(
     clock: Clock,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None,
-    tick_sleep: Callable[[float], Awaitable[None]],
+    config_file: ConfigFile | None,
+    seams: Seams,
 ) -> None:
-    """Listen until ``stop`` is set, ticking the cities, then close every connection."""
-    listener = Listener(build_session_factory(services), clock, sleep=tick_sleep)
-    server = await listener.start(config.server.host, config.server.port)
-    tickers = [
-        asyncio.create_task(run_city(city, services.router, clock, tick_sleep))
-        for city in services.cities.values()
-    ]
-    bound = [sock.getsockname()[:2] for sock in server.sockets]
-    for address, bound_port in bound:
-        log.info("listening on %s:%d", address, bound_port)
-    port: int = bound[0][1]
-    if ready is not None:
-        ready(port)
+    """Listen until ``stop`` is set, ticking the cities, then shut down gracefully."""
+    token = (
+        None
+        if config.server.admin.port is None
+        else resolve_token(
+            config.server.admin, os.environ if seams.environ is None else seams.environ
+        )
+    )  # before anything starts: a channel without a token must stop the server, not run open
+    listener = Listener(
+        build_session_factory(services),
+        clock,
+        sleep=seams.tick_sleep,
+        capture=_capture_factory(config),
+    )
     try:
+        server = await listener.start(config.server.host, config.server.port)
+    except OSError as exc:
+        raise StartupError(
+            f"cannot listen on {config.server.host}:{config.server.port}: {exc.strerror or exc}"
+        ) from exc
+    cities = CityManager(services, clock, seams.rng or random.Random(), seams.tick_sleep)
+    cities.start()
+    control = Control(services, cities, stop, config_file, delay=seams.delay)
+    admin: AdminServer | None = None
+    reload_signal = _on_sighup(cities, config_file)
+    try:
+        if token is not None and config.server.admin.port is not None:
+            admin = AdminServer(control, token, clock)
+            try:
+                admin_port = await admin.start(config.server.admin.port)
+            except OSError as exc:
+                raise StartupError(
+                    f"cannot listen for the admin channel on {policy.ADMIN_HOST}:"
+                    f"{config.server.admin.port}: {exc.strerror or exc}"
+                ) from exc
+            if seams.admin_ready is not None:
+                seams.admin_ready(admin_port)
+        bound = [sock.getsockname()[:2] for sock in server.sockets]
+        for address, bound_port in bound:
+            log.info("listening on %s:%d", address, bound_port)
+        if ready is not None:
+            ready(bound[0][1])
         await stop.wait()
     finally:
-        for ticker in tickers:
-            ticker.cancel()
-        await asyncio.gather(*tickers, return_exceptions=True)
-        await listener.stop()
+        reload_signal()
+        control.close()
+        if admin is not None:
+            await admin.stop()
+        await _shutdown(services, listener, cities, seams.shutdown_deadline)
 
 
-async def _run(config: AppConfig) -> None:
+async def _run(config: AppConfig, config_file: ConfigFile) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
-    await serve(config, stop=stop)
+    await serve(config, stop=stop, config_file=config_file)
 
 
 def _port(text: str) -> int:
@@ -195,23 +299,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"opencs: {exc}", file=sys.stderr)
         return 2
+    config_file = ConfigFile(args.config, config.server)
     overrides = {
         k: v
         for k, v in (("host", args.host), ("port", args.port), ("data_dir", args.data_dir))
         if v is not None
     }
     config = replace(config, server=replace(config.server, **overrides))
-    logging.basicConfig(
-        level=config.server.log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
     try:
-        asyncio.run(_run(config))
+        configure_logging(config.server.logging)
     except OSError as exc:
-        server = config.server
-        print(
-            f"opencs: cannot listen on {server.host}:{server.port}: {exc.strerror or exc}",
-            file=sys.stderr,
-        )
+        print(f"opencs: cannot open the log file: {exc.strerror or exc}", file=sys.stderr)
+        return 2
+    try:
+        asyncio.run(_run(config, config_file))
+    except ConfigError as exc:
+        print(f"opencs: {exc}", file=sys.stderr)
+        return 2
+    except StartupError as exc:
+        print(f"opencs: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"opencs: cannot start: {exc.strerror or exc}", file=sys.stderr)
         return 1
     return 0

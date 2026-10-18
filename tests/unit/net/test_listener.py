@@ -120,3 +120,61 @@ def test_accepted_sockets_get_keepalive(monkeypatch: pytest.MonkeyPatch) -> None
 
     asyncio.run(scenario())
     assert len(seen) == 1 and seen[0] is not None
+
+
+class StuckConnection:
+    """A connection that ignores ``close`` and ends only when aborted (a peer that never reads,
+    or anything else that does not unwind)."""
+
+    def __init__(self, *, obeys_abort: bool = True) -> None:
+        self.finished = asyncio.Event()
+        self.closed_with: list[str] = []
+        self.aborted_with: list[str] = []
+        self._obeys_abort = obeys_abort
+
+    def close(self, reason: str) -> None:
+        self.closed_with.append(reason)
+
+    def abort(self, reason: str) -> None:
+        self.aborted_with.append(reason)
+        if self._obeys_abort:
+            self.finished.set()
+
+
+def test_stop_aborts_what_outlasts_the_deadline_and_returns() -> None:
+    async def scenario() -> tuple[StuckConnection, StuckConnection]:
+        listener = Listener(factory, ManualClock())
+        await listener.start("127.0.0.1", 0)
+        stuck, kind = StuckConnection(), StuckConnection()
+        kind.finished.set()  # this one closes at once
+        listener._connections[1] = stuck  # type: ignore[assignment]
+        listener._connections[2] = kind  # type: ignore[assignment]
+        await wait(listener.stop(deadline=0.0, grace=1.0))
+        return stuck, kind
+
+    stuck, kind = asyncio.run(scenario())
+    assert stuck.closed_with == ["server shutting down"] and kind.closed_with == stuck.closed_with
+    assert stuck.aborted_with == ["shutdown deadline"]
+
+
+def test_stop_does_not_wait_for_ever_on_a_connection_that_ignores_abort() -> None:
+    async def scenario() -> None:
+        listener = Listener(factory, ManualClock())
+        await listener.start("127.0.0.1", 0)
+        listener._connections[1] = StuckConnection(obeys_abort=False)  # type: ignore[assignment]
+        await wait(listener.stop(deadline=0.0, grace=0.0))
+
+    asyncio.run(scenario())
+
+
+def test_a_connection_that_closes_in_time_is_not_aborted() -> None:
+    async def scenario() -> StuckConnection:
+        listener = Listener(factory, ManualClock())
+        await listener.start("127.0.0.1", 0)
+        quick = StuckConnection()
+        quick.close = lambda reason: quick.finished.set()  # type: ignore[method-assign]
+        listener._connections[1] = quick  # type: ignore[assignment]
+        await wait(listener.stop(deadline=5.0))
+        return quick
+
+    assert asyncio.run(scenario()).aborted_with == []

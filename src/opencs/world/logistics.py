@@ -153,7 +153,15 @@ class CatchUp:
     dest: WireXZ
 
 
-type Action = Create | Dispatch | Deliver | CatchUp
+@dataclass(frozen=True, slots=True)
+class WarpHome:
+    """The guppy is teleported to its home corner (an operator's failsafe, M12): every client that
+    holds it is sent ``'L'``, resets its leg count and will report its arrival at once."""
+
+    guppy: Guppy
+
+
+type Action = Create | Dispatch | Deliver | CatchUp | WarpHome
 
 
 class Guppy:
@@ -205,6 +213,27 @@ class Logistics:
 
     def guppy(self, team: int) -> Guppy | None:
         return self._guppies.get(team)
+
+    def warp_home(self, team: int) -> list[Action] | None:
+        """The failsafe for a guppy stranded by leg reports that fell out of step (II §14; our
+        leg-report rules; see I §9.4.1): put it back at its corner as if it had just been created.
+
+        The job it was flying stays first in its queue, so no order is lost. The state becomes
+        that of a new guppy awaiting its create leg: leg 1 in force, nothing acted on. The
+        caller resets every client's count to match (``LegCount`` reports 0, owed 1, in step),
+        since each client reports the arrival of a warp at once (I §8.14), which is then
+        that create leg. None if the team has no guppy yet."""
+        guppy = self._guppies.get(team)
+        if guppy is None or guppy.phase is Phase.ABSENT:
+            return None
+        if guppy.job is not None:
+            guppy.queue.insert(0, guppy.job)
+            guppy.job = None
+        guppy.phase = Phase.CREATING
+        guppy.legs = 1
+        guppy.acted = -1
+        guppy.dest = home_point(team)
+        return [WarpHome(guppy)]
 
     def queue_full(self, team: int) -> bool:
         """Whether a tower order from ``team`` meets ``MAX_WAITING_TOWER_ORDERS`` waiting jobs

@@ -5,6 +5,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+#: What the connection's bytes are right now (``ConnectionContext.stream``): the GEnie logon, whose
+#: lines hold passwords; the Chamber's text; or the binary game frames. Set by the session on each
+#: phase change so the net layer can capture the wire without knowing phases (DESIGN §6).
+STREAM_LOGIN = "login"
+STREAM_CHAMBER = "chamber"
+STREAM_GAME = "game"
+
 
 class ConnectionContext:
     """What identifies a connection in a log: its id, and its callsign once the player is known.
@@ -18,6 +25,8 @@ class ConnectionContext:
         #: The peer's IP address, which the session layer limits what one source may hold by.
         self.address = address
         self.callsign = "-"
+        #: ``STREAM_*``: what the inbound bytes are now. Capture never records the logon.
+        self.stream = STREAM_LOGIN
 
 
 class ConnectionLog(logging.LoggerAdapter[logging.Logger]):

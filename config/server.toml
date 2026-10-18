@@ -10,12 +10,44 @@ data_dir = "../data"
 # One TOML file per city lives here (II §4.2).
 cities_dir = "cities"
 
-# DEBUG, INFO, WARNING, ERROR or CRITICAL.
-log_level = "INFO"
-
 # The city a bare /PLAY picks when every city is empty (II §4.2: B is the default).
 default_city = "B"
 
 # Guest names (II §3): logged on without a password check, the only names several players may
 # share, each given its own callsign, and never saved. An empty list turns guests off.
 guest_names = ["JOINGENIE"]
+
+[logging]
+# DEBUG, INFO, WARNING, ERROR or CRITICAL, for everything the server logs.
+level = "INFO"
+# A file to log to as well as stderr (relative to this file), rotated at max_bytes, keeping
+# `backups` old files. Absent: stderr only.
+# file = "../logs/opencs.log"
+# max_bytes = 5000000
+# backups = 5
+# The line layout (Python logging format).
+# format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+# A different level for one layer: wire, messages, net, session, lobby, world, routing, store,
+# app, admin or capture.
+# [logging.levels]
+# net = "WARNING"
+# world = "DEBUG"
+
+# Record each connection's wire traffic in the replay-fixture format (tests/fixtures/README.md),
+# one file per connection in `dir`, to turn a bug a player hit into a test. The GEnie logon (with
+# its password) is never recorded. A file stops at max_bytes.
+[capture]
+enabled = false
+# dir = "../captures"
+# Only these pilots (callsigns, upper case); empty or absent: everyone.
+# callsigns = ["ALPHA"]
+# max_bytes = 4000000
+
+# The operator channel (docs/operations.md): a line-oriented TCP port on 127.0.0.1 only, off unless
+# `port` is set. It needs a token of at least 16 characters, given here or (better) in the
+# environment variable named by `token_env` (default OPENCS_ADMIN_TOKEN).
+# [admin]
+# port = 2400
+# token = "a long secret"
+# token_env = "OPENCS_ADMIN_TOKEN"

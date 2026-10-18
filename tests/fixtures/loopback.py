@@ -13,9 +13,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from pathlib import Path
 
-from opencs.app import serve
+from opencs import policy
+from opencs.app import Seams, serve
 from opencs.clock import ManualClock
-from opencs.config import AppConfig, load_config
+from opencs.config import AppConfig, ConfigFile, load_config
 from opencs.messages import ClientMessage, ServerMessage, client_payload, decode_server, server
 from opencs.session.phases import Services
 from opencs.store.base import Stores
@@ -141,7 +142,7 @@ class Client:
         return got
 
 
-async def start(
+async def start(  # noqa: PLR0913  (a test seam: one keyword per thing a test may swap)
     config: AppConfig,
     *,
     clock: ManualClock | None = None,
@@ -149,6 +150,9 @@ async def start(
     stores: Stores | None = None,
     on_disk: bool = False,
     tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    shutdown_deadline: float = policy.SHUTDOWN_DEADLINE,
+    config_file: ConfigFile | None = None,
+    seams: Seams | None = None,
 ) -> tuple[asyncio.Event, asyncio.Task[None], int]:
     stop = asyncio.Event()
     port_future: asyncio.Future[int] = asyncio.get_running_loop().create_future()
@@ -157,10 +161,15 @@ async def start(
             config,
             stop=stop,
             ready=port_future.set_result,
-            clock=clock,
-            services=services,
-            stores=stores or (None if services or on_disk else memory_stores()),
-            tick_sleep=tick_sleep,
+            config_file=config_file,
+            seams=seams
+            or Seams(
+                stores=stores or (None if services or on_disk else memory_stores()),
+                clock=clock,
+                services=services,
+                tick_sleep=tick_sleep,
+                shutdown_deadline=shutdown_deadline,
+            ),
         )
     )
     return stop, task, await asyncio.wait_for(port_future, TIMEOUT)
@@ -175,9 +184,9 @@ def frame(msg: ClientMessage) -> bytes:
     return build_frame(client_payload(msg), terminator=b"\x0a")
 
 
-async def enter(port: int, team: str) -> tuple[Client, server.Session]:
+async def enter(port: int, team: str, account: str = "JOINGENIE") -> tuple[Client, server.Session]:
     c = await connect(port)
-    await c.send("HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r")
+    await c.send(f"HHH\r{account}\r<Not Telling!>\rM 1380;3\r")
     await c.expect(b"\x05PRESS RETURN\r")
     await c.send("\r")
     await c.expect(b"\x05A\r")

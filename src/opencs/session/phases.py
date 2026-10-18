@@ -9,17 +9,19 @@ to the next one unchanged: the client starts sending binary frames right after t
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from collections.abc import MutableMapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, ClassVar
 
 from opencs.clock import Clock
+from opencs.connlog import STREAM_LOGIN
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.routing import Router
 from opencs.session.held import HeldGames
 from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
+from opencs.session.registry import SessionRegistry
 from opencs.wire.text import LineReader
 from opencs.world.city import City
 
@@ -36,16 +38,21 @@ class Services:
     identity: Identity
     lobby: Lobby
     clock: Clock
-    cities: Mapping[str, City]  # the world, by city letter
+    cities: MutableMapping[str, City]  # the world, by city letter (cities.py adds and removes)
     router: Router
     persistence: Persistence
     held: HeldGames  # games held for players whose line dropped (II §13)
     #: Password checks and new accounts, metered across connections (DESIGN §5).
     login_limits: LoginLimits
+    #: Every live session, for the admin channel (DESIGN §6).
+    sessions: SessionRegistry = field(default_factory=SessionRegistry)
 
 
 class Phase(ABC):
     """One phase of a connection. It owns the inbound bytes while it is the current phase."""
+
+    #: What this phase's bytes are (``connlog.STREAM_*``); the logon until a phase says otherwise.
+    STREAM: ClassVar[str] = STREAM_LOGIN
 
     def __init__(self, host: Session) -> None:
         self.host = host

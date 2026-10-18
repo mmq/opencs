@@ -23,12 +23,106 @@ DEFAULT_CITIES_DIR = "cities"
 #: Log level when none is configured. Ours.
 DEFAULT_LOG_LEVEL = "INFO"
 
+#: Layout of a log line when none is configured. Ours (DESIGN §6).
+DEFAULT_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+#: A log file rotates at this many bytes and keeps this many old files. Ours (DESIGN §6): five
+#: files of 5 MB bound the log's disk use at about 30 MB.
+DEFAULT_LOG_MAX_BYTES = 5_000_000
+DEFAULT_LOG_BACKUPS = 5
+MAX_LOG_FILE_BYTES = 1_000_000_000
+MAX_LOG_BACKUPS = 100
+
+#: A wire capture stops at this many bytes of file (DESIGN §6). Ours: a played minute is about
+#: 60 KB of hex (15 frames a second, I §3), so 4 MB covers an hour; the repo's longest fixture
+#: is under 1 MB.
+DEFAULT_CAPTURE_MAX_BYTES = 4_000_000
+MAX_CAPTURE_BYTES = 1_000_000_000
+
+#: The capture directory holds at most this many bytes of capture files (DESIGN §6): before a new
+#: file is made the oldest are removed (and logged) until a full one fits, so captures left on for
+#: everyone cannot fill the disk through reconnects. Ours: fifty full-size files.
+CAPTURE_DIR_MAX_BYTES = 200_000_000
+
+#: Capture files go here by default, relative to the config file. Ours.
+DEFAULT_CAPTURE_DIR = "../captures"
+
+#: The loggers a ``[logging.levels]`` table may set: one per layer (DESIGN §3, §6), named
+#: ``opencs.<layer>``, plus the parts that are not layers.
+LOG_LAYERS = (
+    "wire",
+    "messages",
+    "net",
+    "session",
+    "lobby",
+    "world",
+    "routing",
+    "store",
+    "app",
+    "admin",
+    "capture",
+)
+
 #: Valid TCP port numbers (0 asks the OS for a free one). I §3: transport is TCP.
 MIN_PORT = 0
 MAX_PORT = 65535
 
 #: City ticks per second. I §7.1, II §7: 5 per second.
 TICK_HZ = 5
+
+# --- Operations (DESIGN §6) ----------------------------------------------------------------------
+
+#: A graceful shutdown waits this long for connections to flush and close, then aborts the rest
+#: (DESIGN §6: a shutdown never hangs). Ours: longer than ``CLOSE_FLUSH_TIMEOUT`` (a connection
+#: that does not read is cut by that first), so the deadline only matters when something else is
+#: stuck.
+SHUTDOWN_DEADLINE = 10.0
+
+#: After aborting, how long to wait for the aborted connections to finish unwinding. Ours.
+SHUTDOWN_ABORT_GRACE = 2.0
+
+# --- The admin channel (DESIGN §6) ---------------------------------------------------------------
+
+#: The admin channel listens on the loopback address only; it is not configurable, so a typo in
+#: ``server.toml`` cannot put it on the internet. Ours.
+ADMIN_HOST = "127.0.0.1"
+
+#: The environment variable holding the admin token when ``server.toml`` gives none. Ours.
+ADMIN_TOKEN_ENV = "OPENCS_ADMIN_TOKEN"
+
+#: The shortest token accepted (a guess must not be feasible even without the attempt limit).
+ADMIN_TOKEN_MIN_LENGTH = 16
+
+#: Longest admin line in bytes; a longer one closes the connection. Ours: an announcement is at
+#: most 230 characters (``limits.MAX_CHAT_BYTES``), plus the command word.
+ADMIN_MAX_LINE = 512
+
+#: Most admin connections at once; more are closed at once. Ours: one operator and a script.
+ADMIN_MAX_CONNECTIONS = 4
+
+#: Seconds an admin connection has to send its token, and may then stay silent. Ours.
+ADMIN_AUTH_TIMEOUT = 10.0
+ADMIN_IDLE_TIMEOUT = 600.0
+
+#: Commands per connection: a burst and a sustained rate per second (``TokenBucket``). Ours.
+ADMIN_COMMAND_LIMIT = (20, 5.0)
+
+#: Token attempts, over every admin connection: a burst, then one per ten seconds. Ours: it makes
+#: guessing a token (already long) slower still, and costs the operator nothing.
+ADMIN_AUTH_LIMIT = (5, 0.1)
+
+#: The longest delay ``shutdown <seconds>`` accepts, an hour. Ours.
+ADMIN_MAX_SHUTDOWN_SECONDS = 3600
+
+#: What a kicked pilot is told; the operator's reason, if any, follows ``": "``. Ours.
+ADMIN_KICK_NOTICE = "REMOVED BY AN ADMINISTRATOR"
+
+#: What every player is told when the server is going down; ``shutdown <n>`` adds
+#: ``" IN n SECONDS"``. Ours.
+SHUTDOWN_NOTICE = "SERVER SHUTTING DOWN"
+
+#: What every player is told when a pending ``shutdown <n>`` is canceled. Ours.
+SHUTDOWN_CANCELED_NOTICE = "SHUTDOWN CANCELED"
 
 # --- Connections (DESIGN §3.3, §5) --------------------------------------------------------------
 

@@ -108,6 +108,14 @@ def test_duplicate_letter(tmp_path: Path) -> None:
         load_config(write_config(tmp_path, {"A": CITY, "A2": CITY}))
 
 
+def test_default_city_must_be_enabled(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path, {"A": with_line("enabled = false"), "B": CITY.replace('"A"', '"B"')}
+    )
+    with pytest.raises(ConfigError, match="default_city: 'A' is disabled"):
+        load_config(path)
+
+
 def test_default_city_must_be_loaded(tmp_path: Path) -> None:
     path = write_config(tmp_path, {"A": CITY}, server='default_city = "Z"\n')
     with pytest.raises(ConfigError, match="default_city"):
@@ -134,10 +142,21 @@ def test_unknown_server_key_and_bad_types(tmp_path: Path) -> None:
         ('default_city = "A"\nbogus = 1\n', "bogus"),
         ('default_city = "A"\nport = "x"\n', "port"),
         ('default_city = "A"\nport = 70000\n', "port"),
-        ('default_city = "A"\nlog_level = "LOUD"\n', "log_level"),
+        ('default_city = "A"\n[logging]\nlevel = "LOUD"\n', "logging.level"),
+        ('default_city = "A"\n[logging.levels]\nbogus = "INFO"\n', "logging.levels.bogus"),
+        ('default_city = "A"\n[logging.levels]\nnet = "LOUD"\n', "logging.levels.net"),
+        ('default_city = "A"\n[logging]\nmax_bytes = 0\n', "logging.max_bytes"),
+        ('default_city = "A"\n[logging]\nformat = "%(nope)s"\n', "logging.format"),
     ]:
         with pytest.raises(ConfigError, match=f": {key}:"):
             load_config(write_config(tmp_path, {"A": CITY}, server=text))
+
+
+def test_any_standard_log_record_field_is_a_valid_format(tmp_path: Path) -> None:
+    fmt = "%(asctime)s %(process)d %(funcName)s:%(lineno)d %(message)s"
+    server = f'default_city = "A"\n[logging]\nformat = "{fmt}"\n'
+    config = load_config(write_config(tmp_path, {"A": CITY}, server=server))
+    assert config.server.logging.format == fmt
 
 
 def test_unreadable_and_invalid_files(tmp_path: Path) -> None:
@@ -205,10 +224,10 @@ def test_code_defaults_match_the_shipped_file(tmp_path: Path) -> None:
     shipped = load_config(SHIPPED).server
     bare = load_config(write_config(tmp_path, {"A": CITY})).server
     assert bare.data_dir.relative_to(tmp_path) == shipped.data_dir.relative_to(SHIPPED.parent)
-    assert (bare.host, bare.port, bare.log_level) == (
+    assert (bare.host, bare.port, bare.logging.level) == (
         shipped.host,
         shipped.port,
-        shipped.log_level,
+        shipped.logging.level,
     )
 
 
@@ -385,3 +404,66 @@ def test_a_rain_only_program_has_no_light_spacing_to_check(tmp_path: Path) -> No
 def test_an_unknown_key_in_a_step_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="notes"):
         load_city(tmp_path, '\n[[ambient]]\nafter = 1\nnotes = "x"\n')
+
+
+def test_logging_table_is_read(tmp_path: Path) -> None:
+    text = (
+        'default_city = "A"\n[logging]\nlevel = "debug"\nfile = "logs/x.log"\n'
+        'max_bytes = 100\nbackups = 2\n[logging.levels]\nnet = "warning"\nworld = "ERROR"\n'
+    )
+    logging_config = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.logging
+    assert logging_config.level == "DEBUG"
+    assert logging_config.levels == (("net", "WARNING"), ("world", "ERROR"))
+    assert logging_config.file == tmp_path / "logs" / "x.log"
+    assert (logging_config.max_bytes, logging_config.backups) == (100, 2)
+
+
+def test_capture_table_is_read_and_off_by_default(tmp_path: Path) -> None:
+    assert not load_config(write_config(tmp_path, {"A": CITY})).server.capture.enabled
+    text = (
+        'default_city = "A"\n[capture]\nenabled = true\ndir = "caps"\n'
+        'callsigns = ["alpha", "BRAVO"]\nmax_bytes = 5000\n'
+    )
+    capture = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.capture
+    assert capture.enabled and capture.directory == tmp_path / "caps"
+    assert capture.callsigns == ("ALPHA", "BRAVO") and capture.max_bytes == 5000
+
+
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [("max_bytes = 10", "max_bytes"), ("callsigns = [1]", "callsigns"), ("enabled = 1", "enabled")],
+)
+def test_bad_capture_values_name_the_key(tmp_path: Path, line: str, key: str) -> None:
+    text = f'default_city = "A"\n[capture]\n{line}\n'
+    with pytest.raises(ConfigError, match=f"capture.{key}:"):
+        load_config(write_config(tmp_path, {"A": CITY}, server=text))
+
+
+def test_admin_is_off_by_default_and_reads_its_table(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, {"A": CITY})).server.admin.port is None
+    text = 'default_city = "A"\n[admin]\nport = 2400\ntoken = "0123456789abcdef"\n'
+    admin = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.admin
+    assert (admin.port, admin.token, admin.token_env) == (
+        2400,
+        "0123456789abcdef",
+        "OPENCS_ADMIN_TOKEN",
+    )
+    text = 'default_city = "A"\n[admin]\nport = 0\ntoken_env = "MY_TOKEN"\n'
+    admin = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.admin
+    assert (admin.port, admin.token, admin.token_env) == (0, None, "MY_TOKEN")
+
+
+@pytest.mark.parametrize(
+    ("body", "key"),
+    [
+        ('port = 2400\ntoken = "short"', "admin.token"),
+        ('port = 2399\ntoken = "0123456789abcdef"', "admin.port"),  # the game port
+        ("port = 70000", "admin.port"),
+        ('port = "x"', "admin.port"),
+        ("bogus = 1", "admin.bogus"),
+    ],
+)
+def test_bad_admin_values_name_the_key(tmp_path: Path, body: str, key: str) -> None:
+    text = f'default_city = "A"\n[admin]\n{body}\n'
+    with pytest.raises(ConfigError, match=f"{key}:"):
+        load_config(write_config(tmp_path, {"A": CITY}, server=text))

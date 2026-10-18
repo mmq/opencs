@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from opencs import policy
 from opencs.clock import Clock
 from opencs.connlog import ConnectionContext
+from opencs.net.capture import CaptureFactory
 from opencs.net.connection import Connection, SessionFactory
 
 log = logging.getLogger("opencs.net")
@@ -51,7 +52,9 @@ class Listener:
         max_connections: int = policy.MAX_CONNECTIONS,
         max_per_address: int = policy.MAX_CONNECTIONS_PER_ADDRESS,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        capture: CaptureFactory | None = None,
     ) -> None:
+        self._capture = capture
         self._factory = factory
         self._clock = clock
         self._sleep = sleep
@@ -72,18 +75,40 @@ class Listener:
         self._server = await asyncio.start_server(self._accept, host, port)
         return self._server
 
-    async def stop(self) -> None:
-        """Stop accepting, close every connection (flushing), and wait for them to end."""
-        self._stopping = True  # a connection accepted but not yet handed to us is refused
+    def stop_accepting(self) -> None:
+        """Close the listening sockets; a connection accepted but not yet handed to us is
+        refused."""
+        self._stopping = True
         if self._server is not None:
             self._server.close()
+
+    async def stop(
+        self,
+        deadline: float = policy.SHUTDOWN_DEADLINE,
+        grace: float = policy.SHUTDOWN_ABORT_GRACE,
+    ) -> None:
+        """Stop accepting, close every connection (each flushes what it has queued) and wait for
+        them to end, at most ``deadline`` seconds; whatever is left is aborted and given ``grace``
+        more. A client that never reads, or anything else stuck, cannot hold a shutdown up."""
+        self.stop_accepting()
         connections = list(self._connections.values())
         for connection in connections:
             connection.close("server shutting down")
-        for connection in connections:
-            await connection.finished.wait()
+        waits = [asyncio.ensure_future(c.finished.wait()) for c in connections]
+        if waits:
+            _, pending = await asyncio.wait(waits, timeout=deadline)
+            if pending:
+                log.warning(
+                    "%d connections did not close in %.1f s; aborting", len(pending), deadline
+                )
+                for connection in connections:
+                    connection.abort("shutdown deadline")
+                _, pending = await asyncio.wait(pending, timeout=grace)
+                for wait in pending:
+                    wait.cancel()
         if self._server is not None:
-            await self._server.wait_closed()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._server.wait_closed(), grace)
 
     async def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
@@ -101,13 +126,17 @@ class Listener:
             return
         enable_keepalive(writer.get_extra_info("socket"))
         conn_id = next(self._ids)
+        context = ConnectionContext(conn_id, address)
         connection = Connection(
             reader,
             writer,
             self._factory,
             self._clock,
-            ConnectionContext(conn_id, address),
+            context,
             sleep=self._sleep,
+            capture=None
+            if self._capture is None
+            else self._capture.new(context, self._clock.now()),
         )
         self._connections[conn_id] = connection
         self._per_address[address] += 1

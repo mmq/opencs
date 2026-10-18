@@ -4,9 +4,12 @@
 and wrong types raise ``ConfigError`` naming the file and the key, so a typo fails at startup.
 """
 
+from __future__ import annotations
+
+import logging
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +25,42 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class LoggingConfig:
+    """``[logging]`` in ``server.toml`` (DESIGN §6): the level of everything, a level for chosen
+    layers, the line format and an optional rotating file."""
+
+    level: str = policy.DEFAULT_LOG_LEVEL
+    #: Layer name (``policy.LOG_LAYERS``) -> level, overriding ``level`` for ``opencs.<layer>``.
+    levels: tuple[tuple[str, str], ...] = ()
+    format: str = policy.DEFAULT_LOG_FORMAT
+    file: Path | None = None
+    max_bytes: int = policy.DEFAULT_LOG_MAX_BYTES
+    backups: int = policy.DEFAULT_LOG_BACKUPS
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureConfig:
+    """``[capture]``: record each connection's wire traffic in the replay-fixture format
+    (DESIGN §6). ``callsigns`` limits it to those pilots (empty: everyone)."""
+
+    enabled: bool = False
+    directory: Path = Path(policy.DEFAULT_CAPTURE_DIR)
+    callsigns: tuple[str, ...] = ()
+    max_bytes: int = policy.DEFAULT_CAPTURE_MAX_BYTES
+
+
+@dataclass(frozen=True, slots=True)
+class AdminConfig:
+    """``[admin]``: the local operator channel (DESIGN §6). Off unless ``port`` is given. The token
+    is ``token`` if set, else the environment variable ``token_env`` names; the channel does not
+    start without one."""
+
+    port: int | None = None
+    token: str | None = field(default=None, repr=False)  # never printed
+    token_env: str = policy.ADMIN_TOKEN_ENV
+
+
+@dataclass(frozen=True, slots=True)
 class ServerConfig:
     """Process-wide settings (``server.toml``)."""
 
@@ -29,7 +68,9 @@ class ServerConfig:
     port: int
     data_dir: Path
     cities_dir: Path
-    log_level: str
+    logging: LoggingConfig
+    capture: CaptureConfig
+    admin: AdminConfig
     default_city: str  # II §4.2: the city a bare /PLAY picks when all are empty
     #: Upper case; empty turns guests off (II §3).
     guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES
@@ -82,19 +123,29 @@ class AppConfig:
     cities: tuple[CityConfig, ...]  # sorted by letter
 
 
+@dataclass(frozen=True, slots=True)
+class ConfigFile:
+    """The file the running config came from, for ``reload`` (SIGHUP, the admin channel):
+    ``server`` is what the file said when it was read, before command-line overrides."""
+
+    path: Path
+    server: ServerConfig
+
+
 _REQUIRED: Any = object()  # sentinel: the key has no default
 
 
 class _Table:
     """A TOML table with typed, key-checked access that reports errors with file and key."""
 
-    def __init__(self, path: Path, data: Mapping[str, Any]) -> None:
+    def __init__(self, path: Path, data: Mapping[str, Any], prefix: str = "") -> None:
         self._path = path
         self._data = data
+        self._prefix = prefix
         self._seen: set[str] = set()
 
     def fail(self, key: str, problem: str) -> ConfigError:
-        return ConfigError(f"{self._path}: {key}: {problem}")
+        return ConfigError(f"{self._path}: {self._prefix}{key}: {problem}")
 
     def _get(self, key: str, default: Any, kind: type | tuple[type, ...], kind_name: str) -> Any:
         self._seen.add(key)
@@ -139,6 +190,21 @@ class _Table:
             raise self.fail(key, f"{value} is outside {low:g}..{high:g}")
         return float(value)
 
+    def has(self, key: str) -> bool:
+        return key in self._data
+
+    def table(self, key: str) -> _Table:
+        """A ``[key]`` sub-table (empty when absent), checked like this one."""
+        data: Mapping[str, Any] = self._get(key, {}, dict, "a table")
+        return _Table(self._path, data, f"{self._prefix}{key}.")
+
+    def level(self, key: str, default: str) -> str:
+        """A log level name, upper-cased."""
+        value = self.string(key, default).upper()
+        if value not in LOG_LEVELS:
+            raise self.fail(key, f"must be one of {', '.join(LOG_LEVELS)}")
+        return value
+
     def tables(self, key: str) -> list[Mapping[str, Any]]:
         """An array of TOML tables (``[[key]]``), or an empty list."""
         rows: list[Any] = self._get(key, [], list, "an array of tables")
@@ -166,6 +232,13 @@ class _Table:
         for item in value:
             if not isinstance(item, str) or not item.strip():
                 raise self.fail(key, f"expected a list of non-empty strings, found {item!r}")
+        return tuple(value)
+
+    def string_list(self, key: str) -> tuple[str, ...]:
+        value: list[Any] = self._get(key, [], list, "a list of strings")
+        for item in value:
+            if not isinstance(item, str):
+                raise self.fail(key, f"expected a list of strings, found {item!r}")
         return tuple(value)
 
     def unique_nonempty(self, key: str, values: tuple[int, ...]) -> tuple[int, ...]:
@@ -255,15 +328,81 @@ def _parse_ambient(path: Path, table: _Table) -> tuple[AmbientStep, ...]:
     return tuple(steps)
 
 
+def _parse_logging(path: Path, table: _Table) -> LoggingConfig:
+    """``[logging]``: levels by name, a layer table limited to the known loggers, a rotating file
+    (relative to the config file) with positive limits."""
+    section = table.table("logging")
+    levels_table = section.table("levels")
+    levels = tuple(
+        (layer, levels_table.level(layer, policy.DEFAULT_LOG_LEVEL))
+        for layer in policy.LOG_LAYERS
+        if levels_table.has(layer)
+    )
+    levels_table.done()
+    file_name = section.string("file", "")
+    config = LoggingConfig(
+        level=section.level("level", policy.DEFAULT_LOG_LEVEL),
+        levels=levels,
+        format=section.string("format", policy.DEFAULT_LOG_FORMAT),
+        file=path.parent / file_name if file_name else None,
+        max_bytes=section.integer(
+            "max_bytes", policy.DEFAULT_LOG_MAX_BYTES, low=1, high=policy.MAX_LOG_FILE_BYTES
+        ),
+        backups=section.integer(
+            "backups", policy.DEFAULT_LOG_BACKUPS, low=0, high=policy.MAX_LOG_BACKUPS
+        ),
+    )
+    section.done()
+    try:  # a format the logging module cannot apply fails here, not at 3 a.m.
+        record = logging.makeLogRecord({"name": "opencs", "msg": "probe", "levelname": "INFO"})
+        logging.Formatter(config.format, validate=True).format(record)
+    except (KeyError, ValueError, TypeError) as exc:
+        raise section.fail("format", f"not a valid log format: {exc}") from exc
+    return config
+
+
+def _parse_capture(path: Path, table: _Table) -> CaptureConfig:
+    section = table.table("capture")
+    callsigns = section.string_list("callsigns")
+    config = CaptureConfig(
+        enabled=section.boolean("enabled", False),
+        directory=path.parent / section.string("dir", policy.DEFAULT_CAPTURE_DIR),
+        callsigns=tuple(c.upper() for c in callsigns),
+        max_bytes=section.integer(
+            "max_bytes", policy.DEFAULT_CAPTURE_MAX_BYTES, low=1000, high=policy.MAX_CAPTURE_BYTES
+        ),
+    )
+    section.done()
+    return config
+
+
+def _parse_admin(table: _Table, game_port: int) -> AdminConfig:
+    section = table.table("admin")
+    port = section.optional_integer("port", low=policy.MIN_PORT, high=policy.MAX_PORT)
+    token = section.string("token", "") or None
+    config = AdminConfig(port, token, section.string("token_env", policy.ADMIN_TOKEN_ENV))
+    section.done()
+    if token is not None and len(token) < policy.ADMIN_TOKEN_MIN_LENGTH:
+        raise section.fail("token", f"must be at least {policy.ADMIN_TOKEN_MIN_LENGTH} characters")
+    if port and port == game_port:
+        raise section.fail("port", "must differ from the game port")
+    return config
+
+
 def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
     table = _Table(path, data)
     base = path.parent
+    game_port = table.integer(
+        "port", policy.DEFAULT_PORT, low=policy.MIN_PORT, high=policy.MAX_PORT
+    )
     config = ServerConfig(
         host=table.string("host", policy.DEFAULT_HOST),
-        port=table.integer("port", policy.DEFAULT_PORT, low=policy.MIN_PORT, high=policy.MAX_PORT),
+        port=game_port,
         data_dir=base / table.string("data_dir", policy.DEFAULT_DATA_DIR),
         cities_dir=base / table.string("cities_dir", policy.DEFAULT_CITIES_DIR),
-        log_level=table.string("log_level", policy.DEFAULT_LOG_LEVEL).upper(),
+        logging=_parse_logging(path, table),
+        capture=_parse_capture(path, table),
+        admin=_parse_admin(table, game_port),
         default_city=table.string("default_city", policy.DEFAULT_CITY_LETTER),
         guest_names=tuple(
             name.strip().upper()
@@ -271,8 +410,6 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
         ),
     )
     table.done()
-    if config.log_level not in LOG_LEVELS:
-        raise table.fail("log_level", f"must be one of {', '.join(LOG_LEVELS)}")
     return config
 
 
@@ -364,8 +501,14 @@ def load_config(path: Path | str) -> AppConfig:
         if city.letter in cities:
             raise ConfigError(f"{city_path}: letter: duplicate city letter {city.letter!r}")
         cities[city.letter] = city
-    if server.default_city not in cities:
+    default = cities.get(server.default_city)
+    if default is None:
         raise ConfigError(
             f"{server_path}: default_city: {server.default_city!r} is not a loaded city"
+        )
+    if not default.enabled:  # the lobby must always have a city to offer a new pilot
+        raise ConfigError(
+            f"{server_path}: default_city: {server.default_city!r} is disabled; "
+            "name an enabled city or enable it"
         )
     return AppConfig(server=server, cities=tuple(cities[k] for k in sorted(cities)))

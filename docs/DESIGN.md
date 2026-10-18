@@ -56,7 +56,11 @@ layer knows nothing of players, and the world knows nothing of sockets or bytes.
 ```
 src/opencs/
   __main__.py            python -m opencs [--config PATH]
-  app.py                 wiring and shutdown
+  app.py                 wiring, signals, graceful shutdown
+  cities.py              the city tickers and reloading city config (M12)
+  control.py             the operator's commands as text in, text out (M12)
+  admin.py               the loopback admin channel: token, bounds, carries Control (M12)
+  logsetup.py            [logging] applied to the opencs logger tree (M12)
   config.py              typed config: ServerConfig, CityConfig (validated from TOML)
   policy.py              every value the server chooses (spec I §10), named, each citing its spec section
   clock.py               Clock protocol; MonotonicClock; ManualClock for tests
@@ -71,6 +75,7 @@ src/opencs/
   net/
     listener.py          start_server, connection accounting and limits
     connection.py        Connection: read pump, outbox, write pump, tags
+    capture.py           optional wire capture in the fixture format (M12)
   session/
     phases.py            the phase machine (B.1)
     login.py             GEnie logon (I §5.1)
@@ -78,6 +83,7 @@ src/opencs/
     ingame.py            binary session: decode → city calls; quit handshake (I §5.5)
     persistence.py       loads a record before a join, writes what a city reports changed (II §11.3)
     held.py              the games held for dropped players: windows, reserved slots (II §13)
+    registry.py          every live session, for the operator (M12)
   lobby/
     lobby.py             Lobby: members, locations, city choice, teams (S9)
     commands.py          parsing /PLAY, /CITY, … (pure)

@@ -85,3 +85,12 @@ The "never captured" list above was checked against the whole corpus (363 logs),
 
 `tests/replay/test_fight_replay.py` replays every fixture that has a server side (the pod's `'B'` and the
 `'I'`, `'c'`, `'E'`-`'G'` it was sent): 18 of the 53; the others are client-only logs and are skipped.
+
+### Captures the server writes itself (M12)
+
+With `[capture] enabled = true` in `server.toml` the server writes one file per connection in exactly
+the format above (`c`/`s` Chamber text and `C`/`S` frames; the client's GEnie logon is never recorded,
+so no password reaches a file). To turn a bug a player hit into a fixture: copy the file into
+`tests/fixtures/captures/`, load it with `fixtures.captures.load_capture_file`, and replay it as
+`tests/replay/test_live_capture_replay.py` does. `2026-10-18-120000_001-live-loopback-p1` is such a
+capture of the scripted session in that test (`play_and_capture`), unchanged.

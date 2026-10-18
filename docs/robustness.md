@@ -108,4 +108,19 @@ in policy.
 | delivery to a sink | `Router.deliver` | `test_routing`, `test_containment::test_a_sink_that_raises_does_not_stop_delivery_to_the_rest` |
 | server messages | constructors refuse crash-prone values (`'c'` KIND, `'R'` ranges, `'T'` classes, chat bytes) | `messages/test_server`; every message the 48-hour run emits is encoded into a frame (`longrun/test_city_48h`) |
 
-Out of scope here: the admin channel, capture and graceful shutdown (M12).
+## Operations (M12)
+
+| input / event | bound | on violation | test |
+|---|---|---|---|
+| admin connection | loopback peers only; bound to `127.0.0.1`; `ADMIN_MAX_CONNECTIONS` | closed at once | `test_admin::test_it_listens_on_loopback_only`, `test_only_a_loopback_peer_is_served`, `test_more_connections_than_the_limit_are_closed_at_once` |
+| admin token | at least `ADMIN_TOKEN_MIN_LENGTH`; constant-time compare; `ADMIN_AUTH_TIMEOUT`; `ADMIN_AUTH_LIMIT` attempts over all connections; never logged | denied and closed; no command is run | `test_admin::test_a_wrong_token_is_denied_and_closed`, `test_token_attempts_are_metered_across_connections`, `test_no_token_in_time_closes_without_a_reply`, `test_the_token_never_reaches_a_log_record` |
+| no token configured for an admin port | the server does not start | exit code 2 | `test_admin::test_a_server_whose_admin_port_has_no_token_refuses_to_start`, `test_no_usable_token_means_the_channel_does_not_start` |
+| a local user exhausting the admin channel | accepted trade-off: one shared token-attempt bucket and four slots taken before authentication; see operations.md "The admin channel" | the operator is refused for a while; the game is unaffected | none (a decision, not a bound) |
+| admin line length, rate, silence | `ADMIN_MAX_LINE`, `ADMIN_COMMAND_LIMIT`, `ADMIN_IDLE_TIMEOUT` | closed | `test_admin::test_an_overlong_line_closes_before_and_after_the_token`, `test_commands_over_the_rate_close_the_connection`, `test_a_silent_operator_is_dropped_after_the_idle_timeout` |
+| operator input | every command answers in text and never raises | an error line | `test_control::test_no_operator_input_raises` |
+| a callsign or text in an admin reply | printable ASCII only | other bytes shown as `?` | `test_admin::test_replies_cannot_carry_control_characters` |
+| announce text | printable ASCII, `MAX_CHAT_BYTES` | made printable and cut | `test_control::test_announce_text_is_made_printable_and_cut_to_what_the_client_takes` |
+| shutdown | `SHUTDOWN_DEADLINE`, then connections are aborted | aborted | `net/test_listener::test_stop_aborts_what_outlasts_the_deadline_and_returns`, `test_shutdown::test_a_player_who_never_reads_cannot_hold_the_shutdown_and_is_still_saved` |
+| a shutdown or a kick of a player in a fight | not a death, nothing held | clean leave | `session/test_removal::test_a_kick_under_fire_is_not_a_death_and_holds_nothing` |
+| wire capture | `max_bytes` per file and `CAPTURE_DIR_MAX_BYTES` for the directory (oldest of our files removed first); never the logon; a write error ends the capture only | stops with a note | `net/test_capture::test_a_capture_stops_at_its_cap_with_a_note`, `test_the_logon_is_never_recorded`, `test_an_unwritable_directory_ends_the_capture_not_the_connection`, `test_the_oldest_files_go_when_the_directory_would_pass_its_cap` |
+| an invalid city file at reload | validated whole first | nothing changes | `test_cities::test_an_invalid_file_changes_nothing_not_even_the_valid_parts` |
