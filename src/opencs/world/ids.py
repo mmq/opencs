@@ -27,6 +27,12 @@ class IdRange(Enum):
     STRUCTURE = policy.STRUCTURE_IDS
 
 
+def is_allocatable(entity_id: int) -> bool:
+    """Whether the server ever hands out this id: any other cannot be reused, so there is nothing
+    to guard (and a hostile client's arbitrary ids need not be remembered)."""
+    return any(r.value[0] <= entity_id <= r.value[1] for r in IdRange)
+
+
 class IdAllocator:
     """Ids of one range."""
 

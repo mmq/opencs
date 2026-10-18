@@ -63,3 +63,26 @@ def test_the_senders_own_shot_is_not_a_mismatch_and_relays_the_fields_verbatim()
     assert isinstance(msg, server.Shot)
     assert (msg.id, msg.pos, msg.orient, msg.pitch, msg.kind) == (a, fired.pos, 3196, 0, 12)
     assert c.shooter_mismatches == 0
+
+
+def test_a_relayed_shooter_id_counts_as_possibly_held_by_each_recipient_and_not_by_the_sender() -> (
+    None
+):
+    # I §6.2: the recipient's client may have linked a node under the shot's shooter id.
+    c, (a, b, d) = seat([0, 1, 1])
+    c.client_message(a, shot(4100, kind=2), 1.0)
+    views = {pid: c.player(pid).view for pid in (a, b, d)}  # type: ignore[union-attr]
+    assert views[b].has_had(4100) and views[d].has_had(4100)
+    assert not views[a].has_had(4100)
+
+
+def test_a_shot_that_is_not_relayed_leaves_no_trace_in_the_views() -> None:
+    c, (a, b, _) = seat([0, 1, 1])
+    c.client_message(a, shot(4100, kind=0), 1.0)
+    assert not c.player(b).view.has_had(4100)  # type: ignore[union-attr]
+
+
+def test_a_shooter_id_the_server_never_allocates_is_not_remembered() -> None:
+    c, (a, b, _) = seat([0, 1, 1])
+    c.client_message(a, shot(65000), 1.0)
+    assert not c.player(b).view.has_had(65000)  # type: ignore[union-attr]
