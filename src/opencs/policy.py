@@ -344,9 +344,11 @@ POD_STATE_FALLING = 1
 RELAY_LIMIT_POD_STATE = (12, 8.0)
 
 #: Per-session limit on frames of every kind, before they are decoded: a token bucket ``(burst, per
-#: second)``. The real client sends about ten receive calls' worth a second (I §3: 5 packets per
-#: call, ~50/s at most) and in practice ~2 ``'b'`` a second; this is twice the ceiling with a burst
-#: of four seconds' worth. It bounds the decode work and the replies (a ``Ping`` is answered at
+#: second)``. Sized from what the real client *sends*: in the captures it never sent more than 15
+#: frames in any second nor 123 in any 10 s (about 2 ``'b'`` and 3 ``'c'`` a second plus acks and
+#: pings); this is more than six times that peak, with a burst of two seconds' worth. (I §3's
+#: "5 packets per receive call, ~50/s" bounds what the client *reads*, the opposite direction.) It
+#: bounds the decode work and the replies (a ``Ping`` is answered at
 #: once) a hostile client can cause; excess frames are dropped and counted as bad input. Ours.
 FRAME_LIMIT = (200, 100.0)
 RELAY_LIMIT_SHOT = (40, 16.0)
