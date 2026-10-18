@@ -56,9 +56,17 @@ def test_the_guide_city_table_matches_the_shipped_city_files() -> None:
     }
     output = {0: "Low", 1: "Normal"}
     for city in cities:
-        _, name, map_no, ceiling, towers, level, _hazards = rows[city.letter]
+        _, name, map_no, ceiling, towers, level, hazards = rows[city.letter]
         assert name == city.name
         assert int(map_no) == city.map
         assert int(ceiling) == city.max_multiplier
         assert towers == f"{output[city.tower_output]} output"
         assert level == f"up to level {city.max_module_level}"
+        if city.sentinels:
+            assert f"{city.sentinels} Sentinels" in hazards
+        else:
+            assert "Sentinels" not in hazards
+        if city.muncher_every:
+            assert f"a free Muncher every {int(city.muncher_every // 60)} minutes" in hazards
+        else:
+            assert "Muncher" not in hazards

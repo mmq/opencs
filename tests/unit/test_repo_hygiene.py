@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,17 +18,32 @@ SKIPPED_DIRS = {
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
-    "data",
 }
 GAME_SUFFIXES = {".fun", ".cbd", ".crs", ".grs"}
 GAME_NAMES = {"cs.cfg"}
 NAME = re.compile(r"cyber\s*strike", re.IGNORECASE)
 
 
+def _tracked() -> list[Path] | None:
+    """The files git tracks, or None outside a git checkout."""
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return sorted(ROOT / name for name in out.decode().split("\0") if name)
+
+
 def repo_files() -> Iterator[Path]:
+    """Tracked files; without git, every file but the tool caches and the ignored root ``/data``."""
+    tracked = _tracked()
+    if tracked is not None:
+        yield from (p for p in tracked if p.is_file())
+        return
     for path in sorted(ROOT.rglob("*")):
         rel = path.relative_to(ROOT)
-        if SKIPPED_DIRS & set(rel.parts) or not path.is_file():
+        if SKIPPED_DIRS & set(rel.parts) or rel.parts[0] == "data" or not path.is_file():
             continue
         yield path
 
