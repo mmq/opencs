@@ -363,6 +363,21 @@ def test_an_overlong_line_is_refused_not_relayed() -> None:
     assert not h.io.closed
 
 
+def test_a_stream_of_overlong_lines_is_a_flood_and_closes_the_connection() -> None:
+    h = enter_lobby(make_world())
+    long_line = b"x" * (policy.MAX_LINE_BYTES + 5) + b"\r"
+    h.feed(long_line * (policy.CHAMBER_BURST_LINES + policy.CHAMBER_FLOOD_DROPS + 1))
+    assert h.io.closed
+
+
+def test_overlong_lines_within_the_budget_are_each_refused_and_do_not_close() -> None:
+    h = enter_lobby(make_world())
+    h.take()
+    h.feed((b"x" * (policy.MAX_LINE_BYTES + 5) + b"\r") * 2)
+    assert h.take().count(b"TOO LONG") == 2
+    assert not h.io.closed
+
+
 # --- chat ------------------------------------------------------------------------------------
 
 

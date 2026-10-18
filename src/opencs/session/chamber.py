@@ -114,7 +114,9 @@ class ChamberPhase(TextPhase):
     # --- lines -----------------------------------------------------------------------------
 
     def on_overlong(self) -> None:
-        if self._state is State.LOBBY:
+        """An overlong line is charged to the line bucket like any other, so a stream of them
+        closes the connection as a flood does (DESIGN §5); within the budget it is refused."""
+        if self._state is State.LOBBY and self._within_rate():
             self._say(replies.denied("THAT LINE IS TOO LONG"))
 
     def on_line(self, line: str) -> None:

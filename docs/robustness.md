@@ -14,7 +14,7 @@ minute; I §4.1 says a frame that does not decode is dropped, never a reason to 
 | phase | counted as bad | window and limit | on excess |
 |---|---|---|---|
 | login | a line over `MAX_LINE_BYTES`; more than `LOGIN_MAX_LINES` lines; more than `LOGIN_PREAMBLE_LIMIT` bytes before `HHH` | per connection, lifetime (the phase lasts seconds) | close |
-| Chamber | a line past the token bucket (`CHAMBER_BURST_LINES`, `CHAMBER_LINES_PER_SECOND`): dropped, one warning | `CHAMBER_FLOOD_DROPS` drops in `CHAMBER_FLOOD_WINDOW` s | close |
+| Chamber | a line past the token bucket, an overlong line included (`CHAMBER_BURST_LINES`, `CHAMBER_LINES_PER_SECOND`): dropped, one warning | `CHAMBER_FLOOD_DROPS` drops in `CHAMBER_FLOOD_WINDOW` s | close |
 | in game | a frame failing LEN, CK or its checksum; a payload that does not decode; a frame over the frame bucket (`FRAME_LIMIT`) | `MAX_BAD_INPUT` in `BAD_INPUT_WINDOW` s (`WindowedCounter`) | close ("too much bad input") |
 
 A relayed message over its kind's bucket (`RELAY_LIMIT_*`) is dropped and tallied in the session
@@ -48,7 +48,7 @@ in policy.
 
 | input | bound | on violation | test |
 |---|---|---|---|
-| line length | `MAX_LINE_BYTES` (client armed buffer 512, I §5.2) | line discarded and counted, "too long" | `session/test_chamber::test_an_overlong_line_is_refused_not_relayed`, `wire/test_text` |
+| line length | `MAX_LINE_BYTES` (client armed buffer 512, I §5.2) | line discarded and charged to the line bucket below (so a stream of them closes the connection); within the budget, "too long" | `session/test_chamber::test_an_overlong_line_is_refused_not_relayed`, `test_a_stream_of_overlong_lines_is_a_flood_and_closes_the_connection`, `wire/test_text` |
 | line rate | token bucket, then `CHAMBER_FLOOD_*` | dropped with one warning; close on a sustained flood | `session/test_chamber::test_a_burst_of_chat_is_cut_to_the_budget_and_the_sender_is_warned_once`, `test_sustained_flooding_closes_the_connection`, `test_honest_pace_is_never_limited` |
 | chat text | `CHAT_MAX_CHARS`; bytes outside `0x20..0x7e` stripped | truncated, sanitized | `lobby/test_commands`, `wire/test_text` |
 | idle | `CHAMBER_IDLE_TIMEOUT` (an hour) | told, closed; the account is freed | `session/test_chamber::test_a_silent_chamber_connection_is_closed_after_the_idle_timeout`, `test_a_stale_chamber_connection_frees_its_account` |
