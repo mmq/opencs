@@ -286,12 +286,19 @@ AMBIENT_LIGHTNING_MAX = 1
 
 #: Id ranges, inclusive ``(low, high)``. II §8, all ours. Pod messages
 #: carry the id in one bias10 byte, so only pods need the 0-239 space; everything else stays above.
-PLAYER_IDS = (0, 31)
-RIVAL_POD_IDS = (32, 239)
+#: Players take the whole pod space: no server-driven rival pods exist, and a client that stays for
+#: hours keeps a node for every pod it was introduced to (its registry never unlinks), so a narrow
+#: range would refuse joins in a busy city that never empties (II §8). Ours.
+PLAYER_IDS = (0, 239)
 GUPPY_IDS = (250, 259)
 MUNCHER_IDS = (260, 4095)
 SENTINEL_IDS = (4096, 8191)
 STRUCTURE_IDS = (8192, 32767)  # towers, module drops, mines, called Sentinels
+
+#: How many of the oldest released ids a range looks through for one no connected client has seen,
+#: when it is exhausted. Ours (DESIGN §5): a bound on the work of one allocation, since every
+#: candidate is checked against every client (16 at most).
+ID_REUSE_SCAN = 256
 
 # --- In-game session and pods (I §7.1, I §5.5) -------------------------------------------------
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from opencs.config import CityConfig
 from opencs.messages import ClientMessage, client, server
@@ -59,8 +59,10 @@ class City:
         config: CityConfig,
         rng: random.Random | None = None,
         reservations: Reservations | None = None,
+        id_ranges: Mapping[IdRange, tuple[int, int]] | None = None,
     ) -> None:
         self.config = config
+        self._id_ranges = id_ranges
         #: The slots held for dropped players, which the city keeps room and a world for (II §13
         #: item 4).
         self._reservations = reservations or NoReservations()
@@ -72,7 +74,7 @@ class City:
         #: The block-class map every client is sent once, on its first report (I §7.3).
         self._territory = Territory(config.blocks)
         self._players: dict[int, Player] = {}
-        self._ids = IdSpace()
+        self._ids = IdSpace(id_ranges)
         #: Records that changed since ``take_progress``: the world cannot write them, so it says
         #: what to write (ADR 2) and the session layer persists it.
         self._ledger = ProgressLedger()
@@ -110,6 +112,11 @@ class City:
         }
 
     # --- who is here -------------------------------------------------------------------------
+
+    @property
+    def in_game(self) -> bool:
+        """True from the first player until the world is reset (S13): a held slot keeps it so."""
+        return self._in_game
 
     def players(self) -> Sequence[Player]:
         """Everyone in the city, by id."""
@@ -179,6 +186,7 @@ class City:
             held,
             self._ids,
             self._earliest_start(),
+            self._any_client_has_had,
             Applicant(callsign, team, identity, saved, resume),
             now,
         )
@@ -251,7 +259,7 @@ class City:
     def _reset(self) -> None:
         """Nobody is here: the next game starts fresh (S13)."""
         self._in_game = False
-        self._ids = IdSpace()
+        self._ids = IdSpace(self._id_ranges)
         self._live.clear()
         self.orders.reset()
         self.drops.reset()
@@ -259,6 +267,10 @@ class City:
         self.sentinels.reset()
         self.munchers.reset()
         self.effects.reset()
+
+    def _any_client_has_had(self, entity_id: int) -> bool:
+        """Whether a connected client's registry may hold a node under this id (I §6.2)."""
+        return any(p.view.has_had(entity_id) for p in self._players.values())
 
     def _earliest_start(self) -> float | None:
         """When the longest-connected client started: the id-reuse guard's input (I §6.2, II §8)."""
@@ -346,14 +358,16 @@ class City:
 
     def allocate_structure_id(self) -> int | None:
         """A free id for a tower (II §8)."""
-        return self._ids.allocate(IdRange.STRUCTURE, self._earliest_start())
+        return self._ids.allocate(
+            IdRange.STRUCTURE, self._earliest_start(), self._any_client_has_had
+        )
 
     def release_structure_id(self, entity_id: int, now: float) -> None:
         self._ids.release(IdRange.STRUCTURE, entity_id, now)
 
     def allocate_id(self, which: IdRange) -> int | None:
         """A free id in any range (II §8): an NPC's."""
-        return self._ids.allocate(which, self._earliest_start())
+        return self._ids.allocate(which, self._earliest_start(), self._any_client_has_had)
 
     def release_id(self, which: IdRange, entity_id: int, now: float) -> None:
         self._ids.release(which, entity_id, now)

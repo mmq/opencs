@@ -7,7 +7,7 @@ game and notes the record.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from opencs import policy
@@ -55,6 +55,7 @@ def seat(
     held_teams: list[int],
     ids: IdSpace,
     earliest_start: float | None,
+    holds: Callable[[int], bool],
     applicant: Applicant,
     now: float,
 ) -> tuple[Player, server.Session] | JoinRefused:
@@ -67,7 +68,7 @@ def seat(
     free = [i for i in range(policy.MAX_PLAYERS_PER_TEAM) if i not in taken]
     if not free or len(taken) + held_teams.count(team) >= policy.MAX_PLAYERS_PER_TEAM:
         return JoinRefused(f"{policy.TEAM_NAMES[team]} IS FULL")
-    player_id = ids.allocate(IdRange.PLAYER, earliest_start)
+    player_id = ids.allocate(IdRange.PLAYER, earliest_start, holds)
     if player_id is None:
         return JoinRefused("NO FREE PLAYER ID")
     index = free[0]
