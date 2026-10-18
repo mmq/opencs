@@ -170,7 +170,19 @@ class ClientModel:
     #: Every id this client has been sent a create for: its registry never unlinks one (I §6.2),
     #: so a second create for any of them is a duplicate the client answers badly.
     created: set[int] = field(default_factory=set)
+    #: Guppy and Muncher ids this client has been sent a ``'K'`` for and not seen destroyed: a
+    #: ``'K'`` for any other id is a create (I §8, I §7.3), and ``'L'`` and ``'E'``-``'C'``
+    #: name only these.
+    mobiles: set[int] = field(default_factory=set)
     violations: list[str] = field(default_factory=list)
+
+    def _names_pod(self, what: str, pod_id: int) -> None:
+        if pod_id not in self.held and pod_id != self.self_id:
+            self.violations.append(f"{self.name}: {what} about pod {pod_id} it does not hold")
+
+    def _names_mobile(self, what: str, entity_id: int) -> None:
+        if entity_id not in self.mobiles:
+            self.violations.append(f"{self.name}: {what} for id {entity_id} it holds no copy of")
 
     def absorb(self, *, consume: bool = False) -> list[ServerMessage]:
         """Check every message emitted since the last call and return them. ``consume`` empties
@@ -187,7 +199,7 @@ class ClientModel:
             self._check(msg)
         return pending
 
-    def _check(self, msg: ServerMessage) -> None:
+    def _check(self, msg: ServerMessage) -> None:  # noqa: PLR0912  one branch per message type
         build_frame(server_payload(msg, BYTE_MIN))  # encodes into a valid frame
         if isinstance(msg, server.Session):
             if self.self_id is None:  # the 'B' is repeated until the first frame
@@ -203,6 +215,22 @@ class ClientModel:
             if msg.id in self.created:
                 self.violations.append(f"{self.name}: {type(msg).__name__} twice for id {msg.id}")
             self.created.add(msg.id)
+        elif isinstance(msg, server.MobileCreate):
+            if msg.id not in self.mobiles:  # a new id: this is the create
+                if msg.id in self.created:
+                    self.violations.append(f"{self.name}: 'K' created id {msg.id} twice")
+                self.created.add(msg.id)
+                self.mobiles.add(msg.id)
+        elif isinstance(msg, server.MobileWarp):
+            self._names_mobile("'L'", msg.id)
+        elif isinstance(msg, server.SendMuncher):
+            self._names_mobile("'E'-'C'", msg.muncher)
+        elif isinstance(msg, server.ReleaseDrop):
+            self._names_pod("'A'", msg.id)
+        elif isinstance(msg, server.SetBounty):
+            self._names_pod("'E'-'B'", msg.id)
+        elif isinstance(msg, server.Destroy):
+            self.mobiles.discard(msg.id)  # a pod's 'J' is an explosion; it stays held
         elif isinstance(msg, server.Delete):
             if msg.id not in self.held:
                 self.violations.append(f"{self.name}: 'H' for id {msg.id} it does not hold")

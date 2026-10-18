@@ -81,5 +81,6 @@ def test_ids_are_recycled_across_days_and_never_under_a_client_that_may_hold_the
     sim.run(48)  # a duplicate create to any client would have failed the run
     assert recycled[(0, True)] > 0, recycled  # player ids reused with clients connected
     assert recycled[(8192, True)] + recycled[(8192, False)] > 0, recycled  # towers, drops, mines
+    assert recycled[(260, True)] > 0, recycled  # Muncher ids reused with clients connected
     assert sim.joined > 150
     assert_bounded(sim, 6_000)
