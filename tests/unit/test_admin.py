@@ -367,7 +367,12 @@ def test_the_operator_announces_kicks_and_shuts_down_a_running_server() -> None:
     run(scenario())
 
 
-def test_a_server_whose_admin_port_has_no_token_refuses_to_start() -> None:
+def test_a_server_whose_admin_port_has_no_token_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An empty environment given to the seam means "no token", whatever the shell holds.
+    monkeypatch.setenv(policy.ADMIN_TOKEN_ENV, "x" * 21)
+
     async def scenario() -> None:
         config = local_config()
         config = replace(config, server=replace(config.server, admin=AdminConfig(port=0)))

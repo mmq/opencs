@@ -202,7 +202,9 @@ async def _listen(
     token = (
         None
         if config.server.admin.port is None
-        else resolve_token(config.server.admin, seams.environ or os.environ)
+        else resolve_token(
+            config.server.admin, os.environ if seams.environ is None else seams.environ
+        )
     )  # before anything starts: a channel without a token must stop the server, not run open
     listener = Listener(
         build_session_factory(services),
