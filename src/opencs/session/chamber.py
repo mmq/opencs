@@ -13,6 +13,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
 from opencs import policy
+from opencs.connlog import STREAM_CHAMBER
 from opencs.lobby import commands, replies
 from opencs.lobby.lobby import Denied, Member, Placement
 from opencs.session.badinput import WindowedCounter
@@ -49,6 +50,8 @@ class State(Enum):
 
 class ChamberPhase(TextPhase):
     """Version check, lobby commands, chat relay and the launch."""
+
+    STREAM = STREAM_CHAMBER
 
     def __init__(self, host: Session, *, returning: bool = False, late_quits: int = 0) -> None:
         super().__init__(host)

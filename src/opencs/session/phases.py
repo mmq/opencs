@@ -11,9 +11,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from opencs.clock import Clock
+from opencs.connlog import STREAM_LOGIN
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.routing import Router
@@ -46,6 +47,9 @@ class Services:
 
 class Phase(ABC):
     """One phase of a connection. It owns the inbound bytes while it is the current phase."""
+
+    #: What this phase's bytes are (``connlog.STREAM_*``); the logon until a phase says otherwise.
+    STREAM: ClassVar[str] = STREAM_LOGIN
 
     def __init__(self, host: Session) -> None:
         self.host = host

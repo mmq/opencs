@@ -18,6 +18,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from opencs import policy
+from opencs.connlog import STREAM_GAME
 from opencs.messages import (
     ClientMessage,
     DecodeError,
@@ -62,6 +63,8 @@ class _Sink:
 
 class InGamePhase(Phase):
     """Binary frames in, city calls and routed events out."""
+
+    STREAM = STREAM_GAME
 
     def __init__(self, host: Session) -> None:
         super().__init__(host)

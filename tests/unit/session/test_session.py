@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fixtures.sessions import connect, enter_lobby, make_world
+from fixtures.sessions import connect, enter_lobby, make_world, play
+from opencs.connlog import STREAM_CHAMBER, STREAM_GAME, STREAM_LOGIN
 
 
 def test_an_exception_in_a_phase_closes_that_connection_and_does_not_escape() -> None:
@@ -38,3 +39,11 @@ def test_closed_removes_the_member_and_frees_the_callsign_even_after_an_error() 
     h.session.closed()
     assert world.lobby.find("JOINGENI") is None
     assert not world.identity.callsign_online("JOINGENI")
+
+
+def test_the_connection_context_names_the_stream_of_each_phase() -> None:
+    """The net layer's capture records by this and never records the logon (DESIGN §6)."""
+    world = make_world()
+    assert connect(world).session.log.context.stream == STREAM_LOGIN
+    assert enter_lobby(world).session.log.context.stream == STREAM_CHAMBER
+    assert play(world, account="OTHER").session.log.context.stream == STREAM_GAME

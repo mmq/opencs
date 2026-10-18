@@ -38,6 +38,17 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CaptureConfig:
+    """``[capture]``: record each connection's wire traffic in the replay-fixture format
+    (DESIGN §6). ``callsigns`` limits it to those pilots (empty: everyone)."""
+
+    enabled: bool = False
+    directory: Path = Path(policy.DEFAULT_CAPTURE_DIR)
+    callsigns: tuple[str, ...] = ()
+    max_bytes: int = policy.DEFAULT_CAPTURE_MAX_BYTES
+
+
+@dataclass(frozen=True, slots=True)
 class ServerConfig:
     """Process-wide settings (``server.toml``)."""
 
@@ -46,6 +57,7 @@ class ServerConfig:
     data_dir: Path
     cities_dir: Path
     logging: LoggingConfig
+    capture: CaptureConfig
     default_city: str  # II §4.2: the city a bare /PLAY picks when all are empty
     #: Upper case; empty turns guests off (II §3).
     guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES
@@ -200,6 +212,13 @@ class _Table:
                 raise self.fail(key, f"expected a list of non-empty strings, found {item!r}")
         return tuple(value)
 
+    def string_list(self, key: str) -> tuple[str, ...]:
+        value: list[Any] = self._get(key, [], list, "a list of strings")
+        for item in value:
+            if not isinstance(item, str):
+                raise self.fail(key, f"expected a list of strings, found {item!r}")
+        return tuple(value)
+
     def unique_nonempty(self, key: str, values: tuple[int, ...]) -> tuple[int, ...]:
         """Reject an empty tuple or one with repeats (a typo that should fail at startup)."""
         if not values:
@@ -325,6 +344,21 @@ def _parse_logging(path: Path, table: _Table) -> LoggingConfig:
     return config
 
 
+def _parse_capture(path: Path, table: _Table) -> CaptureConfig:
+    section = table.table("capture")
+    callsigns = section.string_list("callsigns")
+    config = CaptureConfig(
+        enabled=section.boolean("enabled", False),
+        directory=path.parent / section.string("dir", policy.DEFAULT_CAPTURE_DIR),
+        callsigns=tuple(c.upper() for c in callsigns),
+        max_bytes=section.integer(
+            "max_bytes", policy.DEFAULT_CAPTURE_MAX_BYTES, low=1000, high=policy.MAX_CAPTURE_BYTES
+        ),
+    )
+    section.done()
+    return config
+
+
 def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
     table = _Table(path, data)
     base = path.parent
@@ -334,6 +368,7 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
         data_dir=base / table.string("data_dir", policy.DEFAULT_DATA_DIR),
         cities_dir=base / table.string("cities_dir", policy.DEFAULT_CITIES_DIR),
         logging=_parse_logging(path, table),
+        capture=_parse_capture(path, table),
         default_city=table.string("default_city", policy.DEFAULT_CITY_LETTER),
         guest_names=tuple(
             name.strip().upper()

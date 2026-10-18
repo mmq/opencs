@@ -33,3 +33,13 @@ level = "INFO"
 # [logging.levels]
 # net = "WARNING"
 # world = "DEBUG"
+
+# Record each connection's wire traffic in the replay-fixture format (tests/fixtures/README.md),
+# one file per connection in `dir`, to turn a bug a player hit into a test. The GEnie logon (with
+# its password) is never recorded. A file stops at max_bytes.
+[capture]
+enabled = false
+# dir = "../captures"
+# Only these pilots (callsigns, upper case); empty or absent: everyone.
+# callsigns = ["ALPHA"]
+# max_bytes = 4000000

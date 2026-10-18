@@ -401,3 +401,24 @@ def test_logging_table_is_read(tmp_path: Path) -> None:
     assert logging_config.levels == (("net", "WARNING"), ("world", "ERROR"))
     assert logging_config.file == tmp_path / "logs" / "x.log"
     assert (logging_config.max_bytes, logging_config.backups) == (100, 2)
+
+
+def test_capture_table_is_read_and_off_by_default(tmp_path: Path) -> None:
+    assert not load_config(write_config(tmp_path, {"A": CITY})).server.capture.enabled
+    text = (
+        'default_city = "A"\n[capture]\nenabled = true\ndir = "caps"\n'
+        'callsigns = ["alpha", "BRAVO"]\nmax_bytes = 5000\n'
+    )
+    capture = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.capture
+    assert capture.enabled and capture.directory == tmp_path / "caps"
+    assert capture.callsigns == ("ALPHA", "BRAVO") and capture.max_bytes == 5000
+
+
+@pytest.mark.parametrize(
+    ("line", "key"),
+    [("max_bytes = 10", "max_bytes"), ("callsigns = [1]", "callsigns"), ("enabled = 1", "enabled")],
+)
+def test_bad_capture_values_name_the_key(tmp_path: Path, line: str, key: str) -> None:
+    text = f'default_city = "A"\n[capture]\n{line}\n'
+    with pytest.raises(ConfigError, match=f"capture.{key}:"):
+        load_config(write_config(tmp_path, {"A": CITY}, server=text))

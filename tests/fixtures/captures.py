@@ -27,8 +27,13 @@ def capture_names() -> list[str]:
 
 def load_capture(name: str) -> list[CapturedFrame]:
     """Every game frame in one fixture file, in log order. Chamber lines are skipped."""
+    return load_capture_file(DIRECTORY / name)
+
+
+def load_capture_file(path: Path) -> list[CapturedFrame]:
+    """The same, for a capture file anywhere: a fixture, or one the server wrote itself (M12)."""
     frames: list[CapturedFrame] = []
-    for line in (DIRECTORY / name).read_text().splitlines():
+    for line in path.read_text().splitlines():
         if not line or line.startswith("#"):
             continue
         t, kind, hexdata = line.split(" ", 2)

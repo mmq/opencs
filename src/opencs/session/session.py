@@ -132,6 +132,7 @@ class Session:
     def _switch(self, phase: Phase) -> None:
         self.log.info("phase %s -> %s", type(self.phase).__name__, type(phase).__name__)
         self.phase = phase
+        self.log.context.stream = phase.STREAM
         phase.enter()
 
     def _guard[**P](self, fn: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> None:

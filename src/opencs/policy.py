@@ -33,6 +33,15 @@ DEFAULT_LOG_BACKUPS = 5
 MAX_LOG_FILE_BYTES = 1_000_000_000
 MAX_LOG_BACKUPS = 100
 
+#: A wire capture stops at this many bytes of file (DESIGN §6). Ours: a played minute is about
+#: 60 KB of hex (15 frames a second, I §3), so 4 MB covers an hour; the repo's longest fixture
+#: is under 1 MB.
+DEFAULT_CAPTURE_MAX_BYTES = 4_000_000
+MAX_CAPTURE_BYTES = 1_000_000_000
+
+#: Capture files go here by default, relative to the config file. Ours.
+DEFAULT_CAPTURE_DIR = "../captures"
+
 #: The loggers a ``[logging.levels]`` table may set: one per layer (DESIGN §3, §6), named
 #: ``opencs.<layer>``, plus the parts that are not layers.
 LOG_LAYERS = (

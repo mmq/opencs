@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from opencs import policy
 from opencs.clock import Clock
 from opencs.connlog import ConnectionContext
+from opencs.net.capture import CaptureFactory
 from opencs.net.connection import Connection, SessionFactory
 
 log = logging.getLogger("opencs.net")
@@ -51,7 +52,9 @@ class Listener:
         max_connections: int = policy.MAX_CONNECTIONS,
         max_per_address: int = policy.MAX_CONNECTIONS_PER_ADDRESS,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        capture: CaptureFactory | None = None,
     ) -> None:
+        self._capture = capture
         self._factory = factory
         self._clock = clock
         self._sleep = sleep
@@ -101,13 +104,17 @@ class Listener:
             return
         enable_keepalive(writer.get_extra_info("socket"))
         conn_id = next(self._ids)
+        context = ConnectionContext(conn_id, address)
         connection = Connection(
             reader,
             writer,
             self._factory,
             self._clock,
-            ConnectionContext(conn_id, address),
+            context,
             sleep=self._sleep,
+            capture=None
+            if self._capture is None
+            else self._capture.new(context, self._clock.now()),
         )
         self._connections[conn_id] = connection
         self._per_address[address] += 1

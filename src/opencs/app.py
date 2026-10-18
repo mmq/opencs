@@ -10,6 +10,7 @@ import signal
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from opencs import policy
@@ -19,6 +20,7 @@ from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.logsetup import configure_logging
+from opencs.net.capture import CaptureFactory
 from opencs.net.connection import ConnectionIO, SessionFactory
 from opencs.net.listener import Listener
 from opencs.routing import Router
@@ -128,6 +130,21 @@ async def serve(
     log.info("stopped")
 
 
+def _wall_stamp() -> str:
+    """The wall-clock start of a capture, for its file name: ``YYYY-MM-DD-HHMMSS``."""
+    return datetime.now().strftime("%Y-%m-%d-%H%M%S")
+
+
+def _capture_factory(config: AppConfig) -> CaptureFactory | None:
+    """The wire capture the config asks for, or None (DESIGN §6)."""
+    capture = config.server.capture
+    if not capture.enabled:
+        return None
+    return CaptureFactory(
+        capture.directory, frozenset(capture.callsigns), capture.max_bytes, _wall_stamp
+    )
+
+
 async def _listen(
     config: AppConfig,
     services: Services,
@@ -137,7 +154,9 @@ async def _listen(
     tick_sleep: Callable[[float], Awaitable[None]],
 ) -> None:
     """Listen until ``stop`` is set, ticking the cities, then close every connection."""
-    listener = Listener(build_session_factory(services), clock, sleep=tick_sleep)
+    listener = Listener(
+        build_session_factory(services), clock, sleep=tick_sleep, capture=_capture_factory(config)
+    )
     server = await listener.start(config.server.host, config.server.port)
     tickers = [
         asyncio.create_task(run_city(city, services.router, clock, tick_sleep))
