@@ -12,8 +12,9 @@ from __future__ import annotations
 from fixtures.captures import client_messages
 from fixtures.lobbies import city
 from opencs.messages import client
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.combat import HitSet, ShotLog
+from opencs.world.seating import JoinResult
 
 HIT_DEDUP = {
     0: "2026-09-03-123853_001-hit-dedup-p1.txt",

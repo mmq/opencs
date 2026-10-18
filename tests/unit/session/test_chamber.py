@@ -5,6 +5,7 @@ from __future__ import annotations
 from fixtures.lobbies import add, city, fill
 from fixtures.sessions import Harness, World, enter_lobby, login, make_world
 from opencs import policy
+from opencs.lobby.identity import Pilot, Refused
 from opencs.session.chamber import ChamberPhase
 from opencs.session.ingame import InGamePhase
 from opencs.session.login import LoginPhase
@@ -362,6 +363,21 @@ def test_an_overlong_line_is_refused_not_relayed() -> None:
     assert not h.io.closed
 
 
+def test_a_stream_of_overlong_lines_is_a_flood_and_closes_the_connection() -> None:
+    h = enter_lobby(make_world())
+    long_line = b"x" * (policy.MAX_LINE_BYTES + 5) + b"\r"
+    h.feed(long_line * (policy.CHAMBER_BURST_LINES + policy.CHAMBER_FLOOD_DROPS + 1))
+    assert h.io.closed
+
+
+def test_overlong_lines_within_the_budget_are_each_refused_and_do_not_close() -> None:
+    h = enter_lobby(make_world())
+    h.take()
+    h.feed((b"x" * (policy.MAX_LINE_BYTES + 5) + b"\r") * 2)
+    assert h.take().count(b"TOO LONG") == 2
+    assert not h.io.closed
+
+
 # --- chat ------------------------------------------------------------------------------------
 
 
@@ -592,3 +608,34 @@ def test_go_0_then_a_quit_frame_in_one_feed_is_not_parsed_as_text() -> None:
     h.feed(b"/GO 0\r" + b"QUIT\rQUIT\r")
     assert phase_of(h) is InGamePhase
     assert not h.io.closed
+
+
+# --- idle ------------------------------------------------------------------------------------
+
+
+def test_a_silent_chamber_connection_is_closed_after_the_idle_timeout() -> None:
+    h = enter_lobby(make_world())
+    h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
+    assert not h.io.closed
+    h.advance(1)  # the first instant it is over
+    assert h.io.closed_with == ["Chamber idle timeout"]
+    assert b"IDLE TOO LONG" in h.take()
+
+
+def test_a_line_restarts_the_idle_clock() -> None:
+    h = enter_lobby(make_world())
+    h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
+    h.feed("/WHO\r")
+    h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
+    assert not h.io.closed
+    h.advance(1)
+    assert h.io.closed
+
+
+def test_a_stale_chamber_connection_frees_its_account() -> None:
+    world = make_world()
+    h = enter_lobby(world, "PILOT,secret")
+    assert isinstance(world.identity.login("PILOT,secret"), Refused)
+    h.advance(policy.CHAMBER_IDLE_TIMEOUT)
+    h.session.closed()  # the connection reacts to the close
+    assert isinstance(world.identity.login("PILOT,secret"), Pilot)

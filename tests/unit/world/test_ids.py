@@ -77,18 +77,76 @@ def test_ranges_are_independent() -> None:
     assert space.allocate(IdRange.GUPPY, None) == 251
 
 
-def test_the_player_range_holds_32_ids() -> None:
+def test_the_player_range_is_the_whole_pod_byte_space() -> None:
     space = IdSpace()
-    got = [space.allocate(IdRange.PLAYER, None) for _ in range(33)]
-    assert got[:32] == list(range(32))
-    assert got[32] is None
+    got = [space.allocate(IdRange.PLAYER, None) for _ in range(241)]
+    assert got[:240] == list(range(240))  # a pod id is one bias10 byte (II §8)
+    assert got[240] is None
 
 
 def test_id_ranges() -> None:
-    assert IdRange.PLAYER.value == (0, 31)
-    assert IdRange.RIVAL_POD.value == (32, 239)
+    assert IdRange.PLAYER.value == (0, 239)  # ours: rival pods 32-239 are not built
     assert IdRange.GUPPY.value == (250, 259)
     assert IdRange.MUNCHER.value == (260, 4095)
     assert IdRange.SENTINEL.value == (4096, 8191)
     assert IdRange.STRUCTURE.value == (8192, 32767)
-    assert policy.RIVAL_POD_IDS[1] == 239  # the last id a bias10 byte can carry
+    assert policy.PLAYER_IDS[1] == 239  # the last id a bias10 byte can carry
+
+
+def test_an_id_released_twice_is_handed_out_once() -> None:
+    a = exhausted()
+    a.release(5, now=1.0)
+    a.release(5, now=2.0)
+    assert [a.allocate(None), a.allocate(None)] == [5, None]
+
+
+def test_an_id_that_was_never_handed_out_cannot_be_released_into_the_pool() -> None:
+    a = IdAllocator(5, 9)
+    a.allocate(None)  # 5
+    a.release(8, now=1.0)  # still fresh
+    a.release(99, now=1.0)  # outside the range
+    a.release(4, now=1.0)
+    assert [a.allocate(None) for _ in range(5)] == [6, 7, 8, 9, None]
+
+
+def test_a_reused_id_can_be_released_and_reused_again() -> None:
+    a = exhausted()
+    a.release(6, now=1.0)
+    assert a.allocate(None) == 6
+    a.release(6, now=2.0)
+    assert a.allocate(None) == 6
+
+
+# --- the exact guard: what a connected client has been sent -------------------------------------
+
+
+def test_an_id_no_connected_client_has_seen_is_reused_though_a_client_started_before_it() -> None:
+    a = exhausted()
+    a.release(6, now=10.0)
+    assert a.allocate(earliest_start=1.0) is None  # the join-time rule alone refuses
+    assert a.allocate(earliest_start=1.0, holds=lambda i: False) == 6
+
+
+def test_an_id_a_connected_client_has_seen_is_not_reused() -> None:
+    a = exhausted()
+    a.release(6, now=10.0)
+    assert a.allocate(earliest_start=1.0, holds=lambda i: i == 6) is None
+    assert a.allocate(earliest_start=1.0, holds=lambda i: False) == 6  # once it has gone
+
+
+def test_the_first_safe_released_id_is_taken_not_just_the_first_released() -> None:
+    a = exhausted()
+    a.release(5, now=10.0)
+    a.release(6, now=11.0)
+    assert a.allocate(earliest_start=1.0, holds=lambda i: i == 5) == 6
+    assert a.allocate(earliest_start=1.0, holds=lambda i: i == 5) is None  # 5 is still held
+    assert a.allocate(earliest_start=1.0, holds=lambda i: False) == 5
+
+
+def test_only_the_oldest_released_ids_are_looked_through(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(policy, "ID_REUSE_SCAN", 2)
+    a = exhausted(0, 3)
+    for n in range(4):
+        a.release(n, now=10.0 + n)
+    assert a.allocate(earliest_start=1.0, holds=lambda i: i in (0, 1)) is None
+    assert a.allocate(earliest_start=1.0, holds=lambda i: i in (0, 1, 2)) is None

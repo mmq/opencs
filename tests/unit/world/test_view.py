@@ -26,3 +26,12 @@ def test_city_wide_state_is_recorded_apart_from_the_entities_held() -> None:
     view.tell("territory", (1, 2))
     assert view.was_told("territory", (1, 2)) and not view.was_told("territory", (1, 3))
     assert view.held == set()  # nothing but real entity ids is ever held
+
+
+def test_an_id_ever_held_is_remembered_after_it_is_forgotten() -> None:
+    view = ClientView(3, joined_at=0.0)
+    view.hold(9)
+    view.forget(9)
+    assert not view.holds(9)
+    assert view.has_had(9)  # the client's registry never unlinks it (I §6.2)
+    assert not view.has_had(10)

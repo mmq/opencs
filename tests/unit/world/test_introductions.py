@@ -11,9 +11,10 @@ from fixtures.spec_vectors import FULL_FRAMES
 from opencs import policy
 from opencs.messages import ServerMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.events import Event, ToAll, ToPlayer
 from opencs.world.pods import Pod
+from opencs.world.seating import JoinResult
 
 
 def join(c: City, callsign: str, team: int = 0, now: float = 0.0) -> int:

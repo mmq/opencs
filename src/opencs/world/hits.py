@@ -21,6 +21,7 @@ from opencs.world.combat import damage_to_victim
 from opencs.world.effects import Effects
 from opencs.world.events import Event, ToPlayer
 from opencs.world.host import WorldHost
+from opencs.world.ids import is_allocatable
 from opencs.world.orders import Orders
 from opencs.world.player import Player
 from opencs.world.pods import PodPhase
@@ -89,7 +90,15 @@ class Hits:
             level = logging.WARNING if self.unsafe_shots == 1 else logging.DEBUG
             log.log(level, "dropping a shot of KIND %d from player %d", fired.kind, player.id)
             return []
-        return [Event(shot, self._host.playing(but=player.id))]
+        audience = self._host.playing(but=player.id)
+        # The recipient's client may link a node under the shooter's id when it spawns the shot
+        # (I §8.25), which would be one the server never recorded: treat the id as held for
+        # the id-reuse guard (I §6.2, II §8). Conservative, and bounded by the id ranges.
+        if is_allocatable(fired.shooter):
+            for p in self._host.players():
+                if p.id in audience.player_ids:
+                    p.view.ever_held.add(fired.shooter)
+        return [Event(shot, audience)]
 
     def note_fire(self, shooter_id: int, origin: WirePos, now: float, why: str) -> None:
         """A shot or grenade left ``origin``: every pod that is not the shooter's own and not on its

@@ -25,7 +25,8 @@ from fixtures.lobbies import city
 from fixtures.pods import report
 from opencs import policy
 from opencs.messages import ServerMessage, client, server
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
+from opencs.world.seating import JoinResult
 
 OBSERVER = 1
 

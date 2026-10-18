@@ -10,9 +10,10 @@ from fixtures.delivery import deliveries
 from fixtures.lobbies import city
 from fixtures.pods import report
 from opencs.messages import ServerMessage, WirePos, client
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.player import Player
 from opencs.world.resume import ResumeRecord
+from opencs.world.seating import JoinResult
 
 
 class Held:

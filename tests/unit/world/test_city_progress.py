@@ -12,8 +12,9 @@ from fixtures.pods import report
 from opencs import policy
 from opencs.messages import ServerMessage, client, server
 from opencs.wire.codec import BIAS88_MIN
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.progress import ProgressChanged, SavedProgress
+from opencs.world.seating import JoinResult
 
 BAYS = (3, 2, 1, 1, 5, 4, 0, 1, 2)
 STORED = SavedProgress(bays=BAYS, marker=-2, bay_points=957, score=1670, career=500)

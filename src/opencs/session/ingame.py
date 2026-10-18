@@ -33,7 +33,8 @@ from opencs.session.ratelimit import TokenBucket
 from opencs.wire.codec import BYTE_MIN
 from opencs.wire.frame import Frame, FrameReader, build_frame
 from opencs.wire.text import QuitScanner
-from opencs.world.city import City, JoinRefused
+from opencs.world.city import City
+from opencs.world.seating import JoinRefused
 
 if TYPE_CHECKING:
     from opencs.session.session import Session
@@ -83,7 +84,10 @@ class InGamePhase(Phase):
             client.PickupRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
             client.EjectRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
         }
-        self._over_budget = 0
+        self._frame_bucket = TokenBucket(*policy.FRAME_LIMIT, now)
+        #: Messages dropped for exceeding their relay budget: a tally, not bad input (see
+        #: ``handle``).
+        self.relay_drops = 0
         self._stalled_since: float | None = None
         self._city: City | None = None
         self._player_id = -1
@@ -285,6 +289,9 @@ class InGamePhase(Phase):
         failed = self._reader.bad_frames - self._bad_seen
         self._bad_seen = self._reader.bad_frames
         for frame in frames:
+            if not self._frame_bucket.take(now):
+                failed += 1  # over the frame rate: dropped undecoded, counted as bad input
+                continue
             try:
                 message = decode_client(frame.payload)
             except DecodeError as exc:
@@ -292,8 +299,6 @@ class InGamePhase(Phase):
                 self.host.log.debug("undecodable %r frame: %s", frame.type, exc)
                 continue
             self.handle(message)
-        failed += self._over_budget  # frames dropped for exceeding their budget count as bad
-        self._over_budget = 0
         if self._bad.record(now, failed):
             self.host.log.warning(
                 "%d bad frames or messages in %.0f s; closing",
@@ -317,7 +322,10 @@ class InGamePhase(Phase):
             case _:
                 bucket = self._relay_buckets.get(type(message))
                 if bucket is not None and not bucket.take(self.host.now()):
-                    self._over_budget += 1  # dropped: counted with the bad input in ``_process``
+                    # Dropped, but not bad input: an honest client's backlog after a stall of up
+                    # to SILENCE_SECONDS arrives at once and can exceed a budget. The budget bounds
+                    # the relay; the frame bucket and decode failures are the bad-input signal.
+                    self.relay_drops += 1
                     if isinstance(message, client.Shot):
                         self._note_shot(message)  # not relayed, but still a shot (II §9.3)
                     elif isinstance(message, client.TowerOrder | client.ModuleOrder):

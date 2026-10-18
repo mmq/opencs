@@ -55,10 +55,24 @@ CLOSE_FLUSH_TIMEOUT = 5.0
 
 #: TCP keepalive on accepted sockets, so a peer that vanished without a FIN is noticed and its
 #: account freed (DESIGN §5): idle seconds before the first probe, seconds between probes, probes
-#: before the connection is dropped. Ours. (A Chamber idle timeout is M11's.)
+#: before the connection is dropped. Ours.
 KEEPALIVE_IDLE = 60
 KEEPALIVE_INTERVAL = 15
 KEEPALIVE_PROBES = 4
+
+#: Limits on password checks and on new accounts across connections (DESIGN §5 "login attempts"):
+#: PBKDF2 runs on the event loop (~30 ms), so every check is metered. Each is a token bucket
+#: ``(burst, per second)``, per source address and for the whole server. A player mistypes a
+#: password a few times at most; a household behind one address may log several people in at once
+#: (``MAX_CONNECTIONS_PER_ADDRESS``). A first login registers an account (II §3), so
+#: registrations are limited harder: they cost a stored row each. Ours (the spec sets none).
+LOGIN_ATTEMPTS_PER_ADDRESS = (8, 1 / 20)
+LOGIN_ATTEMPTS_GLOBAL = (20, 3.0)
+NEW_ACCOUNTS_PER_ADDRESS = (3, 1 / 300)
+NEW_ACCOUNTS_GLOBAL = (10, 0.5)
+
+#: Most source addresses a limiter tracks; past it the oldest are forgotten. Ours (DESIGN §5).
+MAX_TRACKED_SOURCES = 4096
 
 # --- Cities (II §5, I §9.2, II §5) ----------------------
 
@@ -130,6 +144,13 @@ GENIE_IDLE_TIMEOUT = 900.0
 #: "login attempts"): a real client sends 4 lines and about 20 bytes of modem noise.
 LOGIN_MAX_LINES = 50
 LOGIN_PREAMBLE_LIMIT = 4096
+
+#: Seconds of no bytes from a client in the Chamber before it is closed, so a connection that died
+#: without a FIN cannot hold a real account "already logged in" for ever (TCP keepalive,
+#: ``KEEPALIVE_*``, catches most, but not a peer behind a middlebox that still answers probes).
+#: Players do sit in the Chamber to chat or wait, so this is an hour. Ours (DESIGN §5; our Chamber
+#: idle timeout).
+CHAMBER_IDLE_TIMEOUT = 3600.0
 
 #: How long to wait for the reply to ``PRESS RETURN`` before entering anyway, and for ``/GO`` after
 #: ``E <map> <map>``, in seconds. II §4.1 (5 s), I §5.4, II §4.5 (15 s, a server choice).
@@ -265,12 +286,19 @@ AMBIENT_LIGHTNING_MAX = 1
 
 #: Id ranges, inclusive ``(low, high)``. II §8, all ours. Pod messages
 #: carry the id in one bias10 byte, so only pods need the 0-239 space; everything else stays above.
-PLAYER_IDS = (0, 31)
-RIVAL_POD_IDS = (32, 239)
+#: Players take the whole pod space: no server-driven rival pods exist, and a client that stays for
+#: hours keeps a node for every pod it was introduced to (its registry never unlinks), so a narrow
+#: range would refuse joins in a busy city that never empties (II §8). Ours.
+PLAYER_IDS = (0, 239)
 GUPPY_IDS = (250, 259)
 MUNCHER_IDS = (260, 4095)
 SENTINEL_IDS = (4096, 8191)
 STRUCTURE_IDS = (8192, 32767)  # towers, module drops, mines, called Sentinels
+
+#: How many of the oldest released ids a range looks through for one no connected client has seen,
+#: when it is exhausted. Ours (DESIGN §5): a bound on the work of one allocation, since every
+#: candidate is checked against every client (16 at most).
+ID_REUSE_SCAN = 256
 
 # --- In-game session and pods (I §7.1, I §5.5) -------------------------------------------------
 
@@ -307,12 +335,22 @@ POD_STATE_FALLING = 1
 #: Per-session limits on the client messages the city relays to other players (DESIGN §5 "Input is
 #: hostile"; I §8, I §8.24, I §8.25, I §9.3.5): a token bucket per kind, ``(burst, per second)``.
 #: One relayed frame lands in every other outbox, so an unlimited sender could overflow them and get
-#: the receivers disconnected (``OUTBOX_LIMIT``). Excess frames are dropped and counted as bad
-#: input, so a sustained flood closes the flooder's own connection (``MAX_BAD_INPUT``). Sized from
-#: the real captures, whose peaks per kind are: 'b' 3 in 1 s and 20 in 10 s; shots (Rapid Fire,
-#: Tri-Shot) 3 in 1 s and 17 in 10 s; chat 1 per second; Grenades 1 per second. Each limit is about
-#: four times the sustained peak with a burst of several seconds' worth. Ours.
+#: the receivers disconnected (``OUTBOX_LIMIT``). Excess frames are dropped and tallied, not counted
+#: as bad input: an honest line that stalls for just under ``SILENCE_SECONDS`` delivers its backlog
+#: at once and can exceed a budget. A flood is still caught by ``FRAME_LIMIT``. Sized from the real
+#: captures, whose peaks per kind are: 'b' 3 in 1 s and 20 in 10 s; shots (Rapid Fire, Tri-Shot) 3
+#: in 1 s and 17 in 10 s; chat 1 per second; Grenades 1 per second. Each limit is about four times
+#: the sustained peak with a burst of several seconds' worth. Ours.
 RELAY_LIMIT_POD_STATE = (12, 8.0)
+
+#: Per-session limit on frames of every kind, before they are decoded: a token bucket ``(burst, per
+#: second)``. Sized from what the real client *sends*: in the captures it never sent more than 15
+#: frames in any second nor 123 in any 10 s (about 2 ``'b'`` and 3 ``'c'`` a second plus acks and
+#: pings); this is more than six times that peak, with a burst of two seconds' worth. (I §3's
+#: "5 packets per receive call, ~50/s" bounds what the client *reads*, the opposite direction.) It
+#: bounds the decode work and the replies (a ``Ping`` is answered at
+#: once) a hostile client can cause; excess frames are dropped and counted as bad input. Ours.
+FRAME_LIMIT = (200, 100.0)
 RELAY_LIMIT_SHOT = (40, 16.0)
 RELAY_LIMIT_CHAT = (8, 2.0)
 RELAY_LIMIT_GRENADE = (8, 4.0)
@@ -588,6 +626,14 @@ BATTLE_WINDOW = 20.0
 #: Ours: two covers a player who drops twice, or a household sharing an address. A further drop from
 #: that address is an ordinary leave and holds nothing.
 MAX_HELD_PER_ADDRESS = 2
+
+#: The most seats one address can fill at once: its live connections
+#: (``MAX_CONNECTIONS_PER_ADDRESS``) plus the games held for it. The two limits are independent
+#: on purpose: a held game belongs to a connection that is gone, so counting it against new
+#: connections could lock out the very player who is returning to ``/RESUME``. The held limit must
+#: stay below the connection limit, or a drop could hold more than the address may have had in
+#: play. Ours (DESIGN §5; our per-address limits).
+MAX_SEATS_PER_ADDRESS = MAX_CONNECTIONS_PER_ADDRESS + MAX_HELD_PER_ADDRESS
 
 #: How long the attacks on a pod are remembered: the fight window before the last byte of a line
 #: that went quiet, plus the silence limit before it was noticed, plus a tick of slack (D4, D8).

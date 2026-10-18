@@ -7,7 +7,8 @@ from fixtures.delivery import deliveries, to
 from fixtures.pods import report
 from opencs import policy
 from opencs.messages import client, server
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
+from opencs.world.seating import JoinResult
 
 STEP = policy.BOUNTY_PUSH_INTERVAL
 

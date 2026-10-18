@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import os
 from dataclasses import dataclass
+from typing import Protocol
 
 from opencs import policy
 from opencs.store.base import Account, AccountStore
@@ -20,6 +21,19 @@ def identity_key(callsign: str, account: str | None) -> str:
     """The key a player's record is stored under (II §3): ``acct:NAME`` for a
     real account, else the callsign the lobby assigned (``JOINGENI``, ``JOINGEN2``, ...)."""
     return callsign if account is None else policy.ACCOUNT_KEY_PREFIX + account
+
+
+class LoginGate(Protocol):
+    """Meters the costly steps of a login across connections (DESIGN §5). The session layer
+    supplies one per attempt, knowing the source address; ``Identity`` knows only the two steps."""
+
+    def may_check_password(self) -> bool:
+        """Whether a password check (a PBKDF2 run) may be made now."""
+        ...
+
+    def may_register(self) -> bool:
+        """Whether a new account may be created now."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +82,7 @@ class Identity:
         self._callsigns: set[str] = set()
         self._accounts: set[str] = set()
 
-    def login(self, line: str) -> Pilot | Refused:
+    def login(self, line: str, gate: LoginGate | None = None) -> Pilot | Refused:
         """Resolve an account line (I §5.1): ``NAME,PASSWORD`` or ``NAME``.
 
         - A configured guest name, with or without anything after it, is a guest: it gets a
@@ -76,6 +90,8 @@ class Identity:
         - ``NAME,PASSWORD`` is a real account: the first login registers the password, later
           ones must match, a second simultaneous one is refused (II §3). ``NAME`` alone is
           refused for want of a password.
+
+        ``gate`` meters the password checks and registrations; over its limit the login is refused.
         """
         name, _, password = line.strip().partition(",")
         name = name.strip().upper()
@@ -87,7 +103,7 @@ class Identity:
             return self._guest(name)
         if name == policy.GUEST_ACCOUNT_NAME:
             return Refused("GUEST LOGINS ARE TURNED OFF ON THIS SERVER")
-        return self._account(name, password)
+        return self._account(name, password, gate)
 
     def release(self, pilot: Pilot) -> None:
         """The pilot has gone: free its callsign and account for the next login."""
@@ -108,26 +124,48 @@ class Identity:
             return Refused("THAT NAME IS A REGISTERED ACCOUNT: LOG IN WITH ITS PASSWORD")
         return self._admit(name, None)
 
-    def _account(self, name: str, password: str) -> Pilot | Refused:
+    def _account(self, name: str, password: str, gate: LoginGate | None) -> Pilot | Refused:
+        if (refusal := self._refuse_account(name, password, gate)) is not None:
+            return refusal
+        account = self._store.get(name)
+        if account is None:
+            created = self._register(name, password, gate)
+            if isinstance(created, Refused):
+                return created
+            account = created
+        if account is None or not hmac.compare_digest(
+            account.password_hash, hash_password(password, account.salt, account.iterations)
+        ):
+            return Refused("WRONG PASSWORD")
+        return self._admit(name, name)
+
+    def _refuse_account(self, name: str, password: str, gate: LoginGate | None) -> Refused | None:
+        """The cheap reasons to turn an account login away, before any hashing; the gate last,
+        because it spends an allowance."""
         if not password:
             return Refused("PASSWORD REQUIRED")
         if len(password) > policy.MAX_PASSWORD_LENGTH:
             return Refused("PASSWORD TOO LONG")
         if name in self._accounts:
             return Refused("THAT ACCOUNT IS ALREADY LOGGED IN")
-        account = self._store.get(name)
-        if account is None:
-            salt = os.urandom(policy.PBKDF2_SALT_BYTES)
-            account = Account(
-                name, salt, hash_password(password, salt, self._iterations), self._iterations
-            )
-            if not self._store.create(account):  # lost a race: fall back to checking it
-                account = self._store.get(name)
-        if account is None or not hmac.compare_digest(
-            account.password_hash, hash_password(password, account.salt, account.iterations)
-        ):
-            return Refused("WRONG PASSWORD")
-        return self._admit(name, name)
+        if gate is not None and not gate.may_check_password():
+            return Refused("TOO MANY LOGIN ATTEMPTS: WAIT A MOMENT")
+        return None
+
+    def _register(
+        self, name: str, password: str, gate: LoginGate | None
+    ) -> Account | Refused | None:
+        """The first login of an account stores its password. None: another login registered the
+        name first and it is no longer there to read."""
+        if gate is not None and not gate.may_register():
+            return Refused("TOO MANY NEW ACCOUNTS: TRY AGAIN LATER")
+        salt = os.urandom(policy.PBKDF2_SALT_BYTES)
+        account = Account(
+            name, salt, hash_password(password, salt, self._iterations), self._iterations
+        )
+        if self._store.create(account):
+            return account
+        return self._store.get(name)  # lost a race: check against the winner's
 
     def _admit(self, name: str, account: str | None) -> Pilot | Refused:
         callsign = self._allocate_callsign(name)

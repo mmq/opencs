@@ -12,7 +12,8 @@ from fixtures.spec_vectors import FULL_FRAMES
 from opencs.messages import client, decode_client, decode_server, server, server_payload
 from opencs.wire.frame import build_frame
 from opencs.world import relay
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
+from opencs.world.seating import JoinResult
 
 
 @pytest.mark.parametrize(("sent", "relayed"), [(4, 0), (2, 0), (0, 0), (1, 1)])

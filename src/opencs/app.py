@@ -22,6 +22,7 @@ from opencs.net.connection import ConnectionIO, SessionFactory
 from opencs.net.listener import Listener
 from opencs.routing import Router
 from opencs.session.held import HeldGames
+from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
 from opencs.session.phases import Services
 from opencs.session.session import Session
@@ -52,7 +53,14 @@ def build_services(
     lobby = Lobby(config.cities, config.server.default_city, rng, held)
     cities = {c.letter: City(c, rng, held) for c in config.cities if c.enabled}
     return Services(
-        identity, lobby, clock, cities, Router(), Persistence(stores.progress, clock), held
+        identity,
+        lobby,
+        clock,
+        cities,
+        Router(),
+        Persistence(stores.progress, clock),
+        held,
+        LoginLimits(clock),
     )
 
 

@@ -18,7 +18,8 @@ from opencs.messages import (
     server,
 )
 from opencs.wire.frame import FrameReader
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
+from opencs.world.seating import JoinResult
 
 P1_LOG = "2026-10-16-154139_004-grenade-relay-p1.txt"
 P2_LOG = "2026-10-16-154139_005-grenade-relay-p2.txt"

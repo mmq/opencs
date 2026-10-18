@@ -8,8 +8,10 @@ from fixtures.lobbies import city
 from fixtures.pods import report
 from opencs.messages import ClientMessage, client, server, server_payload
 from opencs.wire.frame import build_frame
-from opencs.world.city import City, JoinRefused, JoinResult
+from opencs.world.city import City
 from opencs.world.events import Event, ToAll, ToHolders, ToPlayer
+from opencs.world.ids import IdRange
+from opencs.world.seating import JoinRefused, JoinResult
 
 # I App. A.1: the first frame of a real session (city "CYBERCITY ONE"), tag 11.
 A3_B_FRAME = bytes.fromhex(
@@ -19,6 +21,12 @@ A3_B_FRAME = bytes.fromhex(
 
 def cyber_city_one() -> City:
     return City(city("A", name="CYBERCITY ONE", map=1, max_multiplier=8, tower_output=1))
+
+
+def narrow_city() -> City:
+    """A city whose player ids run 0..31, so a short test exhausts them."""
+    config = city("A", name="CYBERCITY ONE", map=1, max_multiplier=8, tower_output=1)
+    return City(config, id_ranges={IdRange.PLAYER: (0, 31)})
 
 
 def joined(c: City, callsign: str = "JOINGENI", team: int = 0, now: float = 0.0) -> JoinResult:
@@ -125,24 +133,38 @@ def test_leaving_deletes_the_pod_on_the_other_clients_that_hold_it() -> None:
     assert c.leave(a, 6.0) == []  # twice is harmless
 
 
-def churn(c: City, count: int) -> None:
-    """``count`` players join team 3 and leave again, one after the other, from t=1."""
+def churn(c: City, count: int, seen_by: int | None = None) -> None:
+    """``count`` players join team 3 and leave again, one after the other, from t=1. ``seen_by`` is
+    a player id whose client is introduced to each of them (and so keeps a node for its id)."""
     for i in range(count):
         pid = joined(c, "T", 3, now=1.0 + i).player_id
+        if seen_by is not None:
+            watcher = c.player(seen_by)
+            assert watcher is not None
+            watcher.view.hold(pid)
         c.leave(pid, 1.5 + i)
 
 
 def test_an_exhausted_id_range_is_refused_while_an_old_client_may_hold_the_ids() -> None:
-    c = cyber_city_one()
-    joined(c, "OLD", 0, now=0.0)  # id 0, started before every release below
-    churn(c, 31)  # ids 1..31 used and released
+    c = narrow_city()
+    old = joined(c, "OLD", 0, now=0.0).player_id  # id 0, started before every release below
+    churn(c, 31, seen_by=old)  # ids 1..31 used and released, all seen by OLD
     assert isinstance(c.join("LATE", 2, 50.0), JoinRefused)
 
 
+def test_an_old_client_that_was_never_introduced_does_not_hold_the_range_up() -> None:
+    """A client that stays for hours has not seen the pods that came and went without a report to
+    introduce them: reuse needs only that no client has a node under the id (I §6.2, II §8)."""
+    c = narrow_city()
+    joined(c, "OLD", 0, now=0.0)
+    churn(c, 31)  # ids 1..31 used and released, none introduced to OLD
+    assert joined(c, "LATE", 2, now=50.0).player_id == 1
+
+
 def test_released_ids_are_reused_earliest_first_once_every_client_started_after_them() -> None:
-    c = cyber_city_one()
+    c = narrow_city()
     old = joined(c, "OLD", 0, now=0.0).player_id
-    churn(c, 30)  # ids 1..30, released at 1.5 .. 30.5
+    churn(c, 30, seen_by=old)  # ids 1..30, released at 1.5 .. 30.5, all seen by OLD
     assert joined(c, "NEW", 2, now=35.0).player_id == 31  # the last fresh id
     assert isinstance(c.join("WAIT", 1, 36.0), JoinRefused)  # OLD (t=0) may hold every released id
     c.leave(old, 40.0)

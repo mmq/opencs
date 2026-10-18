@@ -7,8 +7,9 @@ from dataclasses import dataclass, field
 from fixtures.lobbies import city
 from opencs.messages import ServerMessage, server
 from opencs.routing import Router
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
 from opencs.world.events import Event, ToAll, ToAllExcept, ToHolders, ToPlayer, ToPlayers, ToTeam
+from opencs.world.seating import JoinResult
 
 
 @dataclass

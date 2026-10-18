@@ -61,6 +61,10 @@ class ClientView:
     player_id: int
     joined_at: float
     held: set[int] = field(default_factory=set)
+    #: Every id this client has ever been told exists, deleted or not. Its registry never unlinks a
+    #: node (I §6.2), so these are the ids that must not be given to a new entity while it is
+    #: connected. Bounded by the id ranges.
+    ever_held: set[int] = field(default_factory=set)
     #: Guppy id -> this client's leg count, for each guppy it holds (I §7.3).
     legs: dict[int, LegCount] = field(default_factory=dict)
     #: Muncher id -> this client's copy of it, for each Muncher it holds (I §7.3).
@@ -72,6 +76,11 @@ class ClientView:
     def hold(self, entity_id: int) -> None:
         """The client has been told this entity exists."""
         self.held.add(entity_id)
+        self.ever_held.add(entity_id)
+
+    def has_had(self, entity_id: int) -> bool:
+        """Whether the client's registry may still have a node under this id (I §6.2)."""
+        return entity_id in self.ever_held
 
     def forget(self, entity_id: int) -> None:
         """The client no longer holds it (it was deleted)."""

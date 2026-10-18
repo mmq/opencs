@@ -7,7 +7,8 @@ from collections.abc import Sequence
 from fixtures.lobbies import city
 from fixtures.pods import report
 from opencs.messages import ServerMessage
-from opencs.world.city import City, JoinResult
+from opencs.world.city import City
+from opencs.world.seating import JoinResult
 
 
 def seat(

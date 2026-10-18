@@ -8,7 +8,8 @@ from fixtures.drops import Held, game
 from fixtures.lobbies import city
 from opencs import policy
 from opencs.messages import WirePos, client
-from opencs.world.city import City, JoinRefused, JoinResult
+from opencs.world.city import City
+from opencs.world.seating import JoinRefused, JoinResult
 
 TOWER = WirePos.from_world(900, 20, 900)
 
