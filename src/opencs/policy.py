@@ -610,6 +610,14 @@ BATTLE_WINDOW = 20.0
 #: that address is an ordinary leave and holds nothing.
 MAX_HELD_PER_ADDRESS = 2
 
+#: The most seats one address can fill at once: its live connections
+#: (``MAX_CONNECTIONS_PER_ADDRESS``) plus the games held for it. The two limits are independent
+#: on purpose: a held game belongs to a connection that is gone, so counting it against new
+#: connections could lock out the very player who is returning to ``/RESUME``. The held limit must
+#: stay below the connection limit, or a drop could hold more than the address may have had in
+#: play. Ours (DESIGN §5; our per-address limits).
+MAX_SEATS_PER_ADDRESS = MAX_CONNECTIONS_PER_ADDRESS + MAX_HELD_PER_ADDRESS
+
 #: How long the attacks on a pod are remembered: the fight window before the last byte of a line
 #: that went quiet, plus the silence limit before it was noticed, plus a tick of slack (D4, D8).
 ATTACK_HISTORY = BATTLE_WINDOW + SILENCE_SECONDS + 5.0
