@@ -87,6 +87,9 @@ class ChamberPhase(TextPhase):
             self._late_reply_possible = True
             self._late_quit_until = self.host.now() + policy.LATE_QUIT_WINDOW
             self._open_lobby()
+            if self.host.notice is not None:  # the server ended the game (I §5.5)
+                self._say(replies.denied(self.host.notice))
+                self.host.notice = None
             return
         self._member = self.host.join_lobby()
         self._deadline = self.host.now() + policy.VERSION_WAIT

@@ -28,6 +28,7 @@ from opencs.messages import (
     server,
     server_payload,
 )
+from opencs.messages.limits import CHAT_STYLE_OPEN, SYSTEM_SENDER
 from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import Phase
 from opencs.session.ratelimit import TokenBucket
@@ -201,9 +202,9 @@ class InGamePhase(Phase):
     @staticmethod
     def _close_runs_fight_test(reason: str | None) -> bool:
         """Whether a close the server made is judged like a drop: yes for what the peer caused
-        (bad input, a stalled frame). The seam for M12: a close for shutdown or by an admin is not
-        the player's doing and should return False for its reasons (our rule for a server-side close
-        in a fight; see I §5.5 (unprompted Quit), II §13)."""
+        (bad input, a stalled frame). A removal for shutdown or by an admin never gets here: it
+        goes through ``remove``, which leaves the city cleanly first (our rule for a server-side
+        close in a fight; see I §5.5 (unprompted Quit), II §13)."""
         return True
 
     def _line_dropped(self, fight_at: float, *, by_server: bool = False) -> None:
@@ -401,6 +402,13 @@ class InGamePhase(Phase):
             self._stalled_since = now if self._reader.pending else None
 
     # --- the quit handshake ------------------------------------------------------------------
+
+    def remove(self, notice: str) -> None:
+        """The server ends the player's game: the reason on its screen as a system line, then the
+        quit handshake as if the player had asked (I §5.5, I §8.5, an unprompted ``'C'``)."""
+        text = server.sanitize_chat(notice.encode("ascii", "replace"))
+        self.host.io.send(server.Chat(SYSTEM_SENDER, CHAT_STYLE_OPEN, text))
+        self._begin_quit(self.host.now())
 
     def _begin_quit(self, now: float) -> None:
         # Built as a normal uppercase message, tag assigned at the send boundary; never an echo of
