@@ -13,32 +13,39 @@ side is in `operations.md` and `DEPLOYMENT.md`.
 - **The address of a server**: a host name or IP address and a TCP port (the default is 2399). If you run
   the server yourself, see `DEPLOYMENT.md`.
 
-## dosbox-x: the serial port as a modem bridged to TCP
+## DOSBox-X or DOSBox Staging: the serial port as a modem
 
-The game thinks it is dialing a modem on a serial port. dosbox-x emulates that modem and, when the game
-"dials" a number, opens a TCP connection to whatever address the phonebook maps the number to.
+The game thinks it is dialing a modem on a serial port. DOSBox-X and DOSBox Staging both emulate that
+modem and, when the game "dials" a number, open a TCP connection to whatever address the phonebook maps
+the number to.
 
-Two things matter beyond the address:
-
-- **8 data bits, no parity, 1 stop bit (8N1).** The in-game protocol is binary and its checksum bytes
-  have the top bit set. On a 7-bit link the Chamber (the text lobby) still works, so everything looks
-  fine, but every in-game packet is silently damaged and nothing you do has any effect. If the game seems
-  to ignore you, check this first (I §3).
-- **9600 bps** is what the reference setup uses (`startbps:9600`); the speed is nominal over TCP.
-
-A complete `[serial]` section for `dosbox-x.conf` (or a config file you pass with `-conf`):
+The settings that matter are the same in both, in the emulator's config file (`dosbox-x.conf`,
+`dosbox-staging.conf`, or one you pass with `-conf`):
 
 ```ini
+[dos]
+umb=true
+ems=true
+xms=true
+
+[cpu]
+core=dynamic
+
 [serial]
-phonebookfile = phonebook.txt
-serial1=modem startbps:9600 parity:n bytesize:8 stopbits:1
+phonebookfile = /full/path/to/phonebook.txt
+serial1=modem
 ```
 
-The phonebook is a text file next to the config (or give its full path). Each line is a number, a space
-and the `host:port` it maps to. Map the number the game dials (next section) to your server:
+The game needs expanded memory (`ems`). It runs smoothly with the dynamic core and about 25000 cycles:
+`cycles=25000` in DOSBox-X, `cpu_cycles = 25000` in DOSBox Staging.
+
+The phonebook is a text file; give its full path. Each line is a number, a space and the `host:port` it
+maps to. Map the number the game dials (next section) to your server, or to `localhost` for a server on
+your own machine:
 
 ```
 1234 play.example.org:2399
+1111 localhost:2399
 ```
 
 Then mount the folder holding the game and start it from `[autoexec]` as you normally would:
@@ -52,20 +59,16 @@ CS.COM
 
 (`CS.COM` is the game's start program; the folder name and the way the game was installed are yours.)
 
-### The game's own settings: account name, password and dial number
+### The game's settings: dial number, baud rate, account name and password
 
-The game keeps its settings in a small file, `CS.CFG`, in its folder: **one line of plain text, with the
-settings separated by spaces**. Among them, in this order, are the log file name, the **phone number**, the
-**account name** and the **password**; a stock install holds the shared sign-up name `JOINGENIE` and a
-blank password.
+Before you log on, press the game's SETTINGS button and set:
 
-The safe way to change them is the game's own SETTINGS button (offline, before you log on): it rewrites
-the file for you. If you edit the file by hand, change only those words and keep the rest of the line,
-including the number of fields and the spaces, exactly as they were; a damaged file makes the game show
-its first-run setup again. Keep a copy of the original. (If in doubt, use the SETTINGS button.)
+- the **phone number** to the one in your phonebook line (`1234` above);
+- the **baud rate** to **9600**;
+- your **account name** and **password**, as described next, or leave the stock guest name `JOINGENIE`.
 
-Set the dial number to the one in your phonebook line (`1234` above) and the account name and password
-to what is described next.
+A name or password **must not contain a space**, and the password is **case-sensitive**: type it the same
+way every time. The game saves these settings in `CS.CFG`, in its folder.
 
 ## Logging in
 
@@ -75,14 +78,13 @@ SETTINGS as above.
 | account name | what you get |
 |---|---|
 | `JOINGENIE` (the stock install) | **A guest.** No password is sent. You are given a callsign: the name cut to 8 letters (`JOINGENI`), with its 8th letter replaced by a digit if that callsign is already online (`JOINGEN2`...). Two unmodified clients can therefore play together. Your record is kept under the callsign you were given, which depends on who else is connected, so do not count on it. Guests cannot `/RESUME`. |
-| any other name, with a password | **A real account.** The first login with a name registers its password (there is no sign-up step); later logins must give the same one. The callsign is the name, upper-cased and cut to 8 characters. Progress is saved to the account, and `/RESUME` works. Only one login per account at a time. |
+| any other name, with a password | **A real account.** The first login with a name registers its password (there is no sign-up step); later logins must give the same one. The callsign is the name, upper-cased and cut to 8 characters, with its 8th letter replaced by a digit if that callsign is already online (`ALEXANDER1` and `ALEXANDER2` become `ALEXANDE` and `ALEXAND2`, whichever logs in first gets the plain one). Progress is saved to the account, and `/RESUME` works. Only one login per account at a time. |
 
 Names may be up to 32 characters and passwords up to 64. A wrong password, a name that is already online,
 or too many attempts in a short time is refused with a line saying so. Choose a password you use nowhere
 else: the server stores only a salted hash, but the link is plain text.
 
-After the script finishes the game shows the online-service menu. Press GO (or F1) and then RETURN at the
-prompt to enter the Chamber.
+After the script finishes the game shows the online-service menu. Press GO (or F1); the Chamber opens.
 
 ## The Chamber
 
@@ -95,7 +97,7 @@ press RETURN. Commands begin with `/`, in either case:
 | `/CITY` | one line per open city: its letter, name and pilots/capacity |
 | `/CITY <letter>` | that city's four teams, how many pilots each has, and their callsigns |
 | `/PLAY` | joins the busiest city that has room; when all are empty, city B |
-| `/PLAY <letter> [team]` | joins that city. `team` is `RED`, `BLUE`, `GREEN`, `BLACK`, or `R`, `B`, `G`, or `0` to `3` (`B` is BLUE; use `BLACK` or `3` for black). If the team is full, or you name none, you are put on the smallest open team and told so |
+| `/PLAY <letter> [team]` | joins that city. `team` is `RED`, `BLUE`, `GREEN`, `BLACK`, or `R`, `B`, `G`, or `0` to `3` (`B` is BLUE; use `BLACK` or `3` for black). If the team you name is full, or the city chooses teams, you are put on the smallest open team and told so; with no team named you get no such line |
 | `/WHO` or `/STATUS` | every pilot online and where (`CHAMBER`, or city letter and team) |
 | `/WHO <callsign>` | that pilot's location and saved record |
 | `/SCORE` | your own saved record: last game's score, career total, bay points, bays, battle marker |
@@ -105,8 +107,8 @@ press RETURN. Commands begin with `/`, in either case:
 | anything else | sent as chat to the other pilots in the Chamber (not to anyone in a game), as `CALLSIGN: text` |
 
 The button bar types for you: PLAY sends `/PLAY`; MORE shows a second row (STATUS, WHO, CITY, SCORE and
-the city and callsign variants that type `/CITY ` or `/PLAY ` onto your line for you to finish with a
-letter). Typing a single city letter shortly after `/CITY` gets a reminder of how to ask for information
+the city variants that type `/CITY ` or `/PLAY ` onto your line, and the callsign button that types
+`/WHO `, for you to finish). Typing a single city letter shortly after `/CITY` gets a reminder of how to ask for information
 or to play. A command the server does not know is answered with an "unknown command" line.
 
 (`/GO` is not a command you type: the game sends it itself while launching, to say it found the city's
@@ -122,7 +124,7 @@ Cities are set by the operator (`config/cities/`); the shipped ones are:
 | B | CYBERCITY TWO | 2 | 20 | Normal output | up to level 4 | 2 Sentinels; rain that comes and goes |
 | C | CYBERCITY THREE | 3 | 40 | Low output | up to level 5 | 4 Sentinels, a free Muncher every 10 minutes; dusk and storms |
 
-Each city's territory is worth different amounts per block (A: a plain middle, B: rings rising to the
+Each city's territory is worth different amounts per block (A: a raised center, B: rings rising to the
 center, C: a high-value core), so where you fight matters. Each city holds 16 pilots, 4 per team.
 **Teams** are RED, BLUE, GREEN and BLACK; the team decides your home corner. B is the default city.
 
@@ -173,8 +175,8 @@ restart loses every held game.
 | The pod is frozen right after loading, or other pilots do not move | The server may be busy or the link slow; wait a few seconds. If it persists, press Shift-Q, or reconnect. Check the link as in the first row |
 | The latency meter stays blank | The ping is not being answered, which the server does in every game, so the in-game link is broken: see the first row |
 | Nothing after dialing, or "NO CARRIER" | The number you dialed is not in the phonebook, the `host:port` is wrong or unreachable, or a firewall blocks the port. Test from the same machine with `nc host port` |
-| The server says `THAT ACCOUNT IS ALREADY LOGGED IN` | The account has a live connection (perhaps your old dropped one, until the server notices it is gone, which can take about 15 seconds); wait and retry |
-| `TOO MANY LOGIN ATTEMPTS` or `TOO MANY NEW ACCOUNTS` | The server limits how fast logins and sign-ups can come from one address; wait a few minutes |
+| The server says `THAT ACCOUNT IS ALREADY LOGGED IN` | The account has a live connection (perhaps your old dropped one, until the server notices it is gone, which takes about 15 seconds in a game and up to 2 minutes in the Chamber); wait and retry |
+| `TOO MANY LOGIN ATTEMPTS` or `TOO MANY NEW ACCOUNTS` | The server limits how fast logins and sign-ups can come from one address; wait a minute |
 | `/RESUME` says nothing is held | You are a guest, the 10 or 3 minutes passed, you used `/PLAY` in between, the drop counted as a death, or the server restarted |
 | The server is full: the connection closes at once | A limit of 8 connections per address and 64 in all applies; tell the operator if you share an address with others |
 
