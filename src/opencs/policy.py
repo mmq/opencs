@@ -55,7 +55,7 @@ CLOSE_FLUSH_TIMEOUT = 5.0
 
 #: TCP keepalive on accepted sockets, so a peer that vanished without a FIN is noticed and its
 #: account freed (DESIGN §5): idle seconds before the first probe, seconds between probes, probes
-#: before the connection is dropped. Ours. (A Chamber idle timeout is M11's.)
+#: before the connection is dropped. Ours.
 KEEPALIVE_IDLE = 60
 KEEPALIVE_INTERVAL = 15
 KEEPALIVE_PROBES = 4
@@ -130,6 +130,13 @@ GENIE_IDLE_TIMEOUT = 900.0
 #: "login attempts"): a real client sends 4 lines and about 20 bytes of modem noise.
 LOGIN_MAX_LINES = 50
 LOGIN_PREAMBLE_LIMIT = 4096
+
+#: Seconds of no bytes from a client in the Chamber before it is closed, so a connection that died
+#: without a FIN cannot hold a real account "already logged in" for ever (TCP keepalive,
+#: ``KEEPALIVE_*``, catches most, but not a peer behind a middlebox that still answers probes).
+#: Players do sit in the Chamber to chat or wait, so this is an hour. Ours (DESIGN §5; our Chamber
+#: idle timeout).
+CHAMBER_IDLE_TIMEOUT = 3600.0
 
 #: How long to wait for the reply to ``PRESS RETURN`` before entering anyway, and for ``/GO`` after
 #: ``E <map> <map>``, in seconds. II §4.1 (5 s), I §5.4, II §4.5 (15 s, a server choice).

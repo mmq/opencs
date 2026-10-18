@@ -69,6 +69,7 @@ class ChamberPhase(TextPhase):
         )
         self._drops = WindowedCounter(policy.CHAMBER_FLOOD_DROPS, policy.CHAMBER_FLOOD_WINDOW)
         self._warned = False
+        self._last_input_at = host.now()
 
     @property
     def member(self) -> Member:
@@ -90,7 +91,16 @@ class ChamberPhase(TextPhase):
 
     # --- time ------------------------------------------------------------------------------
 
+    def feed(self, data: bytes) -> None:
+        self._last_input_at = self.host.now()
+        super().feed(data)
+
     def tick(self, now: float) -> None:
+        if now - self._last_input_at >= policy.CHAMBER_IDLE_TIMEOUT:
+            self.host.log.info("nothing heard for %.0f s; closing", now - self._last_input_at)
+            self._say(replies.denied("IDLE TOO LONG: DISCONNECTING"))
+            self.host.close("Chamber idle timeout")
+            return
         if self._state is State.VERSION and now >= self._deadline:
             self.host.log.info("no version reply in %.0f s; entering anyway", policy.VERSION_WAIT)
             self._open_lobby()
