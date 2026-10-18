@@ -14,8 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 from opencs import policy
+from opencs.cities import CityManager
 from opencs.clock import Clock, MonotonicClock
-from opencs.config import AppConfig, ConfigError, load_config
+from opencs.config import AppConfig, ConfigError, ServerConfig, load_config
 from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.control import SHUTDOWN_NOTICE, announce, remove_everyone
 from opencs.lobby.identity import Identity
@@ -77,20 +78,13 @@ def build_session_factory(services: Services) -> SessionFactory:
     return factory
 
 
-async def run_city(
-    city: City,
-    router: Router,
-    clock: Clock,
-    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-) -> None:
-    """Tick one city ``TICK_HZ`` times a second and deliver what it says (DESIGN §3.3). A bug in
-    the city's rules is logged and the next tick runs (DESIGN §5). ``sleep`` is for tests."""
-    while True:
-        await sleep(1 / policy.TICK_HZ)
-        try:
-            router.deliver(city, city.tick(clock.now()))
-        except Exception:
-            log.exception("city %s failed on a tick", city.config.letter)
+@dataclass(frozen=True, slots=True)
+class ConfigFile:
+    """The file the running config came from, for ``reload`` (SIGHUP, the admin channel):
+    ``server`` is what the file said when it was read, before command-line overrides."""
+
+    path: Path
+    server: ServerConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +108,7 @@ async def serve(
     *,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None = None,
+    config_file: ConfigFile | None = None,
     seams: Seams = Seams(),  # noqa: B008  (frozen, so one shared default is safe)
 ) -> None:
     """Listen on the configured address until ``stop`` is set, then shut down gracefully: every
@@ -134,7 +129,7 @@ async def serve(
             log.info("database %s", config.server.data_dir / policy.DATABASE_FILE_NAME)
         services = build_services(config, stores=stores, clock=clock, rng=seams.rng)
     try:
-        await _listen(config, services, clock, stop, ready, seams)
+        await _listen(config, services, clock, stop, ready, config_file, seams)
     finally:
         # Connections are closed by now, and each saved its player as it left; this saves anyone
         # still seated, and whatever a failed save left waiting for a retry.
@@ -162,7 +157,7 @@ def _capture_factory(config: AppConfig) -> CaptureFactory | None:
 async def _shutdown(
     services: Services,
     listener: Listener,
-    tickers: Sequence[asyncio.Task[None]],
+    cities: CityManager,
     deadline: float,
 ) -> None:
     """Stop accepting, tell everyone, end every session (a game with the unprompted ``'C'``; each
@@ -173,10 +168,27 @@ async def _shutdown(
     announce(services, SHUTDOWN_NOTICE)
     remove_everyone(services, SHUTDOWN_NOTICE)
     services.persistence.save_all(services.cities.values())
-    for ticker in tickers:
-        ticker.cancel()
-    await asyncio.gather(*tickers, return_exceptions=True)
+    await cities.stop()
     await listener.stop(deadline)
+
+
+def _on_sighup(cities: CityManager, config_file: ConfigFile | None) -> Callable[[], None]:
+    """Reload the city configuration on SIGHUP, where the platform has it. Returns the function
+    that takes the handler away again."""
+    if config_file is None or not hasattr(signal, "SIGHUP"):
+        return lambda: None
+    loop = asyncio.get_running_loop()
+
+    def reload() -> None:
+        log.info("SIGHUP: reloading the city configuration")
+        for line in cities.reload_file(config_file.path, config_file.server):
+            log.info("reload: %s", line)
+
+    def remove() -> None:
+        loop.remove_signal_handler(signal.SIGHUP)
+
+    loop.add_signal_handler(signal.SIGHUP, reload)
+    return remove
 
 
 async def _listen(
@@ -185,6 +197,7 @@ async def _listen(
     clock: Clock,
     stop: asyncio.Event,
     ready: Callable[[int], None] | None,
+    config_file: ConfigFile | None,
     seams: Seams,
 ) -> None:
     """Listen until ``stop`` is set, ticking the cities, then shut down gracefully."""
@@ -195,10 +208,9 @@ async def _listen(
         capture=_capture_factory(config),
     )
     server = await listener.start(config.server.host, config.server.port)
-    tickers = [
-        asyncio.create_task(run_city(city, services.router, clock, seams.tick_sleep))
-        for city in services.cities.values()
-    ]
+    cities = CityManager(services, clock, seams.rng or random.Random(), seams.tick_sleep)
+    cities.start()
+    reload_signal = _on_sighup(cities, config_file)
     bound = [sock.getsockname()[:2] for sock in server.sockets]
     for address, bound_port in bound:
         log.info("listening on %s:%d", address, bound_port)
@@ -208,15 +220,16 @@ async def _listen(
     try:
         await stop.wait()
     finally:
-        await _shutdown(services, listener, tickers, seams.shutdown_deadline)
+        reload_signal()
+        await _shutdown(services, listener, cities, seams.shutdown_deadline)
 
 
-async def _run(config: AppConfig) -> None:
+async def _run(config: AppConfig, config_file: ConfigFile) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
-    await serve(config, stop=stop)
+    await serve(config, stop=stop, config_file=config_file)
 
 
 def _port(text: str) -> int:
@@ -249,6 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"opencs: {exc}", file=sys.stderr)
         return 2
+    config_file = ConfigFile(args.config, config.server)
     overrides = {
         k: v
         for k, v in (("host", args.host), ("port", args.port), ("data_dir", args.data_dir))
@@ -261,7 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"opencs: cannot open the log file: {exc.strerror or exc}", file=sys.stderr)
         return 2
     try:
-        asyncio.run(_run(config))
+        asyncio.run(_run(config, config_file))
     except OSError as exc:
         server = config.server
         print(

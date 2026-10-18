@@ -9,7 +9,8 @@ import pytest
 from fixtures.loopback import TIMEOUT, LogWatch, TickGate, connect, local_config, start
 from fixtures.pods import report
 from opencs import policy
-from opencs.app import build_services, main, run_city
+from opencs.app import build_services, main
+from opencs.cities import run_city
 from opencs.clock import ManualClock
 from opencs.config import load_config
 from opencs.messages import ServerMessage, client, client_payload, server

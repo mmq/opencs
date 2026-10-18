@@ -121,6 +121,15 @@ class Lobby:
         """The enabled city with this letter, or None."""
         return self._cities.get(letter)
 
+    def set_city(self, config: CityConfig) -> None:
+        """Offer a city (a new one, or a changed one once its game is empty, M12): a ``/PLAY``
+        placed from now on sees this config."""
+        self._cities[config.letter] = config
+
+    def close_city(self, letter: str) -> None:
+        """Stop offering a city: no ``/PLAY`` is placed there; those already in it stay."""
+        self._cities.pop(letter, None)
+
     def in_city(self, letter: str) -> list[Member]:
         """Members of a city, by team then callsign."""
         found = [m for m in self._members if m.city == letter]
@@ -212,7 +221,11 @@ class Lobby:
     def enter(self, member: Member, placement: Placement) -> bool:
         """Put ``member`` in the placed city and team; False if the place filled meanwhile (the
         launch takes up to ``GO_WAIT`` seconds, during which others may join). The slot held for
-        this member's own identity is its to take (II §13 item 4, II §17)."""
+        this member's own identity is its to take (II §13 item 4, II §17). It also fails if the city
+        was closed or changed (a reload, M12) since the placement: the client was told the old
+        map."""
+        if self._cities.get(placement.city.letter) != placement.city:
+            return False
         if placement.team not in self._open_teams(placement.city, member.key):
             return False
         member.city = placement.city.letter
