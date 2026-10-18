@@ -136,7 +136,8 @@ def test_kick_in_the_chamber_says_why_and_closes_with_the_default_reason() -> No
     ctl, _ = control(world)
     h = enter_lobby(world, ALICE)
     ctl.execute("kick ALICE")
-    assert policy.ADMIN_DEFAULT_KICK_REASON.encode() in h.take()
+    said = h.take()
+    assert said.count(policy.ADMIN_KICK_NOTICE.encode()) == 1  # not "X: X"
     assert h.io.closed
 
 
@@ -298,7 +299,8 @@ def test_help_lists_every_command_and_unknown_words_are_refused() -> None:
 @pytest.mark.parametrize(
     "line",
     ["STATUS", "Kick", "kick  ", "announce \x00\x01", "guppy \x00 home", "shutdown 99999999999999",
-     "reload extra", "help me", "status " + "x" * 5000, "kick éé é"],
+     "reload extra", "help me", "status " + "x" * 5000, "kick éé é",
+     "shutdown ²", "guppy ² home", "guppy ³ home"],
 )  # fmt: skip
 def test_no_operator_input_raises(line: str) -> None:
     async def scenario() -> None:

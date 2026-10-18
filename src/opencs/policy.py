@@ -109,8 +109,15 @@ ADMIN_AUTH_LIMIT = (5, 0.1)
 #: The longest delay ``shutdown <seconds>`` accepts, an hour. Ours.
 ADMIN_MAX_SHUTDOWN_SECONDS = 3600
 
-#: What a kick says when the operator gives no reason. Ours.
-ADMIN_DEFAULT_KICK_REASON = "REMOVED BY AN ADMINISTRATOR"
+#: What a kicked pilot is told; the operator's reason, if any, follows ``": "``. Ours.
+ADMIN_KICK_NOTICE = "REMOVED BY AN ADMINISTRATOR"
+
+#: What every player is told when the server is going down; ``shutdown <n>`` adds
+#: ``" IN n SECONDS"``. Ours.
+SHUTDOWN_NOTICE = "SERVER SHUTTING DOWN"
+
+#: What every player is told when a pending ``shutdown <n>`` is canceled. Ours.
+SHUTDOWN_CANCELED_NOTICE = "SHUTDOWN CANCELED"
 
 # --- Connections (DESIGN §3.3, §5) --------------------------------------------------------------
 

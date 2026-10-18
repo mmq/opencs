@@ -26,7 +26,7 @@ from opencs.world import chat
 log = logging.getLogger("opencs.admin")
 
 #: The notice players get when the server is going down (ours).
-SHUTDOWN_NOTICE = "SERVER SHUTTING DOWN"
+SHUTDOWN_NOTICE = policy.SHUTDOWN_NOTICE
 
 HELP = (
     "status                      connections, players per city and team, held games, uptime",
@@ -76,7 +76,7 @@ def parse_team(text: str) -> int | None:
     word = text.upper()
     if word in policy.TEAM_NAMES:
         return policy.TEAM_NAMES.index(word)
-    if word.isdigit() and int(word) < policy.TEAM_COUNT:
+    if word.isascii() and word.isdigit() and int(word) < policy.TEAM_COUNT:
         return int(word)
     return None
 
@@ -171,14 +171,14 @@ class Control:
         callsign, _, reason = args.partition(" ")
         if not callsign:
             return ["usage: kick <callsign> [reason]"]
-        reason = reason.strip() or policy.ADMIN_DEFAULT_KICK_REASON
-        notice = f"REMOVED BY AN ADMINISTRATOR: {reason}"
+        reason = reason.strip()
+        notice = f"{policy.ADMIN_KICK_NOTICE}: {reason}" if reason else policy.ADMIN_KICK_NOTICE
         sessions = self._services.sessions.by_callsign(callsign.upper())
         if not sessions:
             return [f"no pilot {callsign.upper()} is connected"]
         for session in sessions:
             session.remove(notice, close=False)
-        log.info("kicked %s: %s", callsign.upper(), reason)
+        log.info("kicked %s: %s", callsign.upper(), reason or "no reason given")
         return [f"kicked {callsign.upper()} ({len(sessions)} connection(s))"]
 
     def guppy(self, args: str) -> list[str]:
@@ -204,9 +204,9 @@ class Control:
             if self._countdown is None:
                 return ["no shutdown is pending"]
             self.close()
-            announce(self._services, "SHUTDOWN CANCELED")
+            announce(self._services, policy.SHUTDOWN_CANCELED_NOTICE)
             return ["shutdown canceled"]
-        if arg and not arg.isdigit():
+        if arg and not (arg.isascii() and arg.isdigit()):
             return ["usage: shutdown [seconds|cancel]"]
         seconds = int(arg) if arg else 0
         if seconds > policy.ADMIN_MAX_SHUTDOWN_SECONDS:
