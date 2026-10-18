@@ -6,6 +6,7 @@ and wrong types raise ``ConfigError`` naming the file and the key, so a typo fai
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -352,14 +353,9 @@ def _parse_logging(path: Path, table: _Table) -> LoggingConfig:
         ),
     )
     section.done()
-    try:
-        config.format % {  # a format the logging module cannot apply fails here, not at 3 a.m.
-            "asctime": "",
-            "levelname": "",
-            "name": "",
-            "message": "",
-            "threadName": "",
-        }
+    try:  # a format the logging module cannot apply fails here, not at 3 a.m.
+        record = logging.makeLogRecord({"name": "opencs", "msg": "probe", "levelname": "INFO"})
+        logging.Formatter(config.format, validate=True).format(record)
     except (KeyError, ValueError, TypeError) as exc:
         raise section.fail("format", f"not a valid log format: {exc}") from exc
     return config

@@ -144,6 +144,13 @@ def test_unknown_server_key_and_bad_types(tmp_path: Path) -> None:
             load_config(write_config(tmp_path, {"A": CITY}, server=text))
 
 
+def test_any_standard_log_record_field_is_a_valid_format(tmp_path: Path) -> None:
+    fmt = "%(asctime)s %(process)d %(funcName)s:%(lineno)d %(message)s"
+    server = f'default_city = "A"\n[logging]\nformat = "{fmt}"\n'
+    config = load_config(write_config(tmp_path, {"A": CITY}, server=server))
+    assert config.server.logging.format == fmt
+
+
 def test_unreadable_and_invalid_files(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="cannot read"):
         load_config(tmp_path / "nope.toml")
