@@ -4,6 +4,7 @@ the server stops within its deadline."""
 from __future__ import annotations
 
 import asyncio
+import socket
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,11 +20,13 @@ from fixtures.loopback import (
 )
 from fixtures.pods import report
 from opencs import policy
+from opencs.app import build_services
 from opencs.clock import ManualClock
 from opencs.config import AppConfig
-from opencs.control import SHUTDOWN_NOTICE
+from opencs.control import SHUTDOWN_NOTICE, announce
 from opencs.messages import client, server
 from opencs.store.base import ProgressRecord, Stores
+from opencs.store.memory import memory_stores
 from opencs.store.sqlite import SqliteStore, open_stores
 
 BAYS = (3, 2, 2, 1, 1, 0, 0, 0, 0)
@@ -119,6 +122,39 @@ def test_a_player_who_never_reads_cannot_hold_the_shutdown_and_is_still_saved(
         await asyncio.wait_for(task, TIMEOUT)
         c.writer.close()
         assert saved(tmp_path) == (777, 88, BAYS)  # saved before any connection was waited for
+
+    asyncio.run(asyncio.wait_for(scenario(), 4 * TIMEOUT))
+
+
+def test_a_client_applying_back_pressure_cannot_hold_the_shutdown(tmp_path: Path) -> None:
+    """A real socket with a tiny receive buffer and a near-limit backlog of announcements it never
+    reads: the stop still completes with a non-zero deadline. Whether the server's writes actually
+    block depends on the kernel's send buffer (the backlog cannot exceed ``OUTBOX_LIMIT`` without
+    the connection being cut), so the blocking logic itself is pinned by the listener's
+    ``StuckConnection`` tests; this one guards the whole path on a real socket."""
+
+    async def scenario() -> None:
+        config = config_in(tmp_path)
+        clock = ManualClock(1000.0)
+        services = build_services(config, stores=memory_stores(), clock=clock)
+        stop, task, port = await start(
+            config, clock=clock, services=services, shutdown_deadline=0.3
+        )
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+        sock.setblocking(False)
+        await asyncio.get_running_loop().sock_connect(sock, ("127.0.0.1", port))
+        reader, writer = await asyncio.open_connection(sock=sock)
+        c = Client(reader, writer)
+        await c.send("HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r")
+        await c.expect(b"\x05PRESS RETURN\r")
+        await c.send("\r")
+        await c.expect(b"\x05A\r")
+        for n in range(policy.OUTBOX_LIMIT - 64):  # a backlog the client never reads
+            announce(services, f"ANNOUNCEMENT {n:04d} " + "x" * 200)
+        stop.set()
+        await asyncio.wait_for(task, TIMEOUT)  # returned: the abort path cut the reader off
+        c.writer.close()
 
     asyncio.run(asyncio.wait_for(scenario(), 4 * TIMEOUT))
 
