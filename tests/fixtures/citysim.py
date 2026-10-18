@@ -112,6 +112,7 @@ class CitySim:
         self.max_players = 0
         self.resets = 0
         self.resumed = 0
+        self.messages = 0  # server messages checked to encode into a valid frame
         self.violations: list[str] = []
         self.size_by_hour: list[int] = []
         #: The sizes sampled while the city stood empty and reset: what it keeps between games.
@@ -317,6 +318,7 @@ class CitySim:
         problems = check_city(self.city)
         for c in self.clients:
             messages = c.model.absorb(consume=True)
+            self.messages += len(messages)
             self._answer_legs(c, messages)
             problems += c.model.violations
             c.model.violations.clear()

@@ -67,6 +67,7 @@ def test_two_days_with_the_real_id_ranges() -> None:
     sim = CitySim(city_c(), seed=1)
     sim.run(48)
     assert sim.joined > 150 and sim.max_players >= 6
+    assert sim.messages > 20_000  # every one of them encoded into a valid frame
     assert sim.refusals == {}  # no join was refused for want of an id
     assert sim.resets >= 2  # the quiet nights empty the city and it starts fresh (S13)
     assert sim.resumed >= 1  # a dropped account came back to its held game
