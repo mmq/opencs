@@ -8,6 +8,7 @@ import logging
 import os
 import random
 import signal
+import sqlite3
 import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -39,6 +40,11 @@ from opencs.store.sqlite import SqliteStore, open_stores
 from opencs.world.city import City
 
 log = logging.getLogger("opencs.app")
+
+
+class StartupError(Exception):
+    """A startup step failed; the message says which one and why, ready to print (exit code 1)."""
+
 
 DEFAULT_CONFIG_PATH = Path("config") / "server.toml"
 
@@ -124,7 +130,13 @@ async def serve(
     if services is None:
         stores = seams.stores
         if stores is None:  # the real thing: accounts and progress in data_dir (DESIGN §2)
-            stores, database = open_stores(config.server.data_dir)
+            try:
+                stores, database = open_stores(config.server.data_dir)
+            except (OSError, sqlite3.Error) as exc:
+                raise StartupError(
+                    f"cannot open the database in {config.server.data_dir}: "
+                    f"{getattr(exc, 'strerror', None) or exc}"
+                ) from exc
             log.info("database %s", config.server.data_dir / policy.DATABASE_FILE_NAME)
         services = build_services(config, stores=stores, clock=clock, rng=seams.rng)
     try:
@@ -212,7 +224,12 @@ async def _listen(
         sleep=seams.tick_sleep,
         capture=_capture_factory(config),
     )
-    server = await listener.start(config.server.host, config.server.port)
+    try:
+        server = await listener.start(config.server.host, config.server.port)
+    except OSError as exc:
+        raise StartupError(
+            f"cannot listen on {config.server.host}:{config.server.port}: {exc.strerror or exc}"
+        ) from exc
     cities = CityManager(services, clock, seams.rng or random.Random(), seams.tick_sleep)
     cities.start()
     control = Control(services, cities, stop, config_file, delay=seams.delay)
@@ -221,7 +238,13 @@ async def _listen(
     try:
         if token is not None and config.server.admin.port is not None:
             admin = AdminServer(control, token, clock)
-            admin_port = await admin.start(config.server.admin.port)
+            try:
+                admin_port = await admin.start(config.server.admin.port)
+            except OSError as exc:
+                raise StartupError(
+                    f"cannot listen for the admin channel on {policy.ADMIN_HOST}:"
+                    f"{config.server.admin.port}: {exc.strerror or exc}"
+                ) from exc
             if seams.admin_ready is not None:
                 seams.admin_ready(admin_port)
         bound = [sock.getsockname()[:2] for sock in server.sockets]
@@ -293,11 +316,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"opencs: {exc}", file=sys.stderr)
         return 2
+    except StartupError as exc:
+        print(f"opencs: {exc}", file=sys.stderr)
+        return 1
     except OSError as exc:
-        server = config.server
-        print(
-            f"opencs: cannot listen on {server.host}:{server.port}: {exc.strerror or exc}",
-            file=sys.stderr,
-        )
+        print(f"opencs: cannot start: {exc.strerror or exc}", file=sys.stderr)
         return 1
     return 0

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import socket
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,10 +10,10 @@ import pytest
 from fixtures.loopback import TIMEOUT, LogWatch, TickGate, connect, local_config, start
 from fixtures.pods import report
 from opencs import policy
-from opencs.app import build_services, main
+from opencs.app import Seams, StartupError, build_services, main, serve
 from opencs.cities import run_city
 from opencs.clock import ManualClock
-from opencs.config import load_config
+from opencs.config import AdminConfig, load_config
 from opencs.messages import ServerMessage, client, client_payload, server
 from opencs.routing import Router
 from opencs.store.base import ProgressRecord
@@ -255,3 +256,31 @@ def test_main_reports_a_port_in_use(capsys: pytest.CaptureFixture[str]) -> None:
     assert code == 1
     assert f"cannot listen on 127.0.0.1:{port}" in err
     assert "Traceback" not in err
+
+
+def test_main_names_an_unusable_data_directory(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    not_a_directory = tmp_path / "file"
+    not_a_directory.write_text("x")
+    code = main(["--config", str(SHIPPED), "--port", "0", "--data-dir", str(not_a_directory)])
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "cannot open the database" in err and str(not_a_directory) in err
+    assert "cannot listen" not in err and "Traceback" not in err
+
+
+def test_an_admin_port_in_use_is_named_as_the_admin_port() -> None:
+    async def scenario() -> None:
+        with socket.socket() as taken:
+            taken.bind(("127.0.0.1", 0))
+            taken.listen()
+            port = taken.getsockname()[1]
+            base = local_config()
+            config = replace(
+                base, server=replace(base.server, admin=AdminConfig(port=port, token="t" * 20))
+            )
+            with pytest.raises(StartupError, match=f"admin channel on 127.0.0.1:{port}"):
+                await serve(config, stop=asyncio.Event(), seams=Seams(stores=memory_stores()))
+
+    asyncio.run(asyncio.wait_for(scenario(), TIMEOUT))

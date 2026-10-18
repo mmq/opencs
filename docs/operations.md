@@ -15,7 +15,8 @@ uv run python -m opencs --config /etc/opencs/server.toml --port 2399 --data-dir 
 ```
 
 Command-line options override the file: `--config`, `--host`, `--port`, `--data-dir`. Exit codes: 0 after
-a clean stop, 1 when the game port cannot be bound, 2 for a bad config file, an unwritable log file, or
+a clean stop, 1 when a startup step fails (the message names it: the database or its directory, the game port, the
+admin port), 2 for a bad config file, an unwritable log file, or
 an admin port with no usable token.
 
 ### systemd
