@@ -15,3 +15,7 @@ log_level = "INFO"
 
 # The city a bare /PLAY picks when every city is empty (II §4.2: B is the default).
 default_city = "B"
+
+# Guest names (II §3): logged on without a password check, the only names several players may
+# share, each given its own callsign, and never saved. An empty list turns guests off.
+guest_names = ["JOINGENIE"]

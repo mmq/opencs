@@ -10,9 +10,9 @@ from opencs.store.memory import MemoryAccountStore
 FAST = 1000  # PBKDF2 rounds: the algorithm is the point, not the cost
 
 
-def make() -> tuple[Identity, MemoryAccountStore]:
+def make(guests: tuple[str, ...] = ("JOINGENIE",)) -> tuple[Identity, MemoryAccountStore]:
     store = MemoryAccountStore()
-    return Identity(store, iterations=FAST), store
+    return Identity(store, guest_names=guests, iterations=FAST), store
 
 
 def pilot(result: Pilot | Refused) -> Pilot:
@@ -56,9 +56,31 @@ def test_ninth_and_later_duplicates_get_two_digit_suffixes_until_exhausted() -> 
 
 
 def test_short_names_get_the_digit_appended() -> None:
-    identity, _ = make()
+    identity, _ = make(("JOINGENIE", "BOB"))
     assert pilot(identity.login("BOB")).callsign == "BOB"
     assert pilot(identity.login("bob")).callsign == "BOB2"
+
+
+def test_a_bare_name_that_is_not_a_guest_name_needs_a_password() -> None:
+    identity, store = make()
+    refused = identity.login("ALICE")
+    assert isinstance(refused, Refused) and "PASSWORD" in refused.reason
+    assert store.get("ALICE") is None
+
+
+def test_configured_guest_names_ignore_a_password_and_may_be_shared() -> None:
+    identity, store = make(("JOINGENIE", "visitor"))
+    first, second = pilot(identity.login("VISITOR,one")), pilot(identity.login("Visitor,two"))
+    assert (first, second) == (Pilot("VISITOR", None), Pilot("VISITOR2", None))
+    assert store.get("VISITOR") is None
+
+
+def test_with_no_guest_names_joingenie_is_refused_and_registers_nothing() -> None:
+    identity, store = make(())
+    assert isinstance(identity.login("JOINGENIE"), Refused)
+    assert isinstance(identity.login("JOINGENIE,pw"), Refused)
+    assert store.get("JOINGENIE") is None
+    assert pilot(identity.login("ALICE,pw")).account == "ALICE"
 
 
 def test_first_login_registers_the_password_and_later_ones_must_match() -> None:
@@ -98,8 +120,8 @@ def test_name_bounds() -> None:
     identity, _ = make()
     assert isinstance(identity.login(""), Refused)
     assert isinstance(identity.login("  ,pw"), Refused)
-    assert isinstance(identity.login("N" * 33), Refused)
-    assert isinstance(identity.login("N" * 32), Pilot)
+    assert isinstance(identity.login("N" * 33 + ",pw"), Refused)
+    assert isinstance(identity.login("N" * 32 + ",pw"), Pilot)
 
 
 def test_long_names_are_truncated_and_real_accounts_sharing_eight_characters_get_numbers() -> None:
@@ -111,25 +133,26 @@ def test_long_names_are_truncated_and_real_accounts_sharing_eight_characters_get
 
 
 def test_a_guest_cannot_take_a_registered_accounts_name() -> None:
-    identity, _ = make()
+    identity, store = make()
     identity.release(pilot(identity.login("ALICE,pw")))
-    refused = identity.login("alice")
+    guests = Identity(store, guest_names=("ALICE", "ZED"), iterations=FAST)
+    refused = guests.login("alice")
     assert isinstance(refused, Refused)
     assert "REGISTERED" in refused.reason
-    # An unregistered bare name is a guest named after itself.
-    assert pilot(identity.login("zed")) == Pilot("ZED", None)
+    # An unregistered guest name is a guest named after itself.
+    assert pilot(guests.login("zed")) == Pilot("ZED", None)
 
 
 def test_a_guest_cannot_take_a_registered_accounts_callsign_by_truncation() -> None:
-    identity, _ = make()
+    identity, _ = make(("ALPHAXYZW",))
     identity.release(pilot(identity.login("ALPHAXYZ,secret")))
     refused = identity.login("ALPHAXYZW")
-    assert isinstance(refused, Refused)
+    assert isinstance(refused, Refused) and "REGISTERED" in refused.reason
     assert pilot(identity.login("ALPHAXYZ,secret")).callsign == "ALPHAXYZ"
 
 
 def test_a_guest_cannot_take_the_callsign_of_a_longer_registered_name() -> None:
-    identity, _ = make()
+    identity, _ = make(("LONGNAME", "LONGNAMEX", "LONGNAM"))
     identity.release(pilot(identity.login("LONGNAME99,secret")))
     assert isinstance(identity.login("LONGNAME"), Refused)
     assert isinstance(identity.login("LONGNAMEX"), Refused)
@@ -145,10 +168,10 @@ def test_joingenie_with_a_password_is_a_guest_and_registers_nothing() -> None:
 
 def test_a_guest_online_makes_the_real_account_take_a_numbered_callsign() -> None:
     identity, _ = make()
-    guest = pilot(identity.login("ALICE"))
-    real = pilot(identity.login("ALICE,pw"))
-    assert guest.callsign == "ALICE"
-    assert real.callsign == "ALICE2"
+    guest = pilot(identity.login("JOINGENIE"))
+    real = pilot(identity.login("JOINGENIX,pw"))
+    assert guest.callsign == "JOINGENI"
+    assert real.callsign == "JOINGEN2"
 
 
 def test_the_stored_hash_is_salted_pbkdf2_not_the_password() -> None:
@@ -172,7 +195,7 @@ def test_hash_password_matches_the_pbkdf2_hmac_sha256_reference_vector() -> None
     assert out.hex().startswith("55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc")
 
 
-@pytest.mark.parametrize("line", ["ALICE,pw", "ALICE", "JOINGENIE"])
+@pytest.mark.parametrize("line", ["ALICE,pw", "JOINGENIE"])
 def test_release_of_an_unknown_pilot_is_harmless(line: str) -> None:
     identity, _ = make()
     identity.release(Pilot("NOBODY", None))
@@ -210,7 +233,7 @@ def test_joingenie_is_keyed_by_the_assigned_callsign_in_connection_order() -> No
 
 
 def test_a_guest_key_cannot_equal_an_account_key() -> None:
-    identity, _ = make()
+    identity, _ = make(("acct:zed",))
     guest = pilot(identity.login("acct:zed"))  # upper-cased, so never the lower-case prefix
     assert guest.key == "ACCT:ZED"
     assert identity_key("ZED", "ZED") == "acct:ZED" and identity_key("ZED", None) == "ZED"

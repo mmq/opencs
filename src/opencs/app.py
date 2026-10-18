@@ -46,7 +46,7 @@ def build_services(
     router. Without ``stores`` accounts and progress are kept in memory (tests)."""
     clock = clock or MonotonicClock()
     stores = stores or memory_stores()
-    identity = Identity(stores.accounts)
+    identity = Identity(stores.accounts, guest_names=config.server.guest_names)
     rng = rng or random.Random()
     held = HeldGames(clock)
     lobby = Lobby(config.cities, config.server.default_city, rng, held)

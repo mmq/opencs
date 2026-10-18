@@ -129,7 +129,11 @@ LOGIN = "HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r"
 def login(
     world: World, account: str = "JOINGENIE", *, enter: bool = True, address: str = "?"
 ) -> Harness:
-    """A session taken through the logon to the Chamber's version check (or to the ``*``)."""
+    """A session taken through the logon to the Chamber's version check (or to the ``*``). A bare
+    name that is not a guest name logs on as that account with password ``PW`` (II §3: only guest
+    names may go without one)."""
+    if "," not in account and account.upper() not in policy.DEFAULT_GUEST_NAMES:
+        account += ",PW"
     h = connect(world, address=address)
     h.feed(f"AT\r\nHHH\r\r{account}\r<Not Telling!>\r")
     if enter:

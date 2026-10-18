@@ -152,6 +152,16 @@ def who_is(member: Member | None, callsign: str, record: ProgressRecord | None) 
     return lines + (record_lines(record) if record else [body("NO RECORD YET")])
 
 
+def who_is_guest(member: Member) -> list[Line]:
+    """A guest: where, and that it has no saved record (II §4.2, II §11.3)."""
+    return [body(f"{member.callsign}: {where(member)}"), body("A GUEST: NO RECORD IS KEPT")]
+
+
+def score_guest() -> list[Line]:
+    """``/SCORE`` for a guest (II §4.2, II §11.3)."""
+    return [body("GUESTS' PROGRESS IS NOT KEPT: LOG IN WITH NAME,PASSWORD TO KEEP YOURS")]
+
+
 def score(callsign: str, record: ProgressRecord | None) -> list[Line]:
     """The player's own record (II §4.2)."""
     if record is None:

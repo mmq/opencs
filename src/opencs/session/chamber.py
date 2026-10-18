@@ -212,6 +212,9 @@ class ChamberPhase(TextPhase):
         if found is None:
             self._say(replies.who_is(None, command.callsign, None))
             return
+        if found.account is None:
+            self._say(replies.who_is_guest(found))
+            return
         try:
             record = self.host.services.persistence.record(found.key)
         except Exception:
@@ -222,6 +225,9 @@ class ChamberPhase(TextPhase):
 
     def _score(self, command: commands.Score) -> None:
         """``/SCORE``: the player's own record (II §4.2)."""
+        if self.member.account is None:
+            self._say(replies.score_guest())
+            return
         try:
             record = self.host.services.persistence.record(self.member.key)
         except Exception:

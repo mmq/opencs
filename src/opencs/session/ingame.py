@@ -37,6 +37,7 @@ from opencs.world.city import City, JoinRefused
 
 if TYPE_CHECKING:
     from opencs.session.session import Session
+    from opencs.world.progress import SavedProgress
 
 
 class Stage(Enum):
@@ -110,9 +111,11 @@ class InGamePhase(Phase):
         city = self.host.services.cities[member.city]
         now = self.host.now()
         persistence = self.host.services.persistence
+        saved: SavedProgress | None = None
+        key: str | None = None
         try:
-            saved = persistence.load(member.key)
-            key: str | None = member.key
+            if member.account is not None:  # guests are not saved (II §11.3)
+                saved, key = persistence.load(member.key), member.key
         except Exception:
             # Without the stored record the player would start from the defaults and then overwrite
             # it: keep nothing for this session instead (I §9.2.11, II §11.3).

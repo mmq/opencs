@@ -186,6 +186,10 @@ CITY_HINT_WINDOW = 120.0
 #: I §5.1, II §3.
 GUEST_ACCOUNT_NAME = "JOINGENIE"
 
+#: The guest names when ``server.toml`` lists none (II §3): the only names more than one
+#: connection may use at once, logged on without a password check and never saved.
+DEFAULT_GUEST_NAMES = (GUEST_ACCOUNT_NAME,)
+
 #: Longest and shortest account name, and longest password, accepted on a login line. Ours: the
 #: spec fixes the line's shape (``NAME,PASSWORD``) but no lengths. The line itself is bounded by
 #: ``MAX_LINE_BYTES``.

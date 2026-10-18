@@ -114,6 +114,21 @@ def test_default_city_must_be_loaded(tmp_path: Path) -> None:
         load_config(path)
 
 
+def test_guest_names_default_to_joingenie_and_may_be_listed_or_turned_off(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, {"A": CITY})).server.guest_names == ("JOINGENIE",)
+    for line, names in [('["JoinGenie", "visitor"]', ("JOINGENIE", "VISITOR")), ("[]", ())]:
+        path = write_config(
+            tmp_path, {"A": CITY}, server=f'default_city = "A"\nguest_names = {line}\n'
+        )
+        assert load_config(path).server.guest_names == names
+    for bad in ('"JOINGENIE"', '[""]', "[1]"):
+        path = write_config(
+            tmp_path, {"A": CITY}, server=f'default_city = "A"\nguest_names = {bad}\n'
+        )
+        with pytest.raises(ConfigError, match="guest_names"):
+            load_config(path)
+
+
 def test_unknown_server_key_and_bad_types(tmp_path: Path) -> None:
     for text, key in [
         ('default_city = "A"\nbogus = 1\n', "bogus"),

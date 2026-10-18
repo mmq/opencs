@@ -256,7 +256,7 @@ def test_status_and_who_list_every_pilot_and_where() -> None:
 def test_who_callsign_gives_location_and_the_record() -> None:
     world = make_world()
     h = enter_lobby(world)
-    other = add(world.lobby, "ALPHA", "A", 0)
+    other = add(world.lobby, "ALPHA", "A", 0, account="ALPHA")
     out = ask(h, "/WHO alpha")
     assert b"ALPHA: A RED" in out and b"NO RECORD YET" in out
     world.progress.save(other.key, ProgressRecord((3, 2, 1, 1, 5, 4, 0, 1, 2), -2, 957, 1670, 500))
@@ -270,7 +270,8 @@ def test_who_callsign_gives_location_and_the_record() -> None:
 def test_who_callsign_reads_the_record_of_that_pilot_not_the_askers() -> None:
     world = make_world()
     h = enter_lobby(world)
-    other = add(world.lobby, "ALPHA", "A", 0)
+    h = enter_lobby(world, "BRAVO,pw")
+    other = add(world.lobby, "ALPHA", "A", 0, account="ALPHA")
     assert h.session.member is not None
     world.progress.save(h.session.member.key, ProgressRecord((1,) * 9, 0, 11, 22, 33))
     world.progress.save(other.key, ProgressRecord((2,) * 9, 0, 44, 55, 66))
@@ -278,19 +279,30 @@ def test_who_callsign_reads_the_record_of_that_pilot_not_the_askers() -> None:
     assert b"SCORE: 55" in out and b"SCORE: 22" not in out
 
 
-def test_score_shows_the_players_own_record_for_a_guest_and_for_an_account() -> None:
+def test_score_shows_the_players_own_record_and_tells_a_guest_none_is_kept() -> None:
     world = make_world()
-    guest = enter_lobby(world)
-    assert b"NO RECORD YET" in ask(guest, "/SCORE")
-    world.progress.save("JOINGENI", ProgressRecord((5,) * 9, -7, 123, 4567, 89))
-    out = ask(guest, "/SCORE")
-    for expected in (b"RECORD OF JOINGENI", b"LAST GAME SCORE: 4567", b"CAREER TOTAL: 89"):
+    account = enter_lobby(world, "ALICE,pw")
+    assert b"NO RECORD YET" in ask(account, "/SCORE")
+    world.progress.save("acct:ALICE", ProgressRecord((5,) * 9, -7, 123, 4567, 89))
+    out = ask(account, "/SCORE")
+    for expected in (b"RECORD OF ALICE", b"LAST GAME SCORE: 4567", b"CAREER TOTAL: 89"):
         assert expected in out
     assert b"BAY POINTS: 123" in out and b"BAYS: 5 5 5 5 5 5 5 5 5" in out
     assert b"BATTLE MARKER: -7" in out
-    account = enter_lobby(world, "ALICE,pw")
-    world.progress.save("acct:ALICE", ProgressRecord((4,) * 9, 3, 1, 2, 3))
-    assert b"BATTLE MARKER: 3" in ask(account, "/SCORE")
+    guest = enter_lobby(world)
+    world.progress.save("JOINGENI", ProgressRecord((4,) * 9, 3, 1, 2, 3))  # never read (II §11.3)
+    out = ask(guest, "/SCORE")
+    assert b"GUESTS' PROGRESS IS NOT KEPT" in out and b"BATTLE MARKER" not in out
+
+
+def test_who_shows_a_guest_without_a_record() -> None:
+    world = make_world()
+    h = enter_lobby(world, "ALICE,pw")
+    enter_lobby(world)
+    world.progress.save("JOINGENI", ProgressRecord((4,) * 9, 3, 1, 2, 3))
+    out = ask(h, "/WHO joingeni")
+    assert b"JOINGENI: CHAMBER" in out and b"NO RECORD IS KEPT" in out
+    assert b"BATTLE MARKER" not in out
 
 
 def test_an_unreadable_record_is_reported_and_the_session_carries_on() -> None:
@@ -299,9 +311,9 @@ def test_an_unreadable_record_is_reported_and_the_session_carries_on() -> None:
             raise OSError("gone")
 
     world = make_world(progress=Broken())
-    h = enter_lobby(world)
+    h = enter_lobby(world, "ALICE,pw")
     assert b"CANNOT BE READ" in ask(h, "/SCORE")
-    assert b"CANNOT BE READ" in ask(h, "/WHO joingeni")
+    assert b"CANNOT BE READ" in ask(h, "/WHO alice")
     assert b"PILOTS ONLINE" in ask(h, "/STATUS")
 
 

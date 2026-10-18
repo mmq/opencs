@@ -94,14 +94,17 @@ def test_the_stored_record_is_unchanged_by_a_session_that_reports_nothing_new() 
     assert saved(world).career == 500 and world.progress.load(KEY) is not None
 
 
-def test_guests_are_keyed_by_their_callsign_in_connection_order() -> None:
+def test_guests_are_neither_saved_nor_restored() -> None:
     world = make_world()
+    world.progress.save("JOINGENI", ProgressRecord((5,) * 9, 2, 900, 0, 0))
     a, b = start(world, "JOINGENIE"), start(world, "JOINGENIE")
     for h in (a, b):
         land(h)
     a.feed(frame(client.Bays((2, 2, 2, 2, 0, 0, 0, 0, 0), 0)))
     b.feed(frame(client.Bays((4, 4, 4, 4, 0, 0, 0, 0, 0), 0)))
-    assert saved(world, "JOINGENI").bays[0] == 2 and saved(world, "JOINGEN2").bays[0] == 4
+    a.feed(frame(client.Status(40, 3, 1_100)))
+    assert saved(world, "JOINGENI").bays[0] == 5  # the old record, untouched and unread
+    assert world.progress.load("JOINGEN2") is None
 
 
 # --- saving -----------------------------------------------------------------------------------

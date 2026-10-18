@@ -55,8 +55,15 @@ def hash_password(password: str, salt: bytes, iterations: int) -> bytes:
 class Identity:
     """Logs players in and out and hands out callsigns."""
 
-    def __init__(self, store: AccountStore, *, iterations: int = policy.PBKDF2_ITERATIONS) -> None:
+    def __init__(
+        self,
+        store: AccountStore,
+        *,
+        guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES,
+        iterations: int = policy.PBKDF2_ITERATIONS,
+    ) -> None:
         self._store = store
+        self._guest_names = frozenset(name.upper() for name in guest_names)
         self._iterations = iterations
         self._callsigns: set[str] = set()
         self._accounts: set[str] = set()
@@ -64,19 +71,22 @@ class Identity:
     def login(self, line: str) -> Pilot | Refused:
         """Resolve an account line (I §5.1): ``NAME,PASSWORD`` or ``NAME``.
 
-        - ``NAME`` alone, or ``JOINGENIE`` with anything after it, is a guest: it gets a callsign
-          from its name (II §3).
+        - A configured guest name, with or without anything after it, is a guest: it gets a
+          callsign from its name (II §3). ``JOINGENIE`` is refused when it is not one.
         - ``NAME,PASSWORD`` is a real account: the first login registers the password, later
-          ones must match, a second simultaneous one is refused (II §3).
+          ones must match, a second simultaneous one is refused (II §3). ``NAME`` alone is
+          refused for want of a password.
         """
-        name, comma, password = line.strip().partition(",")
+        name, _, password = line.strip().partition(",")
         name = name.strip().upper()
         if not name:
             return Refused("EMPTY LOGIN NAME")
         if len(name) > policy.MAX_ACCOUNT_NAME_LENGTH:
             return Refused("LOGIN NAME TOO LONG")
-        if not comma or name == policy.GUEST_ACCOUNT_NAME:
+        if name in self._guest_names:
             return self._guest(name)
+        if name == policy.GUEST_ACCOUNT_NAME:
+            return Refused("GUEST LOGINS ARE TURNED OFF ON THIS SERVER")
         return self._account(name, password)
 
     def release(self, pilot: Pilot) -> None:
