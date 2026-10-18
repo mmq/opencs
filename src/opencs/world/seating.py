@@ -7,6 +7,7 @@ game and notes the record.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
@@ -19,6 +20,8 @@ from opencs.world.progress import SavedProgress
 from opencs.world.resume import ResumeRecord
 from opencs.world.view import ClientView
 from opencs.world.weather import CLIENT_CONDITION, WEATHER_KEY
+
+log = logging.getLogger("opencs.world")
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +73,18 @@ def seat(
         return JoinRefused(f"{policy.TEAM_NAMES[team]} IS FULL")
     player_id = ids.allocate(IdRange.PLAYER, earliest_start, holds)
     if player_id is None:
+        # Inherent in I §6.2, II §8: a client that stays long enough has been introduced to every id
+        # in the range and its registry never unlinks one, so it holds the range until it leaves.
+        longest = sorted(players.values(), key=lambda p: p.view.joined_at)[:3]
+        log.warning(
+            "city %s: %s refused, no free player id: the range is held by connected clients, "
+            "longest-connected first: %s",
+            config.letter,
+            callsign,
+            ", ".join(
+                f"{p.callsign} (id {p.id}, joined at {p.view.joined_at:.0f})" for p in longest
+            ),
+        )
         return JoinRefused("NO FREE PLAYER ID")
     index = free[0]
     try:

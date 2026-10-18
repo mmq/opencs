@@ -89,6 +89,7 @@ in policy.
 | shot log | `SHOT_LOG_MAX` | `world/test_combat`; ceiling in `fuzz/test_fuzz_session::test_a_long_hostile_run_leaves_each_players_records_bounded` |
 | hit set, loadout and score ledgers, attack history | aged out or fixed size | same ceiling test |
 | a client's view | `ever_held` is bounded by the id ranges | `longrun/test_city_48h` |
+| player ids held by long-connected clients | a pilot who stays through every id's introduction holds the 240-id range (I §6.2: one byte, a registry that never unlinks); inherent in II §8 | the join is refused ("NO FREE PLAYER ID") until one leaves; a warning names the longest-connected players | `world/test_seating::test_a_join_refused_for_want_of_a_player_id_is_logged_with_who_holds_the_range` |
 | dropped modules, mines, called Sentinels, Munchers | `MAX_DROPS`, `MAX_MINES`, `MAX_CALLED_SENTINELS`, `MAX_MUNCHERS` | `world/test_drops`, `test_effects`, `test_sentinels`, `test_munchers` |
 | waiting guppy jobs | `MAX_WAITING_JOBS`, `MAX_WAITING_TOWER_ORDERS` | `world/test_orders`, `test_module_orders` |
 | released-id pool | at most the range's size; double releases ignored | `world/test_ids` |
