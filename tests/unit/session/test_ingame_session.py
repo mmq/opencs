@@ -496,7 +496,7 @@ def test_orders_for_no_catalog_module_beyond_their_burst_keep_the_connection_ope
     order = frame(client.ModuleOrder(10, 1, 0))
     h.feed(order * (burst + 1))
     assert not h.io.closed
-    assert h.session.phase._bad.total == 1  # type: ignore[attr-defined]
+    assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
     assert sent(h) == []
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
@@ -530,6 +530,31 @@ def test_module_and_effect_messages_that_name_nothing_never_raise_out_of_the_ses
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
+def test_messages_over_a_relay_budget_are_dropped_but_are_not_bad_input() -> None:
+    h = reported_game()
+    burst = int(policy.RELAY_LIMIT_SHOT[0])
+    h.feed(frame(client.Shot(0, report(0).pos, 0, 0, 1)) * (burst + 10))
+    assert phase(h).relay_drops == 10
+    assert phase(h)._bad.total == 0
+
+
+def test_an_honest_stall_of_just_under_the_silence_limit_then_its_backlog_never_closes() -> None:
+    """A noisy line that delivers 14 s of real-rate traffic at once (D8) is not abuse. Rates are
+    the captures' peaks: 'b' 3/s, shots 17 per 10 s, chat and Grenades 1/s."""
+    h = reported_game()
+    seconds = int(policy.SILENCE_SECONDS) - 1
+    backlog = (
+        frame(report(4)) * (3 * seconds)
+        + frame(client.Shot(0, report(0).pos, 0, 0, 1)) * (2 * seconds)
+        + frame(client.Chat(0, b"hi")) * seconds
+        + frame(client.Grenade(report(0).pos, 0, 0)) * seconds
+    )
+    h.feed(backlog)
+    assert not h.io.closed
+    assert phase(h)._bad.total == 0
+    assert phase(h).relay_drops > 0  # the budgets did shed some of it
+
+
 # --- the frame rate ----------------------------------------------------------------------------
 
 
@@ -559,10 +584,10 @@ def test_a_flood_of_frames_closes_the_connection() -> None:
     assert h.io.closed_with == ["too much bad input"]
 
 
-def test_the_real_clients_rate_is_never_limited() -> None:
+def test_a_rate_far_above_the_real_clients_send_rate_is_never_limited() -> None:
     h = play(make_world())
     sent(h)
-    for _ in range(20):  # 20 s at the client's ceiling of ~50 packets a second
+    for _ in range(20):  # 20 s at 50 frames a second, ten times what the client sends
         h.feed(pings(50))
         h.advance(1.0)
     assert phase(h)._bad.total == 0 and not h.io.closed

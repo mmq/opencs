@@ -15,8 +15,11 @@ minute; I §4.1 says a frame that does not decode is dropped, never a reason to 
 |---|---|---|---|
 | login | a line over `MAX_LINE_BYTES`; more than `LOGIN_MAX_LINES` lines; more than `LOGIN_PREAMBLE_LIMIT` bytes before `HHH` | per connection, lifetime (the phase lasts seconds) | close |
 | Chamber | a line past the token bucket (`CHAMBER_BURST_LINES`, `CHAMBER_LINES_PER_SECOND`): dropped, one warning | `CHAMBER_FLOOD_DROPS` drops in `CHAMBER_FLOOD_WINDOW` s | close |
-| in game | a frame failing LEN, CK or its checksum; a payload that does not decode; a frame over the frame bucket (`FRAME_LIMIT`); a relayed message over its kind's bucket (`RELAY_LIMIT_*`) | `MAX_BAD_INPUT` in `BAD_INPUT_WINDOW` s (`WindowedCounter`) | close ("too much bad input") |
+| in game | a frame failing LEN, CK or its checksum; a payload that does not decode; a frame over the frame bucket (`FRAME_LIMIT`) | `MAX_BAD_INPUT` in `BAD_INPUT_WINDOW` s (`WindowedCounter`) | close ("too much bad input") |
 
+A relayed message over its kind's bucket (`RELAY_LIMIT_*`) is dropped and tallied in the session
+(`relay_drops`), **not** counted: an honest line that stalls for just under `SILENCE_SECONDS`
+delivers its backlog at once and can exceed a budget, and the frame bucket already catches a flood.
 A request the rules reject (an order for a module nobody stocks, a hit on an id naming nothing, a
 shot of an unsafe KIND) is **not** counted: an honest client can send those (a stale view, a race),
 the cost is bounded by the buckets above, and each is logged at debug or warned once
@@ -69,7 +72,7 @@ in policy.
 
 | input | bound | on violation | test |
 |---|---|---|---|
-| relayed kinds (`'b'`, `'c'`, `'I'`, chat, Grenade) | `RELAY_LIMIT_*` buckets | dropped, counted; a dropped shot is still logged for attribution, a dropped order is answered | `session/test_ingame` (budget tests), `session/test_ingame_session::test_a_shot_over_the_budget_is_not_relayed_but_still_reaches_the_shot_log` |
+| relayed kinds (`'b'`, `'c'`, `'I'`, chat, Grenade) | `RELAY_LIMIT_*` buckets | dropped and tallied (`relay_drops`, not bad input); a dropped shot is still logged for attribution, a dropped order is answered | `session/test_ingame` (budget tests), `session/test_ingame_session::test_a_shot_over_the_budget_is_not_relayed_but_still_reaches_the_shot_log`, `test_an_honest_stall_of_just_under_the_silence_limit_then_its_backlog_never_closes` |
 | orders, pickups, ejects, effects | `RELAY_LIMIT_ORDER`, `_MODULE_OPS`, `_EFFECT`; queues `MAX_WAITING_*` | refused or dropped | `world/test_orders`, `world/test_module_orders`, `world/test_effects` |
 | ids that name nothing, ids of the wrong kind, absurd positions and values | every handler ignores or logs; none raises | ignored (debug log) or counted by the city (`unsafe_shots` and friends) | `session/test_ingame_session::test_module_and_effect_messages_that_name_nothing_never_raise_out_of_the_session`, `fuzz/test_fuzz_session` (every A.2 type with random fields, ids that name something live or nothing, huge coordinates) |
 | unsafe shot KIND, state other than 0 or 1 relayed | never relayed | dropped, counted | `world/test_shots`, `fuzz/test_fuzz_session` (`ClientModel`) |

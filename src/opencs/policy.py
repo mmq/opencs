@@ -335,11 +335,12 @@ POD_STATE_FALLING = 1
 #: Per-session limits on the client messages the city relays to other players (DESIGN §5 "Input is
 #: hostile"; I §8, I §8.24, I §8.25, I §9.3.5): a token bucket per kind, ``(burst, per second)``.
 #: One relayed frame lands in every other outbox, so an unlimited sender could overflow them and get
-#: the receivers disconnected (``OUTBOX_LIMIT``). Excess frames are dropped and counted as bad
-#: input, so a sustained flood closes the flooder's own connection (``MAX_BAD_INPUT``). Sized from
-#: the real captures, whose peaks per kind are: 'b' 3 in 1 s and 20 in 10 s; shots (Rapid Fire,
-#: Tri-Shot) 3 in 1 s and 17 in 10 s; chat 1 per second; Grenades 1 per second. Each limit is about
-#: four times the sustained peak with a burst of several seconds' worth. Ours.
+#: the receivers disconnected (``OUTBOX_LIMIT``). Excess frames are dropped and tallied, not counted
+#: as bad input: an honest line that stalls for just under ``SILENCE_SECONDS`` delivers its backlog
+#: at once and can exceed a budget. A flood is still caught by ``FRAME_LIMIT``. Sized from the real
+#: captures, whose peaks per kind are: 'b' 3 in 1 s and 20 in 10 s; shots (Rapid Fire, Tri-Shot) 3
+#: in 1 s and 17 in 10 s; chat 1 per second; Grenades 1 per second. Each limit is about four times
+#: the sustained peak with a burst of several seconds' worth. Ours.
 RELAY_LIMIT_POD_STATE = (12, 8.0)
 
 #: Per-session limit on frames of every kind, before they are decoded: a token bucket ``(burst, per

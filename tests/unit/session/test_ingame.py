@@ -174,26 +174,28 @@ def relayed_in_game() -> tuple[Harness, list[ClientMessage]]:
     return h, seen
 
 
-def test_chat_beyond_its_burst_is_dropped_and_counted_not_relayed() -> None:
+def test_chat_beyond_its_burst_is_dropped_and_tallied_not_relayed() -> None:
     h, seen = relayed_in_game()
     burst, _ = policy.RELAY_LIMIT_CHAT
     h.feed(b"".join(CHAT for _ in range(burst + 5)))
     assert len(seen) == burst
-    assert h.session.phase._bad.total == 5  # type: ignore[attr-defined]
+    assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
+    assert h.session.phase.relay_drops == 5  # type: ignore[attr-defined]
     assert not h.io.closed
 
 
-def test_hit_reports_beyond_their_burst_are_dropped_and_counted_not_relayed() -> None:
+def test_hit_reports_beyond_their_burst_are_dropped_and_tallied_not_relayed() -> None:
     # Each credited hit lands in the victim's outbox (I §9.1.4), so it is budgeted too.
     h, seen = relayed_in_game()
     burst, _ = policy.RELAY_LIMIT_HIT
     hit = frame(client_payload(client.HitReport(1, 10)))
     h.feed(hit * (burst + 3))
     assert len(seen) == burst
-    assert h.session.phase._bad.total == 3  # type: ignore[attr-defined]
+    assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
+    assert h.session.phase.relay_drops == 3  # type: ignore[attr-defined]
 
 
-def test_orders_beyond_their_burst_are_dropped_and_counted_not_queued() -> None:
+def test_orders_beyond_their_burst_are_dropped_and_tallied_not_queued() -> None:
     # Each accepted order queues work for the team's guppy, so a flood is bounded here too.
     h, seen = relayed_in_game()
     burst, _ = policy.RELAY_LIMIT_ORDER
@@ -202,10 +204,11 @@ def test_orders_beyond_their_burst_are_dropped_and_counted_not_queued() -> None:
     h.feed(tower * (burst + 2))
     h.feed(module * (burst + 2))
     assert len(seen) == 2 * burst
-    assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
+    assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
+    assert h.session.phase.relay_drops == 4  # type: ignore[attr-defined]
 
 
-def test_pickups_and_ejects_beyond_their_burst_are_dropped_and_counted() -> None:
+def test_pickups_and_ejects_beyond_their_burst_are_dropped_and_tallied() -> None:
     # Each one is broadcast to every other client (a 'Q' destroy, a 'P'), so they are budgeted.
     h, seen = relayed_in_game()
     burst, _ = policy.RELAY_LIMIT_MODULE_OPS
@@ -214,10 +217,11 @@ def test_pickups_and_ejects_beyond_their_burst_are_dropped_and_counted() -> None
     h.feed(pickup * (burst + 2))
     h.feed(eject * (burst + 2))
     assert len(seen) == 2 * burst
-    assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
+    assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
+    assert h.session.phase.relay_drops == 4  # type: ignore[attr-defined]
 
 
-def test_effect_requests_and_air_support_beyond_their_burst_are_dropped_and_counted() -> None:
+def test_effect_requests_and_air_support_beyond_their_burst_are_dropped_and_tallied() -> None:
     # Each can broadcast ('J', 'F', 'R') or queue a guppy job, so they are budgeted (M5 convention).
     h, seen = relayed_in_game()
     burst, _ = policy.RELAY_LIMIT_EFFECT
@@ -226,7 +230,8 @@ def test_effect_requests_and_air_support_beyond_their_burst_are_dropped_and_coun
     h.feed(effect * (burst + 2))
     h.feed(strike * (burst + 2))
     assert len(seen) == 2 * burst
-    assert h.session.phase._bad.total == 4  # type: ignore[attr-defined]
+    assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
+    assert h.session.phase.relay_drops == 4  # type: ignore[attr-defined]
 
 
 def test_leg_reports_are_not_rate_limited_so_no_honest_count_can_be_cut_short() -> None:
@@ -249,9 +254,10 @@ def test_the_budget_refills_with_time() -> None:
 
 
 def test_a_sustained_flood_closes_the_flooder() -> None:
+    # The relay budget sheds the chat; it is the frame rate that marks the flood as bad input.
     h, seen = relayed_in_game()
     burst, _ = policy.RELAY_LIMIT_CHAT
-    h.feed(b"".join(CHAT for _ in range(burst + policy.MAX_BAD_INPUT + 1)))
+    h.feed(CHAT * (int(policy.FRAME_LIMIT[0]) + policy.MAX_BAD_INPUT + 1))
     assert len(seen) == burst
     assert h.io.closed_with == ["too much bad input"]
 
