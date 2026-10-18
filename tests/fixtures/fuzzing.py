@@ -47,6 +47,7 @@ LIKELY: dict[tuple[str, str], list[int]] = {
     ("ModuleOrder", "priority"): [0, 1, 2, 3],
     ("Chat", "style"): [0, 0, 1, 2],
     ("HitReport", "damage"): [11, 21, 31, 91, 15, 0, 100],
+    ("Bays", "marker"): [0, 1, 2, 3, 5],
     ("Status", "multiplier"): [1, 2, 3, 8, 20],
 }
 
@@ -86,7 +87,7 @@ def _value(rng: random.Random, hint: object, known: Sequence[int] = ()) -> objec
         )
     origin = typing.get_origin(hint)
     if origin is tuple:
-        return tuple(_value(rng, int) for _ in range(9))
+        return tuple(rng.choice([0, 1, 1, 2, 3, 6, 7, 40]) for _ in range(9))
     if origin in (typing.Union, types.UnionType):
         args = [a for a in typing.get_args(hint)]
         return (
