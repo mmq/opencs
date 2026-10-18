@@ -108,6 +108,14 @@ def test_duplicate_letter(tmp_path: Path) -> None:
         load_config(write_config(tmp_path, {"A": CITY, "A2": CITY}))
 
 
+def test_default_city_must_be_enabled(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path, {"A": with_line("enabled = false"), "B": CITY.replace('"A"', '"B"')}
+    )
+    with pytest.raises(ConfigError, match="default_city: 'A' is disabled"):
+        load_config(path)
+
+
 def test_default_city_must_be_loaded(tmp_path: Path) -> None:
     path = write_config(tmp_path, {"A": CITY}, server='default_city = "Z"\n')
     with pytest.raises(ConfigError, match="default_city"):

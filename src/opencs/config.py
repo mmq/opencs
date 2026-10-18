@@ -501,8 +501,14 @@ def load_config(path: Path | str) -> AppConfig:
         if city.letter in cities:
             raise ConfigError(f"{city_path}: letter: duplicate city letter {city.letter!r}")
         cities[city.letter] = city
-    if server.default_city not in cities:
+    default = cities.get(server.default_city)
+    if default is None:
         raise ConfigError(
             f"{server_path}: default_city: {server.default_city!r} is not a loaded city"
+        )
+    if not default.enabled:  # the lobby must always have a city to offer a new pilot
+        raise ConfigError(
+            f"{server_path}: default_city: {server.default_city!r} is disabled; "
+            "name an enabled city or enable it"
         )
     return AppConfig(server=server, cities=tuple(cities[k] for k in sorted(cities)))
