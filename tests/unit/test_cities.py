@@ -15,10 +15,10 @@ import pytest
 
 from fixtures.lobbies import city
 from fixtures.loopback import TIMEOUT, LogWatch, TickGate, local_config, start
-from opencs.app import ConfigFile, build_services
+from opencs.app import build_services
 from opencs.cities import CityManager
 from opencs.clock import ManualClock
-from opencs.config import AppConfig, CityConfig, load_config
+from opencs.config import AppConfig, CityConfig, ConfigFile, load_config
 from opencs.lobby.lobby import Denied, Placement
 from opencs.session.phases import Services
 from opencs.world.seating import JoinResult

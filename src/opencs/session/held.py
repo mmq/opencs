@@ -73,6 +73,13 @@ class HeldGames:
         held = self._live(identity)
         return 0.0 if held is None else max(0.0, held.expires_at() - self._clock.now())
 
+    def live(self) -> list[tuple[ResumeRecord, float]]:
+        """Every live record with the seconds it can still be used, oldest drop first (status)."""
+        self._purge()
+        now = self._clock.now()
+        found = [(h.record, max(0.0, h.expires_at() - now)) for h in self._held.values()]
+        return sorted(found, key=lambda pair: pair[0].dropped_at)
+
     def discard(self, identity: str) -> ResumeRecord | None:
         """Give the record up (``/PLAY``, a refused or finished resume)."""
         held = self._held.pop(identity, None)

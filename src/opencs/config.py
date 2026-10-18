@@ -122,6 +122,15 @@ class AppConfig:
     cities: tuple[CityConfig, ...]  # sorted by letter
 
 
+@dataclass(frozen=True, slots=True)
+class ConfigFile:
+    """The file the running config came from, for ``reload`` (SIGHUP, the admin channel):
+    ``server`` is what the file said when it was read, before command-line overrides."""
+
+    path: Path
+    server: ServerConfig
+
+
 _REQUIRED: Any = object()  # sentinel: the key has no default
 
 

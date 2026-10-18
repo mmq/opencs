@@ -14,9 +14,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from opencs import policy
-from opencs.app import ConfigFile, Seams, serve
+from opencs.app import Seams, serve
 from opencs.clock import ManualClock
-from opencs.config import AppConfig, load_config
+from opencs.config import AppConfig, ConfigFile, load_config
 from opencs.messages import ClientMessage, ServerMessage, client_payload, decode_server, server
 from opencs.session.phases import Services
 from opencs.store.base import Stores

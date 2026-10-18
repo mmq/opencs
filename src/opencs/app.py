@@ -16,7 +16,7 @@ from pathlib import Path
 from opencs import policy
 from opencs.cities import CityManager
 from opencs.clock import Clock, MonotonicClock
-from opencs.config import AppConfig, ConfigError, ServerConfig, load_config
+from opencs.config import AppConfig, ConfigError, ConfigFile, load_config
 from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.control import SHUTDOWN_NOTICE, announce, remove_everyone
 from opencs.lobby.identity import Identity
@@ -76,15 +76,6 @@ def build_session_factory(services: Services) -> SessionFactory:
         return Session(io, services, ConnectionLog(logging.getLogger("opencs.session"), context))
 
     return factory
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigFile:
-    """The file the running config came from, for ``reload`` (SIGHUP, the admin channel):
-    ``server`` is what the file said when it was read, before command-line overrides."""
-
-    path: Path
-    server: ServerConfig
 
 
 @dataclass(frozen=True, slots=True)
