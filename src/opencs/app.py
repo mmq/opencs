@@ -5,20 +5,22 @@ cleanly on a signal.
 import argparse
 import asyncio
 import logging
+import os
 import random
 import signal
 import sys
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 from opencs import policy
+from opencs.admin import AdminServer, resolve_token
 from opencs.cities import CityManager
 from opencs.clock import Clock, MonotonicClock
 from opencs.config import AppConfig, ConfigError, ConfigFile, load_config
 from opencs.connlog import ConnectionContext, ConnectionLog
-from opencs.control import SHUTDOWN_NOTICE, announce, remove_everyone
+from opencs.control import SHUTDOWN_NOTICE, Control, announce, remove_everyone
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.logsetup import configure_logging
@@ -92,6 +94,12 @@ class Seams:
     services: Services | None = None
     tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     shutdown_deadline: float = policy.SHUTDOWN_DEADLINE
+    #: The environment the admin token is looked up in (``os.environ`` when None).
+    environ: Mapping[str, str] | None = None
+    #: Receives the admin channel's bound port once it listens.
+    admin_ready: Callable[[int], None] | None = None
+    #: Paces the countdown of ``shutdown <seconds>``.
+    delay: Callable[[float], Awaitable[None]] = asyncio.sleep
 
 
 async def serve(
@@ -192,6 +200,11 @@ async def _listen(
     seams: Seams,
 ) -> None:
     """Listen until ``stop`` is set, ticking the cities, then shut down gracefully."""
+    token = (
+        None
+        if config.server.admin.port is None
+        else resolve_token(config.server.admin, seams.environ or os.environ)
+    )  # before anything starts: a channel without a token must stop the server, not run open
     listener = Listener(
         build_session_factory(services),
         clock,
@@ -201,17 +214,26 @@ async def _listen(
     server = await listener.start(config.server.host, config.server.port)
     cities = CityManager(services, clock, seams.rng or random.Random(), seams.tick_sleep)
     cities.start()
+    control = Control(services, cities, stop, config_file, delay=seams.delay)
+    admin: AdminServer | None = None
     reload_signal = _on_sighup(cities, config_file)
-    bound = [sock.getsockname()[:2] for sock in server.sockets]
-    for address, bound_port in bound:
-        log.info("listening on %s:%d", address, bound_port)
-    port: int = bound[0][1]
-    if ready is not None:
-        ready(port)
     try:
+        if token is not None and config.server.admin.port is not None:
+            admin = AdminServer(control, token, clock)
+            admin_port = await admin.start(config.server.admin.port)
+            if seams.admin_ready is not None:
+                seams.admin_ready(admin_port)
+        bound = [sock.getsockname()[:2] for sock in server.sockets]
+        for address, bound_port in bound:
+            log.info("listening on %s:%d", address, bound_port)
+        if ready is not None:
+            ready(bound[0][1])
         await stop.wait()
     finally:
         reload_signal()
+        control.close()
+        if admin is not None:
+            await admin.stop()
         await _shutdown(services, listener, cities, seams.shutdown_deadline)
 
 
@@ -267,6 +289,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         asyncio.run(_run(config, config_file))
+    except ConfigError as exc:
+        print(f"opencs: {exc}", file=sys.stderr)
+        return 2
     except OSError as exc:
         server = config.server
         print(

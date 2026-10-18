@@ -142,7 +142,7 @@ class Client:
         return got
 
 
-async def start(
+async def start(  # noqa: PLR0913  (a test seam: one keyword per thing a test may swap)
     config: AppConfig,
     *,
     clock: ManualClock | None = None,
@@ -152,6 +152,7 @@ async def start(
     tick_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     shutdown_deadline: float = policy.SHUTDOWN_DEADLINE,
     config_file: ConfigFile | None = None,
+    seams: Seams | None = None,
 ) -> tuple[asyncio.Event, asyncio.Task[None], int]:
     stop = asyncio.Event()
     port_future: asyncio.Future[int] = asyncio.get_running_loop().create_future()
@@ -161,7 +162,8 @@ async def start(
             stop=stop,
             ready=port_future.set_result,
             config_file=config_file,
-            seams=Seams(
+            seams=seams
+            or Seams(
                 stores=stores or (None if services or on_disk else memory_stores()),
                 clock=clock,
                 services=services,
