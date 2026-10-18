@@ -29,6 +29,7 @@ from opencs.world.events import Event, ToPlayer, ToPlayers
 from opencs.world.hits import Hits
 from opencs.world.ids import IdRange, IdSpace
 from opencs.world.ledger import ProgressLedger
+from opencs.world.lifecycle import Lifecycle
 from opencs.world.modules import Drops, ModuleRules
 from opencs.world.npcs.munchers import Munchers
 from opencs.world.npcs.sentinels import Sentinels
@@ -99,6 +100,9 @@ class City:
         )
         #: Shots and hit reports (I §9.1.2, II §9.3).
         self.hits = Hits(self, self.orders, self.effects, [self.sentinels, self.munchers])
+        self._lifecycle = Lifecycle(
+            self.weather, self.sentinels, self.munchers, self.orders, self.drops, self.effects
+        )
         self._handlers: dict[type[ClientMessage], Handler] = {
             **module_handlers(self.orders, self.drops, self.effects, self.munchers),
             client.PodState: lambda p, m, now: pod_state(self, p, _as(client.PodState, m), now),
@@ -194,7 +198,8 @@ class City:
             return seated
         player, hello = seated
         if not self._in_game:
-            self._start_game(now)
+            self._in_game = True
+            self._lifecycle.start(now)
         self._players[player.id] = player
         self._ledger.note(player)
         return JoinResult(player.id, team, player.index, hello)
@@ -245,28 +250,11 @@ class City:
 
     def _reset_if_abandoned(self) -> None:
         """Reset the world when nobody is here and nothing is held for anyone (S13)."""
-        if not self._players and not self._reservations.slots(self.config.letter):
-            self._reset()
-
-    def _start_game(self, now: float) -> None:
-        """The first player is in: the city's game begins, and the clocks of its programs with
-        it (II §17, II §5)."""
-        self._in_game = True
-        self.weather.start(now)
-        self.sentinels.start(now)  # nobody has reported yet, so nobody is sent anything
-        self.munchers.start(now)
-
-    def _reset(self) -> None:
-        """Nobody is here: the next game starts fresh (S13)."""
-        self._in_game = False
-        self._ids = IdSpace(self._id_ranges)
-        self._live.clear()
-        self.orders.reset()
-        self.drops.reset()
-        self.weather.reset()
-        self.sentinels.reset()
-        self.munchers.reset()
-        self.effects.reset()
+        if Lifecycle.abandoned(self._players, self._reservations.slots(self.config.letter)):
+            self._in_game = False
+            self._ids = IdSpace(self._id_ranges)
+            self._live.clear()
+            self._lifecycle.reset()
 
     def _any_client_has_had(self, entity_id: int) -> bool:
         """Whether a connected client's registry may hold a node under this id (I §6.2)."""
