@@ -188,24 +188,18 @@ class InGamePhase(Phase):
     def closed(self) -> None:
         """The socket ended. While playing, with the server not the one that closed it, that is a
         line drop (II §13 item 1). A close the server made for bad input still runs the fight
-        test, since hanging up must not dodge a death, but leaves nothing to resume. After a quit
-        the player is already out."""
+        test, since hanging up must not dodge a death, but leaves nothing to resume. A removal for
+        shutdown or by an admin never gets here: it goes through ``remove``, which leaves the city
+        cleanly first (our rule for a server-side close in a fight; see I §5.5 (unprompted Quit), II
+        §13). After a quit the player is already out."""
         reason = self.host.close_reason
         if self.stage is Stage.PLAYING and reason is None:
             self._line_dropped(self.host.now())
-        elif self.stage is Stage.PLAYING and self._close_runs_fight_test(reason):
+        elif self.stage is Stage.PLAYING:
             self._line_dropped(self.host.now(), by_server=True)
         else:
             self._leave_city()
         self.stage = Stage.GONE
-
-    @staticmethod
-    def _close_runs_fight_test(reason: str | None) -> bool:
-        """Whether a close the server made is judged like a drop: yes for what the peer caused
-        (bad input, a stalled frame). A removal for shutdown or by an admin never gets here: it
-        goes through ``remove``, which leaves the city cleanly first (our rule for a server-side
-        close in a fight; see I §5.5 (unprompted Quit), II §13)."""
-        return True
 
     def _line_dropped(self, fight_at: float, *, by_server: bool = False) -> None:
         """The line dropped mid-game (II §13): the city decides whether it was a fight, which
