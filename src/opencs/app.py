@@ -18,6 +18,7 @@ from opencs.config import AppConfig, ConfigError, load_config
 from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
+from opencs.logsetup import configure_logging
 from opencs.net.connection import ConnectionIO, SessionFactory
 from opencs.net.listener import Listener
 from opencs.routing import Router
@@ -201,10 +202,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if v is not None
     }
     config = replace(config, server=replace(config.server, **overrides))
-    logging.basicConfig(
-        level=config.server.log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    try:
+        configure_logging(config.server.logging)
+    except OSError as exc:
+        print(f"opencs: cannot open the log file: {exc.strerror or exc}", file=sys.stderr)
+        return 2
     try:
         asyncio.run(_run(config))
     except OSError as exc:

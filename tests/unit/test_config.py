@@ -134,7 +134,11 @@ def test_unknown_server_key_and_bad_types(tmp_path: Path) -> None:
         ('default_city = "A"\nbogus = 1\n', "bogus"),
         ('default_city = "A"\nport = "x"\n', "port"),
         ('default_city = "A"\nport = 70000\n', "port"),
-        ('default_city = "A"\nlog_level = "LOUD"\n', "log_level"),
+        ('default_city = "A"\n[logging]\nlevel = "LOUD"\n', "logging.level"),
+        ('default_city = "A"\n[logging.levels]\nbogus = "INFO"\n', "logging.levels.bogus"),
+        ('default_city = "A"\n[logging.levels]\nnet = "LOUD"\n', "logging.levels.net"),
+        ('default_city = "A"\n[logging]\nmax_bytes = 0\n', "logging.max_bytes"),
+        ('default_city = "A"\n[logging]\nformat = "%(nope)s"\n', "logging.format"),
     ]:
         with pytest.raises(ConfigError, match=f": {key}:"):
             load_config(write_config(tmp_path, {"A": CITY}, server=text))
@@ -205,10 +209,10 @@ def test_code_defaults_match_the_shipped_file(tmp_path: Path) -> None:
     shipped = load_config(SHIPPED).server
     bare = load_config(write_config(tmp_path, {"A": CITY})).server
     assert bare.data_dir.relative_to(tmp_path) == shipped.data_dir.relative_to(SHIPPED.parent)
-    assert (bare.host, bare.port, bare.log_level) == (
+    assert (bare.host, bare.port, bare.logging.level) == (
         shipped.host,
         shipped.port,
-        shipped.log_level,
+        shipped.logging.level,
     )
 
 
@@ -385,3 +389,15 @@ def test_a_rain_only_program_has_no_light_spacing_to_check(tmp_path: Path) -> No
 def test_an_unknown_key_in_a_step_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="notes"):
         load_city(tmp_path, '\n[[ambient]]\nafter = 1\nnotes = "x"\n')
+
+
+def test_logging_table_is_read(tmp_path: Path) -> None:
+    text = (
+        'default_city = "A"\n[logging]\nlevel = "debug"\nfile = "logs/x.log"\n'
+        'max_bytes = 100\nbackups = 2\n[logging.levels]\nnet = "warning"\nworld = "ERROR"\n'
+    )
+    logging_config = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.logging
+    assert logging_config.level == "DEBUG"
+    assert logging_config.levels == (("net", "WARNING"), ("world", "ERROR"))
+    assert logging_config.file == tmp_path / "logs" / "x.log"
+    assert (logging_config.max_bytes, logging_config.backups) == (100, 2)

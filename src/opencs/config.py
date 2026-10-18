@@ -4,6 +4,8 @@
 and wrong types raise ``ConfigError`` naming the file and the key, so a typo fails at startup.
 """
 
+from __future__ import annotations
+
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,6 +24,20 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class LoggingConfig:
+    """``[logging]`` in ``server.toml`` (DESIGN §6): the level of everything, a level for chosen
+    layers, the line format and an optional rotating file."""
+
+    level: str = policy.DEFAULT_LOG_LEVEL
+    #: Layer name (``policy.LOG_LAYERS``) -> level, overriding ``level`` for ``opencs.<layer>``.
+    levels: tuple[tuple[str, str], ...] = ()
+    format: str = policy.DEFAULT_LOG_FORMAT
+    file: Path | None = None
+    max_bytes: int = policy.DEFAULT_LOG_MAX_BYTES
+    backups: int = policy.DEFAULT_LOG_BACKUPS
+
+
+@dataclass(frozen=True, slots=True)
 class ServerConfig:
     """Process-wide settings (``server.toml``)."""
 
@@ -29,7 +45,7 @@ class ServerConfig:
     port: int
     data_dir: Path
     cities_dir: Path
-    log_level: str
+    logging: LoggingConfig
     default_city: str  # II §4.2: the city a bare /PLAY picks when all are empty
     #: Upper case; empty turns guests off (II §3).
     guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES
@@ -88,13 +104,14 @@ _REQUIRED: Any = object()  # sentinel: the key has no default
 class _Table:
     """A TOML table with typed, key-checked access that reports errors with file and key."""
 
-    def __init__(self, path: Path, data: Mapping[str, Any]) -> None:
+    def __init__(self, path: Path, data: Mapping[str, Any], prefix: str = "") -> None:
         self._path = path
         self._data = data
+        self._prefix = prefix
         self._seen: set[str] = set()
 
     def fail(self, key: str, problem: str) -> ConfigError:
-        return ConfigError(f"{self._path}: {key}: {problem}")
+        return ConfigError(f"{self._path}: {self._prefix}{key}: {problem}")
 
     def _get(self, key: str, default: Any, kind: type | tuple[type, ...], kind_name: str) -> Any:
         self._seen.add(key)
@@ -138,6 +155,21 @@ class _Table:
         if not low <= value <= high:
             raise self.fail(key, f"{value} is outside {low:g}..{high:g}")
         return float(value)
+
+    def has(self, key: str) -> bool:
+        return key in self._data
+
+    def table(self, key: str) -> _Table:
+        """A ``[key]`` sub-table (empty when absent), checked like this one."""
+        data: Mapping[str, Any] = self._get(key, {}, dict, "a table")
+        return _Table(self._path, data, f"{self._prefix}{key}.")
+
+    def level(self, key: str, default: str) -> str:
+        """A log level name, upper-cased."""
+        value = self.string(key, default).upper()
+        if value not in LOG_LEVELS:
+            raise self.fail(key, f"must be one of {', '.join(LOG_LEVELS)}")
+        return value
 
     def tables(self, key: str) -> list[Mapping[str, Any]]:
         """An array of TOML tables (``[[key]]``), or an empty list."""
@@ -255,6 +287,44 @@ def _parse_ambient(path: Path, table: _Table) -> tuple[AmbientStep, ...]:
     return tuple(steps)
 
 
+def _parse_logging(path: Path, table: _Table) -> LoggingConfig:
+    """``[logging]``: levels by name, a layer table limited to the known loggers, a rotating file
+    (relative to the config file) with positive limits."""
+    section = table.table("logging")
+    levels_table = section.table("levels")
+    levels = tuple(
+        (layer, levels_table.level(layer, policy.DEFAULT_LOG_LEVEL))
+        for layer in policy.LOG_LAYERS
+        if levels_table.has(layer)
+    )
+    levels_table.done()
+    file_name = section.string("file", "")
+    config = LoggingConfig(
+        level=section.level("level", policy.DEFAULT_LOG_LEVEL),
+        levels=levels,
+        format=section.string("format", policy.DEFAULT_LOG_FORMAT),
+        file=path.parent / file_name if file_name else None,
+        max_bytes=section.integer(
+            "max_bytes", policy.DEFAULT_LOG_MAX_BYTES, low=1, high=policy.MAX_LOG_FILE_BYTES
+        ),
+        backups=section.integer(
+            "backups", policy.DEFAULT_LOG_BACKUPS, low=0, high=policy.MAX_LOG_BACKUPS
+        ),
+    )
+    section.done()
+    try:
+        config.format % {  # a format the logging module cannot apply fails here, not at 3 a.m.
+            "asctime": "",
+            "levelname": "",
+            "name": "",
+            "message": "",
+            "threadName": "",
+        }
+    except (KeyError, ValueError, TypeError) as exc:
+        raise section.fail("format", f"not a valid log format: {exc}") from exc
+    return config
+
+
 def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
     table = _Table(path, data)
     base = path.parent
@@ -263,7 +333,7 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
         port=table.integer("port", policy.DEFAULT_PORT, low=policy.MIN_PORT, high=policy.MAX_PORT),
         data_dir=base / table.string("data_dir", policy.DEFAULT_DATA_DIR),
         cities_dir=base / table.string("cities_dir", policy.DEFAULT_CITIES_DIR),
-        log_level=table.string("log_level", policy.DEFAULT_LOG_LEVEL).upper(),
+        logging=_parse_logging(path, table),
         default_city=table.string("default_city", policy.DEFAULT_CITY_LETTER),
         guest_names=tuple(
             name.strip().upper()
@@ -271,8 +341,6 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
         ),
     )
     table.done()
-    if config.log_level not in LOG_LEVELS:
-        raise table.fail("log_level", f"must be one of {', '.join(LOG_LEVELS)}")
     return config
 
 

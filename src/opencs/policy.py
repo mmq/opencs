@@ -23,6 +23,32 @@ DEFAULT_CITIES_DIR = "cities"
 #: Log level when none is configured. Ours.
 DEFAULT_LOG_LEVEL = "INFO"
 
+#: Layout of a log line when none is configured. Ours (DESIGN §6).
+DEFAULT_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+#: A log file rotates at this many bytes and keeps this many old files. Ours (DESIGN §6): five
+#: files of 5 MB bound the log's disk use at about 30 MB.
+DEFAULT_LOG_MAX_BYTES = 5_000_000
+DEFAULT_LOG_BACKUPS = 5
+MAX_LOG_FILE_BYTES = 1_000_000_000
+MAX_LOG_BACKUPS = 100
+
+#: The loggers a ``[logging.levels]`` table may set: one per layer (DESIGN §3, §6), named
+#: ``opencs.<layer>``, plus the parts that are not layers.
+LOG_LAYERS = (
+    "wire",
+    "messages",
+    "net",
+    "session",
+    "lobby",
+    "world",
+    "routing",
+    "store",
+    "app",
+    "admin",
+    "capture",
+)
+
 #: Valid TCP port numbers (0 asks the OS for a free one). I §3: transport is TCP.
 MIN_PORT = 0
 MAX_PORT = 65535
