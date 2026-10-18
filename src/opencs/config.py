@@ -49,6 +49,17 @@ class CaptureConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class AdminConfig:
+    """``[admin]``: the local operator channel (DESIGN §6). Off unless ``port`` is given. The token
+    is ``token`` if set, else the environment variable ``token_env`` names; the channel does not
+    start without one."""
+
+    port: int | None = None
+    token: str | None = None
+    token_env: str = policy.ADMIN_TOKEN_ENV
+
+
+@dataclass(frozen=True, slots=True)
 class ServerConfig:
     """Process-wide settings (``server.toml``)."""
 
@@ -58,6 +69,7 @@ class ServerConfig:
     cities_dir: Path
     logging: LoggingConfig
     capture: CaptureConfig
+    admin: AdminConfig
     default_city: str  # II §4.2: the city a bare /PLAY picks when all are empty
     #: Upper case; empty turns guests off (II §3).
     guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES
@@ -359,16 +371,33 @@ def _parse_capture(path: Path, table: _Table) -> CaptureConfig:
     return config
 
 
+def _parse_admin(table: _Table, game_port: int) -> AdminConfig:
+    section = table.table("admin")
+    port = section.optional_integer("port", low=policy.MIN_PORT, high=policy.MAX_PORT)
+    token = section.string("token", "") or None
+    config = AdminConfig(port, token, section.string("token_env", policy.ADMIN_TOKEN_ENV))
+    section.done()
+    if token is not None and len(token) < policy.ADMIN_TOKEN_MIN_LENGTH:
+        raise section.fail("token", f"must be at least {policy.ADMIN_TOKEN_MIN_LENGTH} characters")
+    if port and port == game_port:
+        raise section.fail("port", "must differ from the game port")
+    return config
+
+
 def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
     table = _Table(path, data)
     base = path.parent
+    game_port = table.integer(
+        "port", policy.DEFAULT_PORT, low=policy.MIN_PORT, high=policy.MAX_PORT
+    )
     config = ServerConfig(
         host=table.string("host", policy.DEFAULT_HOST),
-        port=table.integer("port", policy.DEFAULT_PORT, low=policy.MIN_PORT, high=policy.MAX_PORT),
+        port=game_port,
         data_dir=base / table.string("data_dir", policy.DEFAULT_DATA_DIR),
         cities_dir=base / table.string("cities_dir", policy.DEFAULT_CITIES_DIR),
         logging=_parse_logging(path, table),
         capture=_parse_capture(path, table),
+        admin=_parse_admin(table, game_port),
         default_city=table.string("default_city", policy.DEFAULT_CITY_LETTER),
         guest_names=tuple(
             name.strip().upper()

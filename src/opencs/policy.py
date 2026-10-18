@@ -76,6 +76,42 @@ SHUTDOWN_DEADLINE = 10.0
 #: After aborting, how long to wait for the aborted connections to finish unwinding. Ours.
 SHUTDOWN_ABORT_GRACE = 2.0
 
+# --- The admin channel (DESIGN §6) ---------------------------------------------------------------
+
+#: The admin channel listens on the loopback address only; it is not configurable, so a typo in
+#: ``server.toml`` cannot put it on the internet. Ours.
+ADMIN_HOST = "127.0.0.1"
+
+#: The environment variable holding the admin token when ``server.toml`` gives none. Ours.
+ADMIN_TOKEN_ENV = "OPENCS_ADMIN_TOKEN"
+
+#: The shortest token accepted (a guess must not be feasible even without the attempt limit).
+ADMIN_TOKEN_MIN_LENGTH = 16
+
+#: Longest admin line in bytes; a longer one closes the connection. Ours: an announcement is at
+#: most 230 characters (``limits.MAX_CHAT_BYTES``), plus the command word.
+ADMIN_MAX_LINE = 512
+
+#: Most admin connections at once; more are closed at once. Ours: one operator and a script.
+ADMIN_MAX_CONNECTIONS = 4
+
+#: Seconds an admin connection has to send its token, and may then stay silent. Ours.
+ADMIN_AUTH_TIMEOUT = 10.0
+ADMIN_IDLE_TIMEOUT = 600.0
+
+#: Commands per connection: a burst and a sustained rate per second (``TokenBucket``). Ours.
+ADMIN_COMMAND_LIMIT = (20, 5.0)
+
+#: Token attempts, over every admin connection: a burst, then one per ten seconds. Ours: it makes
+#: guessing a token (already long) slower still, and costs the operator nothing.
+ADMIN_AUTH_LIMIT = (5, 0.1)
+
+#: The longest delay ``shutdown <seconds>`` accepts, an hour. Ours.
+ADMIN_MAX_SHUTDOWN_SECONDS = 3600
+
+#: What a kick says when the operator gives no reason. Ours.
+ADMIN_DEFAULT_KICK_REASON = "REMOVED BY AN ADMINISTRATOR"
+
 # --- Connections (DESIGN §3.3, §5) --------------------------------------------------------------
 
 #: Connections accepted in total and from one address; more are closed at once. Ours (DESIGN §5

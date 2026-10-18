@@ -422,3 +422,33 @@ def test_bad_capture_values_name_the_key(tmp_path: Path, line: str, key: str) ->
     text = f'default_city = "A"\n[capture]\n{line}\n'
     with pytest.raises(ConfigError, match=f"capture.{key}:"):
         load_config(write_config(tmp_path, {"A": CITY}, server=text))
+
+
+def test_admin_is_off_by_default_and_reads_its_table(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, {"A": CITY})).server.admin.port is None
+    text = 'default_city = "A"\n[admin]\nport = 2400\ntoken = "0123456789abcdef"\n'
+    admin = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.admin
+    assert (admin.port, admin.token, admin.token_env) == (
+        2400,
+        "0123456789abcdef",
+        "OPENCS_ADMIN_TOKEN",
+    )
+    text = 'default_city = "A"\n[admin]\nport = 0\ntoken_env = "MY_TOKEN"\n'
+    admin = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.admin
+    assert (admin.port, admin.token, admin.token_env) == (0, None, "MY_TOKEN")
+
+
+@pytest.mark.parametrize(
+    ("body", "key"),
+    [
+        ('port = 2400\ntoken = "short"', "admin.token"),
+        ('port = 2399\ntoken = "0123456789abcdef"', "admin.port"),  # the game port
+        ("port = 70000", "admin.port"),
+        ('port = "x"', "admin.port"),
+        ("bogus = 1", "admin.bogus"),
+    ],
+)
+def test_bad_admin_values_name_the_key(tmp_path: Path, body: str, key: str) -> None:
+    text = f'default_city = "A"\n[admin]\n{body}\n'
+    with pytest.raises(ConfigError, match=f"{key}:"):
+        load_config(write_config(tmp_path, {"A": CITY}, server=text))
