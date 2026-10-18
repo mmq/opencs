@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from fixtures.lobbies import city
@@ -23,6 +24,7 @@ from opencs.session.session import Session
 from opencs.store.base import ProgressStore
 from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
 from opencs.world.city import City
+from opencs.world.ids import IdRange
 
 FAST_ITERATIONS = 1000
 
@@ -100,13 +102,17 @@ def make_world(
     seed: int = 1,
     start: float = 100.0,
     progress: ProgressStore | None = None,
+    id_ranges: Mapping[IdRange, tuple[int, int]] | None = None,
 ) -> World:
     clock = ManualClock(start)
     identity = Identity(MemoryAccountStore(), iterations=FAST_ITERATIONS)
     configs = cities or (city("A"), city("B"), city("C"))
     held = HeldGames(clock)
     lobby = Lobby(configs, default, random.Random(seed), held)
-    cities_by_letter = {c.letter: City(c, reservations=held) for c in configs}
+    cities_by_letter = {
+        c.letter: City(c, random.Random(seed), reservations=held, id_ranges=id_ranges)
+        for c in configs
+    }
     router = Router()
     progress = progress or MemoryProgressStore()
     services = Services(

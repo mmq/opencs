@@ -10,6 +10,7 @@ import types
 import typing
 from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
+from typing import Any
 
 from fixtures.sessions import FakeIO
 from opencs.messages import ClientMessage, ServerMessage, WirePos, WireXZ, client, server
@@ -111,7 +112,7 @@ def random_client_message(
         cls = rng.choice(kinds or CLIENT_TYPES)
         hints = typing.get_type_hints(cls, include_extras=False)
         try:
-            kwargs = {}
+            kwargs: dict[str, Any] = {}
             for f in fields(cls):  # type: ignore[arg-type]
                 likely = LIKELY.get((cls.__name__, f.name))
                 if likely and rng.random() < 0.7:
@@ -152,6 +153,10 @@ class ErrorLog(logging.Handler):
         return "\n".join(out)
 
 
+#: The messages that create an entity on the client under an id of the server's choosing.
+CREATES = (server.SpawnTower, server.SpawnSentinel, server.SpawnModule, server.SpawnMine)
+
+
 @dataclass
 class ClientModel:
     """What one client has been sent, replayed from the messages its session emitted, to check the
@@ -162,15 +167,25 @@ class ClientModel:
     self_id: int | None = None
     held: set[int] = field(default_factory=set)
     seen: set[int] = field(default_factory=set)
+    #: Every id this client has been sent a create for: its registry never unlinks one (I §6.2),
+    #: so a second create for any of them is a duplicate the client answers badly.
+    created: set[int] = field(default_factory=set)
     violations: list[str] = field(default_factory=list)
 
-    def absorb(self) -> None:
-        """Check every message emitted since the last call."""
-        # By identity: a ping reply is inserted ahead of the queue (``send_first``).
-        pending = [m for m in self.io.messages if id(m) not in self.seen]
-        for msg in sorted(pending, key=lambda m: isinstance(m, server.PingReply)):
-            self.seen.add(id(msg))
+    def absorb(self, *, consume: bool = False) -> list[ServerMessage]:
+        """Check every message emitted since the last call and return them. ``consume`` empties
+        the recording as it goes (a long run); otherwise it is kept and the messages already seen
+        are skipped by identity (a ping reply is inserted ahead of the queue, ``send_first``)."""
+        if consume:
+            pending = list(self.io.messages)
+            self.io.messages.clear()
+        else:
+            pending = [m for m in self.io.messages if id(m) not in self.seen]
+        for msg in pending:
+            if not consume:
+                self.seen.add(id(msg))
             self._check(msg)
+        return pending
 
     def _check(self, msg: ServerMessage) -> None:
         build_frame(server_payload(msg, BYTE_MIN))  # encodes into a valid frame
@@ -178,10 +193,16 @@ class ClientModel:
             if self.self_id is None:  # the 'B' is repeated until the first frame
                 self.self_id = msg.self_id
                 self.held = {msg.self_id}
+                self.created = {msg.self_id}
         elif isinstance(msg, server.Introduce):
-            if msg.id in self.held:
+            if msg.id in self.created:
                 self.violations.append(f"{self.name}: 'G' twice for id {msg.id}")
+            self.created.add(msg.id)
             self.held.add(msg.id)
+        elif isinstance(msg, CREATES):
+            if msg.id in self.created:
+                self.violations.append(f"{self.name}: {type(msg).__name__} twice for id {msg.id}")
+            self.created.add(msg.id)
         elif isinstance(msg, server.Delete):
             if msg.id not in self.held:
                 self.violations.append(f"{self.name}: 'H' for id {msg.id} it does not hold")
