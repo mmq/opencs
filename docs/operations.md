@@ -32,7 +32,7 @@ User=opencs
 WorkingDirectory=/opt/opencs
 # The admin token is a secret: keep it out of server.toml and out of the process list.
 EnvironmentFile=/etc/opencs/environment            # OPENCS_ADMIN_TOKEN=<at least 16 characters>
-ExecStart=/opt/opencs/.venv/bin/python -m opencs --config /etc/opencs/server.toml
+ExecStart=/opt/opencs/.venv/bin/python -m opencs --config /etc/opencs/server.toml --data-dir /var/lib/opencs
 ExecReload=/bin/kill -HUP $MAINPID                 # re-read the city files
 KillSignal=SIGTERM                                  # a graceful stop: players are saved
 TimeoutStopSec=30                                   # more than the 10 s shutdown deadline
@@ -43,6 +43,17 @@ NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
+```
+
+Paths in `server.toml` are relative to the file, and `/etc` is read-only under `ProtectSystem=strict`.
+`--data-dir` puts the database in a writable place; give the other two absolute paths to match
+`ReadWritePaths`:
+
+```toml
+[logging]
+file = "/var/log/opencs/opencs.log"
+[capture]
+dir = "/var/lib/opencs-captures"
 ```
 
 ### Ports and firewall
@@ -140,7 +151,10 @@ Set `[capture] enabled = true` (optionally `callsigns = ["ALPHA"]`) and restart.
 Times are seconds since the connection began. What the client types at the GEnie logon (the account
 line, with its password) is **never** recorded; the server's own prompts may appear. A file stops with a
 `# truncated` line at `max_bytes`; a file that cannot be written ends that capture and is logged, the
-connection carries on. Captures hold chat and callsigns: treat them as private.
+connection carries on. The directory as a whole is capped at 200 MB (`CAPTURE_DIR_MAX_BYTES`): before a
+new file is made the oldest capture files are removed (with a log line) until a full one fits; only files
+named as captures are touched, so a fixture you keep there is safe, but copy what you want to keep
+elsewhere. Capturing only the callsigns you are chasing (`callsigns`) keeps the history longer. Captures hold chat and callsigns: treat them as private.
 
 To make a bug into a test: copy the file into `tests/fixtures/captures/`, load it with
 `fixtures.captures.load_capture_file`, and replay it through a fresh city the way
@@ -172,11 +186,18 @@ closed; five attempts in a burst across all connections, then one per ten second
 is a command and each reply ends with an empty line. Bounds: lines of at most 512 bytes, 20 commands
 burst and 5 a second, 10 minutes of silence, 4 connections at once; any breach closes the connection.
 
+Trade-off: the token-attempt limit is shared by every connection, and the four connection slots are
+taken before a client has authenticated (for up to 10 seconds each). Any local user can therefore make
+the channel refuse the operator for a while by connecting or guessing in a loop. That is accepted: it
+costs the attacker a local account and denies service only to the channel (the game is unaffected),
+while slowing token guessing is what matters. If it happens, find the process (`ss -tnp` on the admin
+port) or restart the server, which resets the limits.
+
 | command | does |
 |---|---|
 | `status` | uptime; connections by phase (logon, Chamber, game); per city its players by team (and `[closing: no new players]`); held `/RESUME` games with the time left |
 | `announce <text>` | a system line (`'a'`, sender 100) on every started in-game client and a `*** text` line to each Chamber pilot. Text is made printable ASCII and cut to 230 characters. Says how many received it |
-| `kick <callsign> [reason]` | in a game: the reason as a system line, then an unprompted `'C'` (I §5.5, I §8.5): the client returns to the Chamber exactly as after its own quit, where the reason is shown again. In the Chamber or at the logon: a line, and the connection is closed. See "Kicks and shutdown" |
+| `kick <callsign> [reason]` | in a game: the reason as a system line, then an unprompted `'C'` (I §5.5, I §8.5): the client returns to the Chamber exactly as after its own quit, where the reason is shown again. In the Chamber: a line, and the connection is closed; at the logon, just closed (no line is sent). See "Kicks and shutdown" |
 | `guppy <team> home` | the failsafe for a stranded team guppy (below); `<team>` is RED, BLUE, GREEN, BLACK or 0-3; applies in every city that has that team's guppy |
 | `shutdown [seconds]` | with no argument, stops now; with seconds (at most 3600), announces and stops then. `shutdown cancel` withdraws a pending one |
 | `reload` | re-read the city files (below) |
@@ -189,6 +210,11 @@ A modified client reporting a guppy's legs early can leave a team's guppy waitin
 team's guppy to its corner and starts its count again; the interrupted order is flown again first and
 the queue follows in order. Do not repeat it within seconds (five `'L'` in a row make the client print
 `GUPPY MALFUNCTION`).
+
+One known window: a client's arrival report carries no leg number, so a report for the *old* leg that
+was already on its way when the warp was sent cannot be told from the warp's own arrival. The server
+then counts the stale one, and that client can end up one leg out of step again. If a team's orders
+are still stranded some seconds later, run the command once more (the failsafe is ours; II §14 allows one).
 
 ## Stopping, signals and kicks
 
@@ -226,8 +252,9 @@ error changes nothing and the first one is reported. Then, per city:
 
 A running game is never changed under its players (II §17). A `/PLAY` begun against the old
 configuration just before the swap is told "CITY x FILLED UP: TRY AGAIN". A change to `server.toml` (the
-port, logging, capture, admin, `default_city`) needs a restart; a reload says that it saw one. The
-default city cannot be removed (config validation refuses it).
+port, logging, capture, admin, `default_city`) needs a restart; a reload says that it saw one. A
+config whose `default_city` is missing or has `enabled = false` is refused at validation, at start-up and
+on `reload` alike (nothing changes), so the lobby always has a city to offer.
 
 ## Backups
 
@@ -247,7 +274,7 @@ backed up: a restart starts every city fresh.
 
 1. `git pull` and `uv sync`.
 2. Back up `opencs.db` (above).
-3. `shutdown 120` on the admin channel (players see the countdown), or `systemctl stop opencs`.
+3. `shutdown 120` on the admin channel (players are told once, at the start, that the server stops in 120 seconds; there is no repeating countdown), or `systemctl stop opencs`.
 4. Start the new version. The database schema only moves forward, automatically, on open
    (`MIGRATIONS` is append-only); a database from a newer server is refused rather than guessed at, so
    downgrading means restoring the pre-upgrade backup.
