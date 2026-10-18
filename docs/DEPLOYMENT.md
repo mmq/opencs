@@ -18,7 +18,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL=/usr/
 # the server, in /opt/opencs
 sudo git clone <the repository URL> /opt/opencs
 cd /opt/opencs
-sudo uv sync --no-dev                  # creates /opt/opencs/.venv with the project installed
+sudo uv sync --no-dev --python /usr/bin/python3.12   # makes /opt/opencs/.venv
 /opt/opencs/.venv/bin/python -m opencs --version     # opencs 1.0.0rc1
 ```
 
@@ -54,6 +54,9 @@ data_dir = "/var/lib/opencs"      # the unit also passes --data-dir
 
 [logging]
 file = "/var/log/opencs/opencs.log"
+
+[capture]
+dir = "/var/lib/opencs-captures"   # only used if capture is enabled
 
 # Optional: the operator channel, on 127.0.0.1 only.
 [admin]
@@ -92,7 +95,7 @@ an admin port without a usable token.
 | port | default | exposure |
 |---|---|---|
 | game | TCP 2399 (`port`) | **public**: open and forward this one |
-| admin | TCP 2400 if `[admin] port` is set | **127.0.0.1 only**: never open or forward it |
+| admin | off; TCP 2400 in the example, if `[admin] port` is set | **127.0.0.1 only**: never open or forward it |
 
 ```bash
 sudo ufw allow 2399/tcp
@@ -109,10 +112,10 @@ All state is the SQLite file `/var/lib/opencs/opencs.db`. Back it up while the s
 tool, never `cp`:
 
 ```bash
-sudo -u opencs sqlite3 /var/lib/opencs/opencs.db ".backup '/var/backups/opencs-$(date +%F).db'"
+sudo sqlite3 /var/lib/opencs/opencs.db ".backup '/var/backups/opencs-$(date +%F).db'"
 ```
 
-Run that daily from cron or a systemd timer, and copy the result off the machine. Restore by stopping the
+(Run as root: the `opencs` user cannot write to `/var/backups`.) Run that daily from cron or a systemd timer, and copy the result off the machine. Restore by stopping the
 service and putting a backup in place of `opencs.db` (owned by `opencs`). Games held for `/RESUME`, the
 cities' worlds and login limits are in memory and are lost on a restart: announce one
 (`shutdown 120` on the admin channel) so players finish first.

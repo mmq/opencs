@@ -1,8 +1,7 @@
 # Changelog
 
 OpenCS is built one milestone at a time; each milestone is one `--no-ff` merge on
-`main`, so `git log --first-parent main` reads as the chapter list. Newest first. Test counts are the
-suite size at the milestone's merge.
+`main`, so `git log --first-parent main` reads as the chapter list. Newest first.
 
 ## 1.0.0rc1 (release candidate)
 

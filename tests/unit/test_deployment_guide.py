@@ -31,7 +31,23 @@ def test_the_command_line_options_the_unit_uses_are_accepted() -> None:
         for line in unit.splitlines():
             if line.startswith("ExecStart="):
                 args = re.sub(r"%i", "one", line.split("-m opencs", 1)[1]).split()
-                assert _parse_args(args).config is not None
+                parsed = _parse_args(args)
+                paths = dict(zip(args[::2], args[1::2], strict=False))
+                assert parsed.config == Path(paths["--config"])
+                assert parsed.data_dir == Path(paths["--data-dir"])
+
+
+def test_every_environment_file_in_a_unit_is_optional() -> None:
+    """systemd refuses a unit whose EnvironmentFile is missing unless the path starts with ``-``;
+    the token file exists only when the admin channel is used."""
+    lines = [
+        line
+        for unit in fenced(GUIDE + OPERATIONS, "ini")
+        for line in unit.splitlines()
+        if line.startswith("EnvironmentFile=")
+    ]
+    assert len(lines) >= 2
+    assert [x for x in lines if not x.startswith("EnvironmentFile=-")] == []
 
 
 def test_the_server_toml_in_the_guide_loads(tmp_path: Path) -> None:
