@@ -127,6 +127,14 @@ def test_damaged_frames_in_game_never_raise_and_are_counted(seed: int) -> None:
     h.feed(build_frame(client_payload(report(4)), terminator=b"\x0a"))
     phase = h.session.phase
     assert isinstance(phase, InGamePhase)
+    recorded = [0]  # everything ever fed to the accounting (the window forgets)
+    record = phase._bad.record
+
+    def spy(now: float, n: int = 1) -> bool:
+        recorded[0] += n
+        return record(now, n)
+
+    phase._bad.record = spy  # type: ignore[method-assign]
     with ErrorLog() as errors:
         for i in range(300):
             wire = good_frame(rng, i)
@@ -142,6 +150,7 @@ def test_damaged_frames_in_game_never_raise_and_are_counted(seed: int) -> None:
             h.io.messages.clear()
         assert not errors.records, errors.describe()
     assert_clean(h, GAME_CLOSES, seed)
+    assert recorded[0] > 0, "damaged frames were fed in and none was counted"
     if h.io.closed_with == ["too much bad input"]:
         # Closed by the accounting rule: the window really did hold more than the limit.
         assert phase._bad.total > policy.MAX_BAD_INPUT

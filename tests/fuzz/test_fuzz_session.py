@@ -10,7 +10,7 @@ import pytest
 from fixtures.citysim import size_of
 from fixtures.fuzzing import CLIENT_TYPES, ClientModel, ErrorLog, check_city, random_client_message
 from fixtures.pods import report
-from fixtures.sessions import Harness, World, make_world, play
+from fixtures.sessions import Harness, make_world, play
 from opencs.messages import ClientMessage, client, client_payload
 from opencs.wire.frame import build_frame
 
@@ -75,10 +75,6 @@ def run(seed: int, steps: int, players: int = 3) -> None:
 @pytest.mark.parametrize("seed", range(30))
 def test_random_valid_messages_keep_every_invariant(seed: int) -> None:
     run(seed, 600)
-
-
-def _unused(world: World) -> None:  # keeps the import used for type checkers
-    del world
 
 
 def test_a_long_hostile_run_leaves_each_players_records_bounded() -> None:
