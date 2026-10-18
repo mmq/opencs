@@ -134,8 +134,7 @@ def test_a_pilot_in_the_chamber_is_told_and_the_connection_closes() -> None:
         await c.expect(b"TYPE /HELP FOR COMMANDS.\r\x05D0\r")
         stop.set()
         got = await c.expect(b"\x05D0\r")
-        assert b"*** SERVER SHUTTING DOWN\r" in got  # the announcement
-        assert b"SERVER SHUTTING DOWN\r\x05D0\r" in got  # and the removal line
+        assert got.count(b"SERVER SHUTTING DOWN\r") == 1  # told once, in the error color
         await asyncio.wait_for(task, TIMEOUT)
         c.writer.close()
 

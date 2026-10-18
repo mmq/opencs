@@ -20,7 +20,7 @@ from opencs.cities import CityManager
 from opencs.clock import Clock, MonotonicClock
 from opencs.config import AppConfig, ConfigError, ConfigFile, load_config
 from opencs.connlog import ConnectionContext, ConnectionLog
-from opencs.control import SHUTDOWN_NOTICE, Control, announce, remove_everyone
+from opencs.control import SHUTDOWN_NOTICE, Control, remove_everyone
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.logsetup import configure_logging
@@ -159,12 +159,12 @@ async def _shutdown(
     cities: CityManager,
     deadline: float,
 ) -> None:
-    """Stop accepting, tell everyone, end every session (a game with the unprompted ``'C'``; each
-    player is saved as it leaves), save whoever is still seated, stop the tickers, and close the
-    connections, aborting any that outlast ``deadline`` (DESIGN §6)."""
+    """Stop accepting, end every session with the notice (a game with a system line and the
+    unprompted ``'C'``, the Chamber with a line; each player is saved as it leaves), save whoever
+    is still seated, stop the tickers, and close the connections, aborting any that outlast
+    ``deadline`` (DESIGN §6)."""
     log.info("shutting down")
     listener.stop_accepting()
-    announce(services, SHUTDOWN_NOTICE)
     remove_everyone(services, SHUTDOWN_NOTICE)
     services.persistence.save_all(services.cities.values())
     await cities.stop()
@@ -180,8 +180,7 @@ def _on_sighup(cities: CityManager, config_file: ConfigFile | None) -> Callable[
 
     def reload() -> None:
         log.info("SIGHUP: reloading the city configuration")
-        for line in cities.reload_file(config_file.path, config_file.server):
-            log.info("reload: %s", line)
+        cities.reload_file(config_file.path, config_file.server)  # logs its own outcome
 
     def remove() -> None:
         loop.remove_signal_handler(signal.SIGHUP)

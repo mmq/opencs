@@ -30,6 +30,7 @@ uv run pytest                # tests
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): layers, package layout, conventions
 - [Spec v1.0](https://github.com/mmq/cyberstrike-spec): the protocol and server rules
+- [`docs/operations.md`](docs/operations.md): running, configuring, capturing, administering and backing up the server
 - [`docs/decisions/`](docs/decisions/README.md): architecture decision records
 
 Licensed under the MIT License (`LICENSE`).
