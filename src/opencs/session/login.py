@@ -102,7 +102,9 @@ class LoginPhase(TextPhase):
             self._star_line(text)
 
     def _account(self, text: str) -> None:
-        result = self.host.services.identity.login(text)
+        result = self.host.services.identity.login(
+            text, self.host.services.login_limits.gate(self.host.address)
+        )
         if isinstance(result, Refused):
             self.host.log.info("login refused: %s", result.reason)
             self.host.io.send_raw(plain_line(result.reason))

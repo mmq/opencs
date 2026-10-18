@@ -16,6 +16,7 @@ from opencs.lobby.lobby import Lobby
 from opencs.messages import ServerMessage
 from opencs.routing import Router
 from opencs.session.held import HeldGames
+from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
 from opencs.session.phases import Services
 from opencs.session.session import Session
@@ -109,7 +110,14 @@ def make_world(
     router = Router()
     progress = progress or MemoryProgressStore()
     services = Services(
-        identity, lobby, clock, cities_by_letter, router, Persistence(progress, clock), held
+        identity,
+        lobby,
+        clock,
+        cities_by_letter,
+        router,
+        Persistence(progress, clock),
+        held,
+        LoginLimits(clock),
     )
     return World(clock, identity, lobby, services, progress)
 

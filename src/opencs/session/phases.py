@@ -18,6 +18,7 @@ from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
 from opencs.routing import Router
 from opencs.session.held import HeldGames
+from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
 from opencs.wire.text import LineReader
 from opencs.world.city import City
@@ -39,6 +40,8 @@ class Services:
     router: Router
     persistence: Persistence
     held: HeldGames  # games held for players whose line dropped (II §13)
+    #: Password checks and new accounts, metered across connections (DESIGN §5).
+    login_limits: LoginLimits
 
 
 class Phase(ABC):

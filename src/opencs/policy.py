@@ -60,6 +60,20 @@ KEEPALIVE_IDLE = 60
 KEEPALIVE_INTERVAL = 15
 KEEPALIVE_PROBES = 4
 
+#: Limits on password checks and on new accounts across connections (DESIGN §5 "login attempts"):
+#: PBKDF2 runs on the event loop (~30 ms), so every check is metered. Each is a token bucket
+#: ``(burst, per second)``, per source address and for the whole server. A player mistypes a
+#: password a few times at most; a household behind one address may log several people in at once
+#: (``MAX_CONNECTIONS_PER_ADDRESS``). A first login registers an account (II §3), so
+#: registrations are limited harder: they cost a stored row each. Ours (the spec sets none).
+LOGIN_ATTEMPTS_PER_ADDRESS = (8, 1 / 20)
+LOGIN_ATTEMPTS_GLOBAL = (20, 3.0)
+NEW_ACCOUNTS_PER_ADDRESS = (3, 1 / 300)
+NEW_ACCOUNTS_GLOBAL = (10, 0.5)
+
+#: Most source addresses a limiter tracks; past it the oldest are forgotten. Ours (DESIGN §5).
+MAX_TRACKED_SOURCES = 4096
+
 # --- Cities (II §5, I §9.2, II §5) ----------------------
 
 #: Longest city name, in characters. Ours (the test server's limit); the spec is silent.
