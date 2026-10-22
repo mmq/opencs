@@ -85,6 +85,7 @@ start; **only the city files are re-read by `reload`** (below).
 | `data_dir` | `"../data"` | a directory, created | holds `opencs.db` (accounts and progress) |
 | `cities_dir` | `"cities"` | a directory | one `*.toml` per city |
 | `default_city` | `"B"` | a loaded city | what a bare `/PLAY` picks when every city is empty |
+| `guest_names` | `["JOINGENIE"]` | names; `[]` turns guests off | the guest names (II §3): no password check, the only names several players may share, never saved |
 | `[logging] level` | `"INFO"` | DEBUG, INFO, WARNING, ERROR, CRITICAL | for everything the server logs |
 | `[logging.levels] <layer>` | none | a layer below; a level | overrides `level` for `opencs.<layer>` |
 | `[logging] file` | none (stderr only) | a path | also log to this file, rotating |
@@ -255,7 +256,7 @@ error changes nothing and the first one is reported. Then, per city:
 
 A running game is never changed under its players (II §17). A `/PLAY` begun against the old
 configuration just before the swap is told "CITY x FILLED UP: TRY AGAIN". A change to `server.toml` (the
-port, logging, capture, admin, `default_city`) needs a restart; a reload says that it saw one. A
+port, logging, capture, admin, `default_city`, `guest_names`) needs a restart; a reload says that it saw one. A
 config whose `default_city` is missing or has `enabled = false` is refused at validation, at start-up and
 on `reload` alike (nothing changes), so the lobby always has a city to offer.
 

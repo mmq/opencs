@@ -77,12 +77,13 @@ SETTINGS as above.
 
 | account name | what you get |
 |---|---|
-| `JOINGENIE` (the stock install) | **A guest.** No password is sent. You are given a callsign: the name cut to 8 letters (`JOINGENI`), with its 8th letter replaced by a digit if that callsign is already online (`JOINGEN2`...). Two unmodified clients can therefore play together. Your record is kept under the callsign you were given, which depends on who else is connected, so do not count on it. Guests cannot `/RESUME`. |
+| `JOINGENIE` (the stock install) | **A guest.** No password is sent. You are given a callsign: the name cut to 8 letters (`JOINGENI`), with its 8th letter replaced by a digit if that callsign is already online (`JOINGEN2`...). Two unmodified clients can therefore play together. Nothing a guest earns is kept: every game starts as a new player's would, and guests cannot `/RESUME`. A server may name other guest names, or turn guests off. |
 | any other name, with a password | **A real account.** The first login with a name registers its password (there is no sign-up step); later logins must give the same one. The callsign is the name, upper-cased and cut to 8 characters, with its 8th letter replaced by a digit if that callsign is already online (`ALEXANDER1` and `ALEXANDER2` become `ALEXANDE` and `ALEXAND2`, whichever logs in first gets the plain one). Progress is saved to the account, and `/RESUME` works. Only one login per account at a time. |
 
-Names may be up to 32 characters and passwords up to 64. A wrong password, a name that is already online,
-or too many attempts in a short time is refused with a line saying so. Choose a password you use nowhere
-else: the server stores only a salted hash, but the link is plain text.
+Names may be up to 32 characters and passwords up to 64. A name other than a guest name with no password,
+a wrong password, a name that is already online, or too many attempts in a short time is refused with a
+line saying so. Choose a password you use nowhere else: the server stores only a salted hash, but the
+link is plain text.
 
 After the script finishes the game shows the online-service menu. Press GO (or F1); the Chamber opens.
 
@@ -140,8 +141,8 @@ the game's own. What the server does for you:
   the modules' effects. A dropped module can be picked up.
 - **Bounty and payouts.** The server keeps every pod's bounty and pays it to those who hit and kill
   you. A death resets your power, multiplier and modules; your battle marker drops by one.
-- **Bays persist.** The bays you have upgraded and your battle marker are saved with your account (or
-  guest callsign) and restored next time you enter a city.
+- **Bays persist.** The bays you have upgraded and your battle marker are saved with your account and
+  restored next time you enter a city. A guest's are not kept.
 - **Latency meter.** The server answers the game's ping at once; the meter shows your round trip.
 
 To leave, press **Shift-Q**: the game saves your progress, closes and returns you to the Chamber on the
