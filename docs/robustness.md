@@ -15,7 +15,7 @@ minute; I §4.1 says a frame that does not decode is dropped, never a reason to 
 |---|---|---|---|
 | login | a line over `MAX_LINE_BYTES`; more than `LOGIN_MAX_LINES` lines; more than `LOGIN_PREAMBLE_LIMIT` bytes before `HHH` | per connection, lifetime (the phase lasts seconds) | close |
 | Chamber | a line past the token bucket, an overlong line included (`CHAMBER_BURST_LINES`, `CHAMBER_LINES_PER_SECOND`): dropped, one warning | `CHAMBER_FLOOD_DROPS` drops in `CHAMBER_FLOOD_WINDOW` s | close |
-| in game | a frame failing LEN, CK or its checksum; a payload that does not decode; a frame over the frame bucket (`FRAME_LIMIT`) | `MAX_BAD_INPUT` in `BAD_INPUT_WINDOW` s (`WindowedCounter`) | close ("too much bad input") |
+| in game | a frame failing LEN, CK or its checksum; a frame over the frame bucket (`FRAME_LIMIT`) | `MAX_BAD_INPUT` in `BAD_INPUT_WINDOW` s (`WindowedCounter`) | close ("too much bad input") |
 
 A relayed message over its kind's bucket (`RELAY_LIMIT_*`) is dropped and tallied in the session
 (`relay_drops`), **not** counted: an honest line that stalls for just under `SILENCE_SECONDS`
@@ -61,7 +61,7 @@ in policy.
 |---|---|---|---|
 | bad CK / ~CK / LEN, payload checksum | the reader skips and counts; buffer at most `MAX_PENDING` | counted | `wire/test_frame`, `fuzz/test_fuzz_net::test_damaged_frames_in_game_never_raise_and_are_counted` |
 | a header that never completes | `FRAME_STALL_SECONDS` | given up, counted | `session/test_ingame::test_a_growing_partial_frame_is_still_given_up_when_the_stall_began_long_ago`, `fuzz/test_fuzz_net::test_a_partial_frame_that_never_completes_cannot_hold_the_buffer_past_its_bound` |
-| undecodable payload, unknown type or sub | `DecodeError` only | counted | `session/test_ingame`, `messages/test_base` |
+| undecodable payload, unknown type or sub | `DecodeError` only | dropped and tallied (`decode_drops`), not counted (I §4.1) | `session/test_ingame`, `messages/test_base` |
 | frames per second | `FRAME_LIMIT` (200 burst, 100/s; the captured clients send at most 15 frames in any second and 123 in any 10 s, and I §3's ~50/s is what the client *reads*, not what it sends) | dropped undecoded, counted | `session/test_ingame_session::test_frames_past_the_burst_are_dropped_and_counted_as_bad_input`, `test_a_flood_of_frames_closes_the_connection`, `test_a_rate_far_above_the_real_clients_send_rate_is_never_limited` |
 | sustained garbage | `MAX_BAD_INPUT` per `BAD_INPUT_WINDOW` | close | `fuzz/test_fuzz_net::test_a_sustained_flood_of_garbage_in_game_closes_the_connection` |
 | a noisy line | a few bad frames a minute | never closes | `fuzz/test_fuzz_net::test_a_trickle_of_damaged_frames_does_not_close_an_honest_connection`, `session/test_ingame::test_undecodable_real_client_b_frames_at_one_a_second_do_not_close` |

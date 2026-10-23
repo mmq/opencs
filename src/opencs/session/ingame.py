@@ -92,6 +92,9 @@ class InGamePhase(Phase):
         #: Messages dropped for exceeding their relay budget: a tally, not bad input (see
         #: ``handle``).
         self.relay_drops = 0
+        #: Frames that passed the checks but did not decode: dropped and tallied, never counted as
+        #: bad input, for a frame that does not decode is never a reason to close (I §4.1).
+        self.decode_drops = 0
         self._stalled_since: float | None = None
         self._city: City | None = None
         self._player_id = -1
@@ -293,7 +296,7 @@ class InGamePhase(Phase):
             try:
                 message = decode_client(frame.payload)
             except DecodeError as exc:
-                failed += 1
+                self.decode_drops += 1
                 self.host.log.debug("undecodable %r frame: %s", frame.type, exc)
                 continue
             self.handle(message)
@@ -322,7 +325,7 @@ class InGamePhase(Phase):
                 if bucket is not None and not bucket.take(self.host.now()):
                     # Dropped, but not bad input: an honest client's backlog after a stall of up
                     # to SILENCE_SECONDS arrives at once and can exceed a budget. The budget bounds
-                    # the relay; the frame bucket and decode failures are the bad-input signal.
+                    # the relay; the frame bucket and framing failures are the bad-input signal.
                     self.relay_drops += 1
                     if isinstance(message, client.Shot):
                         self._note_shot(message)  # not relayed, but still a shot (II §9.3)

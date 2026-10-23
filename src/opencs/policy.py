@@ -251,10 +251,10 @@ CHAMBER_IDLE_TIMEOUT = 3600.0
 VERSION_WAIT = 5.0
 GO_WAIT = 15.0
 
-#: Bad inbound frames and undecodable messages tolerated per window before a connection is closed
-#: (DESIGN §5 ``MAX_BAD_FRAMES``). A window rather than a lifetime total, because real clients send
-#: some: 24 consecutive undecodable ``'b'`` frames, one a second, were captured (I §4.1), i.e. at
-#: most 10 per 10 s. Ours.
+#: Bad inbound frames (failing LEN, CK or the checksum, or over ``FRAME_LIMIT``) tolerated per
+#: window before a connection is closed (DESIGN §5 ``MAX_BAD_FRAMES``). A frame that passes the
+#: checks but does not decode is dropped and not counted (I §4.1). A window rather than a lifetime
+#: total, so a noisy line's few damaged frames a minute never add up to a close. Ours.
 MAX_BAD_INPUT = 50
 BAD_INPUT_WINDOW = 10.0
 

@@ -8,8 +8,8 @@ from collections import deque
 class WindowedCounter:
     """Counts events in the last ``window`` seconds and says when they exceed ``limit``.
 
-    Real clients send some undecodable frames (I §4.1), so a lifetime total would close honest
-    connections on a long session; a hostile flood still trips this within one window.
+    A noisy line damages some frames, so a lifetime total would close honest connections on a long
+    session; a hostile flood still trips this within one window.
     """
 
     def __init__(self, limit: int, window: float) -> None:

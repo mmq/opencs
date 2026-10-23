@@ -182,7 +182,7 @@ in `world/view.py` as one `ClientView` per player, owned by the city. Sessions d
 ## 5. Robustness and security
 
 - **Input is hostile.** A frame that fails its checksum or length is dropped and counted; a message that
-  fails to decode is dropped and counted; a connection that passes `policy.MAX_BAD_FRAMES` is closed.
+  fails to decode is dropped but not counted (I §4.1); a connection that passes `policy.MAX_BAD_FRAMES` is closed.
   **No input can raise out of a session**: the session's handler catches, logs with context and carries on
   or closes that one connection.
 - **Limits:** connections in total and per address, line length in the Chamber (the client's armed buffer

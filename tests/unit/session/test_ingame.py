@@ -1,4 +1,4 @@
-"""The in-game phase's input side: frames in, bad input counted over a window (DESIGN §5)."""
+"""The in-game phase's input side: frames in, bad frames counted over a window (DESIGN §5)."""
 
 from __future__ import annotations
 
@@ -64,6 +64,13 @@ def test_the_july_build_trailing_nul_in_b_frames_is_accepted_for_a_whole_run() -
     assert h.session.phase._bad.total == 0  # type: ignore[attr-defined]
 
 
+def bad_checksum() -> bytes:
+    """A header with a good CK pair but a wrong payload checksum: one bad frame."""
+    bad = bytearray(frame(b"b" * 10))
+    bad[-3] ^= 0x01
+    return bytes(bad)
+
+
 def test_undecodable_real_client_b_frames_at_one_a_second_do_not_close() -> None:
     # 24 in a row, one a second, as captured.
     h, seen = in_game()
@@ -74,12 +81,25 @@ def test_undecodable_real_client_b_frames_at_one_a_second_do_not_close() -> None
     assert not h.io.closed
 
 
+def test_frames_that_do_not_decode_are_dropped_and_never_close() -> None:
+    # They pass the checks, so they are dropped and tallied, never counted (I §4.1).
+    h, seen = in_game()
+    for _ in range(policy.MAX_BAD_INPUT * 3):
+        h.feed(frame(SHORT_B))
+    assert not h.io.closed
+    phase = h.session.phase
+    assert phase.decode_drops == policy.MAX_BAD_INPUT * 3  # type: ignore[attr-defined]
+    assert phase._bad.total == 0  # type: ignore[attr-defined]
+    h.feed(frame(b"EN"))
+    assert seen == [client.Ping()]
+
+
 def test_a_burst_of_bad_frames_closes_but_the_last_allowed_one_does_not() -> None:
     h, _ = in_game()
     for _ in range(policy.MAX_BAD_INPUT):
-        h.feed(frame(SHORT_B))
+        h.feed(bad_checksum())
     assert not h.io.closed
-    h.feed(frame(SHORT_B))
+    h.feed(bad_checksum())
     assert h.io.closed_with == ["too much bad input"]
 
 
@@ -87,18 +107,18 @@ def test_the_count_is_a_window_not_a_lifetime_total() -> None:
     h, _ = in_game()
     for _ in range(3):
         for _ in range(policy.MAX_BAD_INPUT):
-            h.feed(frame(SHORT_B))
+            h.feed(bad_checksum())
         h.advance(policy.BAD_INPUT_WINDOW)
     assert not h.io.closed
 
 
-def test_framing_garbage_counts_toward_the_same_limit() -> None:
+def test_undecodable_frames_do_not_add_to_the_framing_failures() -> None:
     h, _ = in_game()
-    # Each is a header with a good CK pair but a wrong payload checksum: one bad frame apiece.
-    bad = bytearray(frame(b"b" * 10))
-    bad[-3] ^= 0x01
-    for _ in range(policy.MAX_BAD_INPUT + 1):
-        h.feed(bytes(bad))
+    for _ in range(policy.MAX_BAD_INPUT):
+        h.feed(bad_checksum())
+        h.feed(frame(SHORT_B))
+    assert not h.io.closed
+    h.feed(bad_checksum())
     assert h.io.closed_with == ["too much bad input"]
 
 
