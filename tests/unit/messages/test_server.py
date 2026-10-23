@@ -412,8 +412,8 @@ def test_session_slot_parts() -> None:
 
 
 def test_session_string_limits() -> None:
-    replace(SESSION, callsign=b"A" * 8, network=b"N" * 16, city=b"C" * 16)
-    bad(lambda: replace(SESSION, callsign=b"A" * 9))
+    replace(SESSION, callsign=b"A" * 12, network=b"N" * 16, city=b"C" * 16)
+    bad(lambda: replace(SESSION, callsign=b"A" * 13))
     bad(lambda: replace(SESSION, network=b"N" * 17))
     bad(lambda: replace(SESSION, city=b"C" * 17))
     bad(lambda: replace(SESSION, callsign=b""))
@@ -544,8 +544,8 @@ def test_introduce_callsign_and_velocity() -> None:
     def make(callsign: bytes = b"A", v1: int = 0) -> server.Introduce:
         return server.Introduce(1, callsign, 0, 0, POS, 0, v1)
 
-    make(b"A" * 8)
-    bad(lambda: make(b"A" * 9))
+    make(b"A" * 12)
+    bad(lambda: make(b"A" * 13))
     bad(lambda: make(b""))
     bad(lambda: make(b"A\n"))
     bad(lambda: make(b"Joe"))  # one rule for 'B' and 'G': no lower case

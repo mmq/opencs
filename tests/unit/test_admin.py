@@ -352,7 +352,7 @@ def test_the_operator_announces_kicks_and_shuts_down_a_running_server() -> None:
         assert "city A CYBERCITY ONE: 1 players (RED 1)" in status
         assert await op.command("announce lights out") == ["announced to 1"]
         assert await player.expect_frame("a") == server.Chat(100, 0, b"lights out")
-        assert await op.command("kick joingeni test") == ["kicked JOINGENI (1 connection(s))"]
+        assert await op.command("kick joingenie test") == ["kicked JOINGENIE (1 connection(s))"]
         assert await player.expect_frame("a") == server.Chat(
             100, 0, b"REMOVED BY AN ADMINISTRATOR: test"
         )

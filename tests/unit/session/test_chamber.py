@@ -39,7 +39,7 @@ def test_entering_asks_press_return_then_a_and_a_welcome_after_the_version_reply
     assert out.startswith(ENTER_A)
     assert (
         out[len(ENTER_A) :]
-        == b"\x05D2\rWELCOME TO THE CHAMBER, JOINGENI. TYPE /HELP FOR COMMANDS.\r\x05D0\r"
+        == b"\x05D2\rWELCOME TO THE CHAMBER, JOINGENIE. TYPE /HELP FOR COMMANDS.\r\x05D0\r"
     )
 
 
@@ -104,7 +104,7 @@ def test_a_burst_of_chat_is_cut_to_the_budget_and_the_sender_is_warned_once() ->
     h = enter_lobby(world)
     other.take()
     h.feed("x\r" * (policy.CHAMBER_BURST_LINES + 5))
-    assert other.take().count(b"JOINGENI: x") == policy.CHAMBER_BURST_LINES
+    assert other.take().count(b"JOINGENIE: x") == policy.CHAMBER_BURST_LINES
     assert h.take().count(b"TOO MANY LINES") == 1
 
 
@@ -117,7 +117,7 @@ def test_the_budget_refills_with_time() -> None:
     other.take()
     h.advance(1 / policy.CHAMBER_LINES_PER_SECOND)
     h.feed("y\r")
-    assert b"JOINGENI: y" in other.take()
+    assert b"JOINGENIE: y" in other.take()
     assert b"TOO MANY" not in h.take()
 
 
@@ -158,7 +158,7 @@ def test_a_reply_before_the_timeout_does_not_enter_twice() -> None:
 def test_the_pilot_is_in_the_lobby_from_entering() -> None:
     world = make_world()
     login(world)
-    assert world.lobby.find("JOINGENI") is not None
+    assert world.lobby.find("JOINGENIE") is not None
 
 
 # --- /HELP /CITY /STATUS ... -----------------------------------------------------------------
@@ -210,7 +210,7 @@ def test_a_bare_letter_after_a_bare_city_gets_the_hint_within_two_minutes() -> N
     assert b"TYPE /CITY B" in ask(h, "b")
     h.advance(0.01)
     assert ask(h, "b") == b""  # window over: it is chat now
-    assert other.take() == b"\x05D4\rJOINGENI: b\r\x05D0\r"
+    assert other.take() == b"\x05D4\rJOINGENIE: b\r\x05D0\r"
 
 
 def test_a_bare_letter_with_no_prior_city_list_is_chat() -> None:
@@ -218,7 +218,7 @@ def test_a_bare_letter_with_no_prior_city_list_is_chat() -> None:
     h = enter_lobby(world)
     other = enter_lobby(world, "OTHER")
     assert ask(h, "C") == b""
-    assert b"JOINGENI: C" in other.take()
+    assert b"JOINGENIE: C" in other.take()
 
 
 def test_a_bare_letter_that_is_not_a_city_is_chat_even_after_a_city_list() -> None:
@@ -227,7 +227,7 @@ def test_a_bare_letter_that_is_not_a_city_is_chat_even_after_a_city_list() -> No
     other = enter_lobby(world, "OTHER")
     ask(h, "/CITY")
     assert ask(h, "z") == b""
-    assert b"JOINGENI: z" in other.take()
+    assert b"JOINGENIE: z" in other.take()
 
 
 def test_city_with_a_letter_shows_teams_counts_and_callsigns() -> None:
@@ -250,8 +250,8 @@ def test_status_and_who_list_every_pilot_and_where() -> None:
     for line in ("/STATUS", "/WHO", "/status"):
         out = ask(h, line)
         assert b"PILOTS ONLINE: 2" in out
-        assert b"ALPHA     C BLACK" in out
-        assert b"JOINGENI  CHAMBER" in out
+        assert b"ALPHA         C BLACK" in out
+        assert b"JOINGENIE     CHAMBER" in out
 
 
 def test_who_callsign_gives_location_and_the_record() -> None:
@@ -291,7 +291,7 @@ def test_score_shows_the_players_own_record_and_tells_a_guest_none_is_kept() -> 
     assert b"BAY POINTS: 123" in out and b"BAYS: 5 5 5 5 5 5 5 5 5" in out
     assert b"BATTLE MARKER: -7" in out
     guest = enter_lobby(world)
-    world.progress.save("JOINGENI", ProgressRecord((4,) * 9, 3, 1, 2, 3))  # never read (II §11.3)
+    world.progress.save("JOINGENIE", ProgressRecord((4,) * 9, 3, 1, 2, 3))  # never read (II §11.3)
     out = ask(guest, "/SCORE")
     assert b"GUESTS' PROGRESS IS NOT KEPT" in out and b"BATTLE MARKER" not in out
 
@@ -300,9 +300,9 @@ def test_who_shows_a_guest_without_a_record() -> None:
     world = make_world()
     h = enter_lobby(world, "ALICE,pw")
     enter_lobby(world)
-    world.progress.save("JOINGENI", ProgressRecord((4,) * 9, 3, 1, 2, 3))
-    out = ask(h, "/WHO joingeni")
-    assert b"JOINGENI: CHAMBER" in out and b"NO RECORD IS KEPT" in out
+    world.progress.save("JOINGENIE", ProgressRecord((4,) * 9, 3, 1, 2, 3))
+    out = ask(h, "/WHO joingenie")
+    assert b"JOINGENIE: CHAMBER" in out and b"NO RECORD IS KEPT" in out
     assert b"BATTLE MARKER" not in out
 
 
@@ -435,7 +435,7 @@ def test_play_letter_and_team() -> None:
     h = enter_lobby(world)
     assert go(h, "/PLAY a green") == b"\x05E 1 1\r"
     h.feed("/GO 0\r")
-    assert world.lobby.find("JOINGENI").team == 2  # type: ignore[union-attr]
+    assert world.lobby.find("JOINGENIE").team == 2  # type: ignore[union-attr]
 
 
 def test_a_full_team_is_balanced_with_a_line_before_the_launch() -> None:
@@ -464,7 +464,7 @@ def test_the_launch_flow_e_then_go_0_then_c_and_the_phase_switch() -> None:
     h.feed("/GO 0\r")
     assert h.take() == b"\x05C\r"
     assert phase_of(h) is InGamePhase
-    member = world.lobby.find("JOINGENI")
+    member = world.lobby.find("JOINGENIE")
     assert member is not None
     assert (member.city, member.team) == ("B", 0)
     assert not h.io.closed
@@ -501,7 +501,7 @@ def test_go_1_2_3_name_the_problem_and_stay_in_the_chamber() -> None:
         assert text in out and b"MAP 2" in out
         assert b"\x05C\r" not in out
         assert phase_of(h) is ChamberPhase
-        assert world.lobby.find("JOINGENI").in_chamber  # type: ignore[union-attr]
+        assert world.lobby.find("JOINGENIE").in_chamber  # type: ignore[union-attr]
         assert go(h) == b"\x05E 2 2\r"  # and the player may try again
 
 
@@ -583,13 +583,13 @@ def test_quit_sends_b_and_the_star_prompt_then_m_1380_re_enters_and_bye_closes()
     out = ask(h, "/QUIT")
     assert out == b"\x05B\r\r\n*"
     assert phase_of(h) is LoginPhase
-    assert world.lobby.find("JOINGENI") is None  # gone from the roster
-    assert world.identity.callsign_online("JOINGENI")  # but still logged in
+    assert world.lobby.find("JOINGENIE") is None  # gone from the roster
+    assert world.identity.callsign_online("JOINGENIE")  # but still logged in
     assert ask(h, "M 1380;3") == PRESS_RETURN
     assert phase_of(h) is ChamberPhase
     h.feed("\r")
     h.take()
-    assert world.lobby.find("JOINGENI") is not None
+    assert world.lobby.find("JOINGENIE") is not None
     ask(h, "/QUIT")
     assert ask(h, "BYE").endswith(b"GOODBYE\r")
     assert h.io.closed_with == ["BYE"]

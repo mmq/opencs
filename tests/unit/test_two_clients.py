@@ -29,7 +29,7 @@ def test_two_players_see_each_other_chat_throw_and_leave() -> None:
         # P2's first report introduces the pair, G then A each way, then the relayed 'b'.
         await p2.send(frame(report(4, x_off=75, z_off=75)))
         g = await p1.expect_frame("G")
-        assert isinstance(g, server.Introduce) and (g.id, g.callsign) == (1, b"JOINGEN2")
+        assert isinstance(g, server.Introduce) and (g.id, g.callsign) == (1, b"JOINGENIE2")
         assert await p1.expect_frame("A") == server.ReleaseDrop(1)
         relayed = await p1.expect_frame("b")
         assert isinstance(relayed, server.PodState) and (relayed.id, relayed.state) == (1, 0)

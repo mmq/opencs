@@ -333,12 +333,11 @@ SAVE_RETRY_INTERVAL = 5.0
 #: which is upper case, so the two can never collide. II §3.
 ACCOUNT_KEY_PREFIX = "acct:"
 
-#: The first and last single-digit suffix of a duplicate callsign (``JOINGEN2`` .. ``JOINGEN9``;
-#: II §3: the 8th character is replaced by a digit), then two-digit suffixes
-#: (``JOINGE10`` .. ``JOINGE99``) when those run out. The 9th duplicate and beyond are ours, see
-#: II §3.
+#: The first and last number a duplicate callsign ends in (II §3): the name's first 11
+#: characters and ``2`` .. ``9``, then its first 10 and ``10`` .. ``99``, then its first 9 and
+#: ``100`` .. ``999`` (``JOINGENIE2``, ``ABCDEFGHIJ10``). Past the last, the logon is refused.
 CALLSIGN_FIRST_SUFFIX = 2
-CALLSIGN_LAST_SUFFIX = 99
+CALLSIGN_LAST_SUFFIX = 999
 
 # --- Wire (I §5.2, I §4.1; DESIGN §5) ------------------------------------------------------------
 
@@ -349,9 +348,9 @@ MAX_LINE_BYTES = 512
 
 # --- Messages (I §8, I §8, I §8.20) ----------------------------------------------------
 
-#: Longest callsign the server sends in ``'B'``/``'G'``. II §3: 8 is
-#: our choice; test servers have always sent it.
-MAX_CALLSIGN_LENGTH = 8
+#: Longest callsign the server sends in ``'B'``/``'G'``: the client's roster shows 12 characters
+#: (I §8.4, II §3).
+MAX_CALLSIGN_LENGTH = 12
 
 #: Longest network name in ``'B'`` (the banner reads "City: <city> on <network>"). Ours; the spec
 #: gives none; the real one is 5 characters.

@@ -75,9 +75,9 @@ def test_entering_the_game_seats_the_player_and_sends_b_at_once() -> None:
     (hello,) = h.io.messages
     assert isinstance(hello, server.Session)
     assert (hello.self_id, hello.index, hello.team) == (0, 0, 0)
-    assert hello.callsign == b"JOINGENI" and hello.city == b"CITY A"
+    assert hello.callsign == b"JOINGENIE" and hello.city == b"CITY A"
     assert [p.id for p in city_a(world).players()] == [0]
-    assert world.lobby.find("JOINGENI") is not None
+    assert world.lobby.find("JOINGENIE") is not None
 
 
 def test_b_is_repeated_every_point_two_seconds_until_the_first_frame() -> None:
@@ -241,7 +241,7 @@ def test_two_quit_lines_return_the_connection_to_the_chamber_after_three_seconds
     h.advance(0.2)
     assert h.take().startswith(b"\x05A\r")
     assert isinstance(h.session.phase, ChamberPhase)
-    member = world.lobby.find("JOINGENI")
+    member = world.lobby.find("JOINGENIE")
     assert member is not None and member.in_chamber and member.team is None
 
 
@@ -352,7 +352,7 @@ def test_a_line_drop_in_game_frees_the_seat_and_tells_the_others() -> None:
     h1.session.closed()
     assert city_a(world).player(0) is None
     assert sent(h2) == [server.Delete(0)]
-    assert world.lobby.find("JOINGENI") is None
+    assert world.lobby.find("JOINGENIE") is None
 
 
 def test_a_line_drop_after_the_quit_does_not_leave_twice() -> None:
@@ -413,7 +413,7 @@ def test_a_quit_line_that_arrives_after_the_return_is_not_chat() -> None:
     h.feed(QUIT)
     assert bystander.take() == b""  # swallowed, not relayed
     h.feed(QUIT)
-    assert b"JOINGENI: QUIT" in bystander.take()  # only the one that was owed
+    assert b"JOINGENIE: QUIT" in bystander.take()  # only the one that was owed
 
 
 def test_a_late_quit_line_after_two_were_seen_is_chat_like_any_other() -> None:
@@ -426,7 +426,7 @@ def test_a_late_quit_line_after_two_were_seen_is_chat_like_any_other() -> None:
     h.advance(policy.RETURN_SETTLE)
     h.take()
     h.feed(QUIT)
-    assert b"JOINGENI: QUIT" in bystander.take()
+    assert b"JOINGENIE: QUIT" in bystander.take()
 
 
 def test_a_quit_line_long_after_the_return_is_chat() -> None:
@@ -440,7 +440,7 @@ def test_a_quit_line_long_after_the_return_is_chat() -> None:
     h.take()
     h.advance(policy.LATE_QUIT_WINDOW)
     h.feed(QUIT)
-    assert b"JOINGENI: QUIT" in bystander.take()
+    assert b"JOINGENIE: QUIT" in bystander.take()
 
 
 def test_a_shot_over_the_budget_is_not_relayed_but_still_reaches_the_shot_log() -> None:

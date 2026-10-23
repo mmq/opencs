@@ -177,8 +177,8 @@ class Identity:
         return Pilot(callsign, account)
 
     def _allocate_callsign(self, name: str) -> str | None:
-        """The name cut to 8 characters, or with its tail replaced by a digit suffix until free
-        (II §3: ``JOINGENI``, ``JOINGEN2``, ``JOINGEN3`` ...)."""
+        """The name cut to 12 characters, or with its tail replaced by a number until free
+        (II §3: ``JOINGENIE``, ``JOINGENIE2`` ... ``JOINGENIE999``)."""
         base = name[: policy.MAX_CALLSIGN_LENGTH]
         if base not in self._callsigns:
             return base

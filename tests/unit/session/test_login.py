@@ -57,7 +57,7 @@ def test_joingenie_in_any_case_is_a_guest_with_no_password(name: str) -> None:
     h = connect(make_world())
     h.feed(f"HHH\r{name}\r")
     assert h.session.pilot is not None
-    assert h.session.pilot.callsign == "JOINGENI"
+    assert h.session.pilot.callsign == "JOINGENIE"
     assert h.session.pilot.is_guest
 
 
@@ -214,12 +214,12 @@ def test_closing_frees_the_callsign() -> None:
     a.feed("HHH\rJOINGENIE\r")
     b = connect(world)
     b.feed("HHH\rJOINGENIE\r")
-    assert b.session.pilot is not None and b.session.pilot.callsign == "JOINGEN2"
+    assert b.session.pilot is not None and b.session.pilot.callsign == "JOINGENIE2"
     a.session.closed()
     a.session.closed()  # idempotent
     c = connect(world)
     c.feed("HHH\rJOINGENIE\r")
-    assert c.session.pilot is not None and c.session.pilot.callsign == "JOINGENI"
+    assert c.session.pilot is not None and c.session.pilot.callsign == "JOINGENIE"
 
 
 def test_nothing_is_processed_after_a_close_request() -> None:

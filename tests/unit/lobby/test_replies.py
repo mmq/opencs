@@ -112,8 +112,8 @@ def test_status_lists_every_pilot_and_where() -> None:
     out = text(replies.status(lobby))
     assert "PILOTS ONLINE: 3" in out
     rows = out.split("\r")
-    assert rows.index("ALPHA     C BLACK") < rows.index("BRAVO     CHAMBER")
-    assert "CHARLIE   A RED" in rows
+    assert rows.index("ALPHA         C BLACK") < rows.index("BRAVO         CHAMBER")
+    assert "CHARLIE       A RED" in rows
 
 
 def test_who_is_gives_location_and_the_record_or_an_error() -> None:

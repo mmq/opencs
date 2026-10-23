@@ -35,10 +35,10 @@ def test_an_exception_in_tick_closes_the_connection() -> None:
 def test_closed_removes_the_member_and_frees_the_callsign_even_after_an_error() -> None:
     world = make_world()
     h = enter_lobby(world)
-    assert world.lobby.find("JOINGENI") is not None
+    assert world.lobby.find("JOINGENIE") is not None
     h.session.closed()
-    assert world.lobby.find("JOINGENI") is None
-    assert not world.identity.callsign_online("JOINGENI")
+    assert world.lobby.find("JOINGENIE") is None
+    assert not world.identity.callsign_online("JOINGENIE")
 
 
 def test_the_connection_context_names_the_stream_of_each_phase() -> None:
