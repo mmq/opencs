@@ -1,7 +1,7 @@
 # Playing on an OpenCS server
 
 How to connect the original DOS client to an OpenCS server and what to do once you are in. The server's
-side is in `operations.md` and `DEPLOYMENT.md`.
+side is in `OPERATING.md`.
 
 ## What you need
 
@@ -11,7 +11,7 @@ side is in `operations.md` and `DEPLOYMENT.md`.
   internet. Both emulators' modems take a phonebook file that turns the number the game dials into a
   server address. (The original DOSBox has no phonebook.)
 - **The address of a server**: a host name or IP address and a TCP port (the default is 2399). If you run
-  the server yourself, see `DEPLOYMENT.md`.
+  the server yourself, see `OPERATING.md`.
 
 ## DOSBox-X or DOSBox Staging: the serial port as a modem
 

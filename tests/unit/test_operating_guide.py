@@ -1,4 +1,4 @@
-"""docs/DEPLOYMENT.md names only options, keys and limits the server has."""
+"""docs/OPERATING.md names only options, keys and limits the server has."""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ from opencs.app import _parse_args
 from opencs.config import load_config
 
 ROOT = Path(__file__).resolve().parents[2]
-GUIDE = (ROOT / "docs" / "DEPLOYMENT.md").read_text()
-OPERATIONS = (ROOT / "docs" / "operations.md").read_text()
+GUIDE = (ROOT / "docs" / "OPERATING.md").read_text()
 
 
 def fenced(text: str, language: str) -> list[str]:
@@ -20,14 +19,14 @@ def fenced(text: str, language: str) -> list[str]:
 
 
 def test_every_policy_constant_the_guides_name_exists() -> None:
-    names = set(re.findall(r"`([A-Z][A-Z_]{4,})`", GUIDE + OPERATIONS))
+    names = set(re.findall(r"`([A-Z][A-Z_]{4,})`", GUIDE))
     constants = {n for n in names if "_" in n and not n.startswith("OPENCS_")}
     assert {"MAX_CONNECTIONS", "MAX_CONNECTIONS_PER_ADDRESS"} <= constants
     assert [n for n in sorted(constants) if not hasattr(policy, n)] == []
 
 
 def test_the_command_line_options_the_unit_uses_are_accepted() -> None:
-    for unit in fenced(GUIDE + OPERATIONS, "ini"):
+    for unit in fenced(GUIDE, "ini"):
         for line in unit.splitlines():
             if line.startswith("ExecStart="):
                 args = re.sub(r"%i", "one", line.split("-m opencs", 1)[1]).split()
@@ -42,7 +41,7 @@ def test_every_environment_file_in_a_unit_is_optional() -> None:
     the token file exists only when the admin channel is used."""
     lines = [
         line
-        for unit in fenced(GUIDE + OPERATIONS, "ini")
+        for unit in fenced(GUIDE, "ini")
         for line in unit.splitlines()
         if line.startswith("EnvironmentFile=")
     ]
@@ -72,7 +71,7 @@ def test_the_guide_uses_the_default_game_port() -> None:
 
 def test_systemd_units_keep_comments_on_their_own_lines() -> None:
     """systemd takes a trailing ``# ...`` as part of the value."""
-    for unit in fenced(GUIDE + OPERATIONS, "ini"):
+    for unit in fenced(GUIDE, "ini"):
         for line in unit.splitlines():
             if "=" in line and not line.lstrip().startswith("#"):
                 assert " #" not in line, line

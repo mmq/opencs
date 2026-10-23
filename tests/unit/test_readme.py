@@ -19,8 +19,7 @@ def test_every_relative_link_in_the_readme_resolves() -> None:
 def test_every_guide_in_docs_is_on_the_documentation_map() -> None:
     guides = [
         "PLAYING",
-        "DEPLOYMENT",
-        "operations",
+        "OPERATING",
         "robustness",
         "DESIGN",
     ]

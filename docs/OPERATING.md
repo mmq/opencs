@@ -1,8 +1,79 @@
 # Operating OpenCS
 
-How to run, configure, watch, back up and upgrade the server. Players' instructions are in the player
-guide (`PLAYING.md`); installing on a new machine is in `DEPLOYMENT.md`; the structure is in
-`DESIGN.md`. Every limit named here is a value in `src/opencs/policy.py`, with its reason beside it.
+The operator's guide: install the server on a machine, run it as a service, open it to players, configure
+it, watch it, back it up and upgrade it. What players do is in the player guide ([`PLAYING.md`](PLAYING.md));
+how the code is organized is in [`DESIGN.md`](DESIGN.md). Every limit named here is a value in
+`src/opencs/policy.py`, with its reason beside it.
+
+## Install on Ubuntu 24.04
+
+Ubuntu 24.04 ships Python 3.12, which is what OpenCS needs. At run time it uses only the standard
+library; `uv` is used to create the virtual environment.
+
+```bash
+sudo apt update
+sudo apt install -y git sqlite3 curl          # sqlite3: for the online backup command
+
+# uv, installed for everyone
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL=/usr/local/bin sh
+
+# the server, in /opt/opencs
+sudo git clone <the repository URL> /opt/opencs
+cd /opt/opencs
+sudo uv sync --no-dev --python /usr/bin/python3.12   # makes /opt/opencs/.venv
+/opt/opencs/.venv/bin/python -m opencs --version     # opencs 1.0.0rc1
+```
+
+Check that it works before wiring a service: `sudo tools/smoke.sh` starts a throwaway server on a free
+port with a throwaway data directory, plays the 19 judge checks against it (about a minute) and prints
+`smoke: ok (19 of 19 checks passed)`. Run it again after every upgrade. (It uses the `.venv` it finds in
+the checkout.)
+
+### Layout
+
+| path | holds |
+|---|---|
+| `/opt/opencs` | the code and its `.venv` (read-only to the service) |
+| `/etc/opencs/server.toml`, `/etc/opencs/cities/*.toml` | the configuration |
+| `/etc/opencs/environment` | `OPENCS_ADMIN_TOKEN=...`, mode 0600, only if the admin channel is used |
+| `/var/lib/opencs` | the data directory: `opencs.db` (accounts and progress) |
+| `/var/log/opencs` | the log file, if `[logging] file` is set |
+| `/var/lib/opencs-captures` | session captures, if `[capture]` is enabled |
+
+```bash
+sudo useradd --system --home /var/lib/opencs --shell /usr/sbin/nologin opencs
+sudo install -d -o opencs -g opencs /var/lib/opencs /var/log/opencs /var/lib/opencs-captures
+sudo install -d /etc/opencs
+sudo cp -r /opt/opencs/config/. /etc/opencs/
+```
+
+Edit `/etc/opencs/server.toml`. Paths in it are relative to the file, and `/etc` is read-only to the
+service, so point the writable things elsewhere, with absolute paths or on the command line:
+
+```toml
+port = 2399
+data_dir = "/var/lib/opencs"      # the unit also passes --data-dir
+
+[logging]
+file = "/var/log/opencs/opencs.log"
+
+[capture]
+dir = "/var/lib/opencs-captures"   # only used if capture is enabled
+
+# Optional: the operator channel, on 127.0.0.1 only.
+[admin]
+port = 2400
+```
+
+If you use the admin channel, put a token (at least 16 characters) in the environment file:
+
+```bash
+sudo sh -c 'umask 077; echo "OPENCS_ADMIN_TOKEN=$(head -c 24 /dev/urandom | base64 | tr -d "=+/")" > /etc/opencs/environment'
+```
+
+Every other key, its default and its limits are under "Configuration" below. The cities (letter, map,
+multiplier ceiling, tower output, module level, Sentinels, weather) are the files in
+`/etc/opencs/cities/`; a map number needs `C<n>` on each player's PC, and only 1 to 3 come with the game.
 
 ## Running
 
@@ -15,11 +86,11 @@ uv run python -m opencs --config /etc/opencs/server.toml --port 2399 --data-dir 
 ```
 
 Command-line options override the file: `--config`, `--host`, `--port`, `--data-dir`. Exit codes: 0 after
-a clean stop, 1 when a startup step fails (the message names it: the database or its directory, the game port, the
-admin port), 2 for a bad config file, an unwritable log file, or
-an admin port with no usable token.
+a clean stop; 1 when a startup step fails (the message names it: the database or its directory, the game
+port, the admin port); 2 for a bad config file, an unwritable log file, or an admin port with no usable
+token.
 
-### systemd
+### As a service (systemd)
 
 ```ini
 # /etc/systemd/system/opencs.service
@@ -48,27 +119,43 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 ```
 
-Paths in `server.toml` are relative to the file, and `/etc` is read-only under `ProtectSystem=strict`.
-`--data-dir` puts the database in a writable place; give the other two absolute paths to match
-`ReadWritePaths`:
+The paths in `server.toml` are relative to the file, and `/etc` is read-only under `ProtectSystem=strict`.
+`--data-dir` puts the database in a writable place; the log file and capture directory take absolute paths
+that match `ReadWritePaths` (as in the configuration above).
 
-```toml
-[logging]
-file = "/var/log/opencs/opencs.log"
-[capture]
-dir = "/var/lib/opencs-captures"
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now opencs
+sudo systemctl status opencs
+journalctl -u opencs -f              # the start-up line "listening on HOST:PORT"
+sudo systemctl reload opencs         # re-read the city files after editing them
+sudo systemctl stop opencs           # graceful: players are saved
 ```
 
 ### Ports and firewall
 
 | port | default | who | note |
 |---|---|---|---|
-| game | TCP 2399 (`port`) | **public** | what dosbox-x's serial bridge connects to; open it in the firewall |
-| admin | none (`[admin] port`) | **this machine only** | bound to `127.0.0.1` whatever the config says; never forward or open it |
+| game | TCP 2399 (`port`) | **public** | what the players' games connect to; open and forward this one |
+| admin | none (`[admin] port`; 2400 in the example) | **this machine only** | bound to `127.0.0.1` whatever the config says; never open or forward it |
+
+```bash
+sudo ufw allow 2399/tcp
+sudo ufw status
+```
 
 The game listener limits connections to 64 in total and 8 per address (`MAX_CONNECTIONS`,
 `MAX_CONNECTIONS_PER_ADDRESS`); the rest are closed at once. Behind a NAT or a proxy that makes every
-player share one address, raise the per-address limit in `policy.py`.
+player share one address, raise the per-address limit in `policy.py`. The link is plain TCP carrying the
+game's own protocol with no encryption: a password travels in the clear, so tell players to use one they
+use nowhere else.
+
+### Players behind one address
+
+Players who share one public address, such as a household or a LAN party behind one router, share the
+per-address limits: 4 connections, 2 not yet logged in and 2 guests. For them, raise
+`max_connections_per_address`, `max_connections_per_subnet`, `max_unauthenticated_per_address` and
+`max_guests_per_address` under `[limits]` in `server.toml`.
 
 ## Configuration
 
@@ -260,6 +347,7 @@ port, logging, capture, admin, `default_city`, `guest_names`) needs a restart; a
 config whose `default_city` is missing or has `enabled = false` is refused at validation, at start-up and
 on `reload` alike (nothing changes), so the lobby always has a city to offer.
 
+
 ## Backups
 
 State is one SQLite file, `<data_dir>/opencs.db` (accounts with salted PBKDF2 hashes, and progress). It
@@ -267,20 +355,65 @@ is written after every progress change, so back it up while the server runs with
 by copying the file:
 
 ```bash
-sqlite3 /var/lib/opencs/opencs.db ".backup '/backups/opencs-$(date +%F).db'"
+sudo sqlite3 /var/lib/opencs/opencs.db ".backup '/var/backups/opencs-$(date +%F).db'"
 ```
 
-Restore by stopping the server and putting the backup in place of `opencs.db`. `/RESUME` records, the
-cities' worlds (towers, territory, weather) and the login rate-limit tables are in memory and are not
-backed up: a restart starts every city fresh.
+Run it as root: the `opencs` user cannot write to `/var/backups`. Run it daily from cron or a systemd
+timer, and copy the result off the machine. Restore by stopping the server and putting a backup in place
+of `opencs.db` (owned by `opencs`). `/RESUME` records, the cities' worlds (towers, territory, weather) and
+the login rate-limit tables are in memory and are not backed up: a restart starts every city fresh, so
+announce one (`shutdown 120` on the admin channel) and players can finish first.
 
 ## Upgrading
 
-1. `git pull` and `uv sync`.
+1. `git pull` and `sudo uv sync --no-dev` in `/opt/opencs`.
 2. Back up `opencs.db` (above).
-3. `shutdown 120` on the admin channel (players are told once, at the start, that the server stops in 120 seconds; there is no repeating countdown), or `systemctl stop opencs`.
+3. `shutdown 120` on the admin channel (players are told once, at the start, that the server stops in 120
+   seconds; there is no repeating countdown), or `systemctl stop opencs`.
 4. Start the new version. The database schema only moves forward, automatically, on open
    (`MIGRATIONS` is append-only); a database from a newer server is refused rather than guessed at, so
    downgrading means restoring the pre-upgrade backup.
 5. Read the start-up log for config errors before announcing the server is back. Config files from an
    older version are accepted if their keys are still known; a removed key is an error that names it.
+6. Run `tools/smoke.sh`.
+
+## Two servers on one host
+
+Each server needs its own game port, admin port (if used), data directory and configuration. Do not
+share a data directory. With a template unit:
+
+```ini
+# /etc/systemd/system/opencs@.service      (instances: opencs@one, opencs@two)
+[Unit]
+Description=OpenCS game server (%i)
+After=network.target
+
+[Service]
+User=opencs
+WorkingDirectory=/opt/opencs
+EnvironmentFile=-/etc/opencs/%i/environment
+ExecStart=/opt/opencs/.venv/bin/python -m opencs --config /etc/opencs/%i/server.toml --data-dir /var/lib/opencs-%i
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+ProtectSystem=strict
+ReadWritePaths=/var/lib/opencs-%i /var/log/opencs
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+for n in one two; do
+  sudo install -d /etc/opencs/$n && sudo cp -r /opt/opencs/config/. /etc/opencs/$n/
+  sudo install -d -o opencs -g opencs /var/lib/opencs-$n /var/log/opencs
+done
+# in /etc/opencs/one/server.toml: port = 2399, admin port 2400, log file /var/log/opencs/one.log
+# in /etc/opencs/two/server.toml: port = 2499, admin port 2500, log file /var/log/opencs/two.log
+sudo systemctl enable --now opencs@one opencs@two
+```
+
+Players of each server use the port of theirs in the phonebook. The two do not share accounts, cities or
+held games, and a pilot can be online on both at once.

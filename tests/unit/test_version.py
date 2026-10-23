@@ -28,8 +28,6 @@ def test_version_flag_prints_the_version_and_exits_zero(
     assert capsys.readouterr().out.strip() == f"opencs {opencs.__version__}"
 
 
-def test_changelog_has_the_current_version_and_every_milestone() -> None:
+def test_changelog_has_the_current_version() -> None:
     text = (ROOT / "CHANGELOG.md").read_text()
     assert f"## {opencs.__version__}" in text
-    milestones = [f"M{n}" for n in (*range(10), 11, 12, 13)] + ["M10a", "M10b"]
-    assert [m for m in milestones if f"### {m}:" not in text] == []

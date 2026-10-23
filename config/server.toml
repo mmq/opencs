@@ -44,7 +44,7 @@ enabled = false
 # callsigns = ["ALPHA"]
 # max_bytes = 4000000
 
-# The operator channel (docs/operations.md): a line-oriented TCP port on 127.0.0.1 only, off unless
+# The operator channel (docs/OPERATING.md): a line-oriented TCP port on 127.0.0.1 only, off unless
 # `port` is set. It needs a token of at least 16 characters, given here or (better) in the
 # environment variable named by `token_env` (default OPENCS_ADMIN_TOKEN).
 # [admin]
