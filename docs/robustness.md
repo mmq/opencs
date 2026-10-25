@@ -141,6 +141,11 @@ in policy.
 
 ## Threat model
 
+`tests/e2e/test_abuse.py` plays the main abuses against a real server on loopback: a chat flood spread
+over trips through the `*` prompt, chat aimed past a client that reads slowly, a guess storm on one
+account (and that the event loop keeps running while the hashes do), a reconnect loop, and guests from
+one address.
+
 The game port is public, and anything may connect to it and send anything. The tables above bound what
 one connection, one address, one subnet, one account and the whole server can make the server do. This
 section lists what those bounds do **not** cover, and why.
