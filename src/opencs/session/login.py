@@ -106,7 +106,7 @@ class LoginPhase(TextPhase):
             text, self.host.services.login_limits.gate(self.host.address)
         )
         if isinstance(result, Refused):
-            self.host.log.info("login refused: %s", result.reason)
+            self.host.log.info("login refused from %s: %s", self.host.address, result.reason)
             self.host.io.send_raw(plain_line(result.reason))
             self.host.close("login refused")
             return

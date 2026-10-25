@@ -11,7 +11,7 @@ from collections import Counter
 
 from opencs import policy
 from opencs.clock import Clock
-from opencs.session.ratelimit import KeyedBuckets, TokenBucket
+from opencs.ratelimit import KeyedBuckets, TokenBucket
 
 
 class LoginLimits:

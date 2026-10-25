@@ -147,6 +147,16 @@ SUBNET_PREFIX_V6 = 64
 MAX_UNAUTHENTICATED = 16
 MAX_UNAUTHENTICATED_PER_ADDRESS = 2
 
+#: New connections from one address, refused or not: a token bucket ``(burst, per second)``. Past
+#: it a connection is closed before a session is made. A player reconnects after a drop or a
+#: mistyped password a few times a minute at most. Ours (DESIGN §5).
+CONNECT_RATE_PER_ADDRESS = (10, 1 / 6)
+
+#: Refused connections from one address are logged at most once in this many seconds, the rest
+#: summed up in the next line (``net.listener.RefusalLog``), so a reconnect flood cannot flood the
+#: log and rotate the useful history away. Ours (DESIGN §6).
+REFUSAL_LOG_INTERVAL = 60.0
+
 #: Items (raw writes or messages) a connection may have queued for sending before it is closed.
 #: Ours (DESIGN §3.3): the client handles about 50 packets a second (I §3), so this is over
 #: twenty seconds of backlog for a client that has stopped reading.

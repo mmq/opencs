@@ -6,8 +6,8 @@ from fixtures.sessions import World, connect, make_world
 from opencs import policy
 from opencs.clock import ManualClock
 from opencs.lobby.identity import Pilot
+from opencs.ratelimit import KeyedBuckets
 from opencs.session.loginlimits import LoginLimits
-from opencs.session.ratelimit import KeyedBuckets
 
 
 def attempt(world: World, line: str, address: str) -> bytes:

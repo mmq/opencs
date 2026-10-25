@@ -21,6 +21,7 @@ from opencs.clock import Clock
 from opencs.connlog import ConnectionContext
 from opencs.net.capture import CaptureFactory
 from opencs.net.connection import Connection, SessionFactory
+from opencs.ratelimit import KeyedBuckets
 
 log = logging.getLogger("opencs.net")
 
@@ -75,6 +76,38 @@ class ConnectionLimits:
     per_subnet: int = policy.MAX_CONNECTIONS_PER_SUBNET
     unauthenticated: int = policy.MAX_UNAUTHENTICATED
     unauthenticated_per_address: int = policy.MAX_UNAUTHENTICATED_PER_ADDRESS
+    #: New connections from one address: a token bucket ``(burst, per second)``.
+    connect_rate: tuple[int, float] = policy.CONNECT_RATE_PER_ADDRESS
+
+
+class RefusalLog:
+    """Logs refused connections without letting a flood of them flood the log (DESIGN §6).
+
+    The first refusal of an address is logged at once; later ones within ``REFUSAL_LOG_INTERVAL``
+    are counted and summed up in one line with the next refusal after it. The line's shape is
+    stable, ``refusing ADDRESS: REASON`` with `` (and N more since the last line)`` when some were
+    held back, so a firewall tool can match it. Bounded by ``MAX_TRACKED_SOURCES``.
+    """
+
+    def __init__(self, clock: Clock) -> None:
+        self._clock = clock
+        self._last: dict[str, tuple[float, int]] = {}  # address -> (logged at, held back since)
+
+    def refused(self, address: str, reason: str) -> None:
+        now = self._clock.now()
+        logged_at, held = self._last.get(address, (None, 0))
+        if logged_at is not None and now - logged_at < policy.REFUSAL_LOG_INTERVAL:
+            self._last[address] = (logged_at, held + 1)
+            return
+        if len(self._last) >= policy.MAX_TRACKED_SOURCES:
+            self._last = {
+                a: v for a, v in self._last.items() if now - v[0] < policy.REFUSAL_LOG_INTERVAL
+            }
+            while len(self._last) >= policy.MAX_TRACKED_SOURCES:
+                del self._last[next(iter(self._last))]
+        more = f" (and {held} more since the last line)" if held else ""
+        log.warning("refusing %s: %s%s", address, reason, more)
+        self._last[address] = (now, 0)
 
 
 class Listener:
@@ -100,6 +133,8 @@ class Listener:
         self._clock = clock
         self._sleep = sleep
         self._limits = limits
+        self._connect_rate = KeyedBuckets(*limits.connect_rate)
+        self._refusals = RefusalLog(clock)
         self._ids = itertools.count(1)
         self._connections: dict[int, Connection] = {}  # oldest first
         self._per_address: Counter[str] = Counter()
@@ -159,7 +194,7 @@ class Listener:
             await self._refuse(writer)
             return
         if (reason := self._over_limit(address, subnet)) is not None:
-            log.warning("refusing %s: %s", address, reason)
+            self._refusals.refused(address, reason)
             await self._refuse(writer)
             return
         self._make_room_to_log_in()
@@ -180,7 +215,7 @@ class Listener:
         self._connections[conn_id] = connection
         self._per_address[address] += 1
         self._per_subnet[subnet] += 1
-        log.info("[conn=%d -] accepted from %s", conn_id, address)
+        log.debug("[conn=%d -] accepted from %s", conn_id, address)
         try:
             await connection.run()
         finally:
@@ -193,7 +228,10 @@ class Listener:
                 del self._per_subnet[subnet]
 
     def _over_limit(self, address: str, subnet: str) -> str | None:
-        """Why a new connection from ``address`` is refused, None if it is not."""
+        """Why a new connection from ``address`` is refused, None if it is not. Every attempt
+        spends from the address's connect rate, refused or not: a reconnect loop stays refused."""
+        if not self._connect_rate.take(address, self._clock.now()):
+            return "connecting too often"
         if len(self._connections) >= self._limits.total:
             return f"{len(self._connections)} connections"
         if self._per_address[address] >= self._limits.per_address:

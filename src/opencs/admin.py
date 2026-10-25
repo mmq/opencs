@@ -24,7 +24,7 @@ from opencs import policy
 from opencs.clock import Clock
 from opencs.config import AdminConfig, ConfigError
 from opencs.control import COMMAND_NAMES, Control
-from opencs.session.ratelimit import TokenBucket
+from opencs.ratelimit import TokenBucket
 
 log = logging.getLogger("opencs.admin")
 

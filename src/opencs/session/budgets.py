@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from opencs import policy
 from opencs.messages import ClientMessage, client
+from opencs.ratelimit import TokenBucket
 from opencs.session.badinput import WindowedCounter
-from opencs.session.ratelimit import TokenBucket
 
 
 class Budgets:

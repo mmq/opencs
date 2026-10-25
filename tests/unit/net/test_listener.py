@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 
 import pytest
 
 from fixtures.streams import until, wait
+from opencs import policy
 from opencs.clock import ManualClock
 from opencs.connlog import ConnectionContext
 from opencs.net.connection import ConnectionIO
 from opencs.net.listener import (
     ConnectionLimits,
     Listener,
+    RefusalLog,
     enable_keepalive,
     normalize_address,
     subnet_of,
@@ -291,3 +294,55 @@ def test_past_the_total_not_logged_in_the_oldest_such_connection_is_cut() -> Non
         return cut
 
     assert asyncio.run(scenario()) == b""
+
+
+def test_an_address_that_connects_too_often_is_refused_until_its_rate_refills() -> None:
+    async def scenario() -> list[bytes]:
+        clock = ManualClock()
+        listener = Listener(
+            factory,
+            clock,
+            limits=ConnectionLimits(connect_rate=(2, 0.5), unauthenticated_per_address=10),
+        )
+        r1, w1 = await open_to(listener)
+        port = listener._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
+        got = [await wait(r1.readexactly(2))]
+        r2, w2 = await wait(asyncio.open_connection("127.0.0.1", port))
+        got.append(await wait(r2.readexactly(2)))
+        r3, w3 = await wait(asyncio.open_connection("127.0.0.1", port))
+        got.append(await wait(r3.read()))  # the third in a row is refused
+        clock.advance(2.0)  # one token back
+        r4, w4 = await wait(asyncio.open_connection("127.0.0.1", port))
+        got.append(await wait(r4.readexactly(2)))
+        await listener.stop()
+        for w in (w1, w2, w3, w4):
+            w.close()
+        return got
+
+    assert asyncio.run(scenario()) == [b"hi", b"hi", b"", b"hi"]
+
+
+def test_refusals_are_logged_once_a_minute_per_address_and_summed_up(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = ManualClock()
+    refusals = RefusalLog(clock)
+    with caplog.at_level(logging.WARNING, logger="opencs.net"):
+        for _ in range(50):
+            refusals.refused("203.0.113.7", "connecting too often")
+        refusals.refused("198.51.100.1", "4 from that address")
+        clock.advance(policy.REFUSAL_LOG_INTERVAL)
+        refusals.refused("203.0.113.7", "connecting too often")
+    assert [r.getMessage() for r in caplog.records] == [
+        "refusing 203.0.113.7: connecting too often",
+        "refusing 198.51.100.1: 4 from that address",
+        "refusing 203.0.113.7: connecting too often (and 49 more since the last line)",
+    ]
+
+
+def test_the_refusal_log_remembers_a_bounded_number_of_addresses() -> None:
+    clock = ManualClock()
+    refusals = RefusalLog(clock)
+    for n in range(policy.MAX_TRACKED_SOURCES + 10):
+        refusals.refused(f"10.{n // 65536}.{n // 256 % 256}.{n % 256}", "x")
+    assert len(refusals._last) <= policy.MAX_TRACKED_SOURCES

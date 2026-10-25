@@ -1,4 +1,8 @@
-"""A token bucket on the session clock (DESIGN §5)."""
+"""Token buckets on a caller's clock, alone or one per source (DESIGN §5).
+
+Shared by the layers that meter input: the listener (connections per address), the sessions
+(lines, frames, chat) and the admin channel.
+"""
 
 from __future__ import annotations
 

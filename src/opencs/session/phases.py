@@ -18,11 +18,11 @@ from opencs.clock import Clock
 from opencs.connlog import STREAM_LOGIN
 from opencs.lobby.identity import Identity
 from opencs.lobby.lobby import Lobby
+from opencs.ratelimit import KeyedBuckets
 from opencs.routing import Router
 from opencs.session.held import HeldGames
 from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
-from opencs.session.ratelimit import KeyedBuckets
 from opencs.session.registry import SessionRegistry
 from opencs.wire.text import LineReader
 from opencs.world.city import City

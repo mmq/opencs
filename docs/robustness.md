@@ -31,6 +31,8 @@ in policy.
 | input | bound | on violation | test |
 |---|---|---|---|
 | TCP accept, total | `MAX_CONNECTIONS` | refused at once | `net/test_listener::test_total_connection_limit_refuses_the_extra_one_at_once` |
+| TCP accept rate, per address | `CONNECT_RATE_PER_ADDRESS` (every attempt spends, refused or not) | closed before a session is made | `net/test_listener::test_an_address_that_connects_too_often_is_refused_until_its_rate_refills` |
+| log lines from refusals | one per address per `REFUSAL_LOG_INTERVAL`, the rest summed up in the next (`RefusalLog`, bounded by `MAX_TRACKED_SOURCES`); accepts log at DEBUG, logins at INFO with the address | held back and counted | `net/test_listener::test_refusals_are_logged_once_a_minute_per_address_and_summed_up`, `test_the_refusal_log_remembers_a_bounded_number_of_addresses` |
 | TCP accept, per address | `MAX_CONNECTIONS_PER_ADDRESS`; an IPv4-mapped IPv6 address counts as its IPv4 one | refused at once | `net/test_listener::test_per_address_limit`, `test_addresses_are_keyed_as_one_host_and_grouped_by_subnet` |
 | TCP accept, per subnet | `MAX_CONNECTIONS_PER_SUBNET` (/24, /64: `SUBNET_PREFIX_*`) | refused at once | `net/test_listener::test_per_subnet_limit` |
 | connections not logged in | `MAX_UNAUTHENTICATED_PER_ADDRESS`; `MAX_UNAUTHENTICATED` in all | per address: refused at once; in all: the oldest not logged in is cut to make room | `net/test_listener::test_an_address_may_have_only_so_many_connections_not_logged_in`, `test_past_the_total_not_logged_in_the_oldest_such_connection_is_cut` |

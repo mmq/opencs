@@ -124,7 +124,10 @@ class Session:
         if pilot.is_guest:
             self.services.login_limits.guest_in(self.address)
         self.log.info(
-            "logged in as %s (%s)", pilot.callsign, "guest" if pilot.is_guest else "account"
+            "logged in as %s (%s) from %s",
+            pilot.callsign,
+            "guest" if pilot.is_guest else "account",
+            self.address,
         )
 
     def join_lobby(self) -> Member:
