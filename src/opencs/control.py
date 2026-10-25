@@ -18,6 +18,7 @@ from opencs.cities import CityManager
 from opencs.config import ConfigFile
 from opencs.connlog import STREAM_CHAMBER, STREAM_GAME
 from opencs.lobby import replies
+from opencs.lobby.identity import Refused, identity_key
 from opencs.messages import server
 from opencs.routing import Router
 from opencs.session.phases import Services
@@ -35,6 +36,11 @@ HELP = (
     "guppy <team> home           warp a stranded team guppy home and reset its leg counts",
     "shutdown [seconds|cancel]   announce, then stop the server gracefully (saving everyone)",
     "reload                      re-read the city files (a running game is never changed)",
+    "accounts                    how many accounts there are, and whether first logins register",
+    "create-account <name>       make an account with a new password, shown once",
+    "reset-password <name>       give an account a new password, shown once",
+    "reset-progress <name>       wipe an account's saved progress (it must be offline)",
+    "delete-account <name>       remove an account and its progress (it must be offline)",
     "help                        this list",
     "quit                        close this connection",
 )
@@ -42,7 +48,20 @@ HELP = (
 
 #: The words ``Control.execute`` answers; the admin channel logs a word only if it is one of these,
 #: so a token typed again after logging in (an unknown word) never reaches the log.
-COMMAND_NAMES = ("status", "announce", "kick", "guppy", "shutdown", "reload", "help")
+COMMAND_NAMES = (
+    "status",
+    "announce",
+    "kick",
+    "guppy",
+    "shutdown",
+    "reload",
+    "help",
+    "accounts",
+    "create-account",
+    "reset-password",
+    "reset-progress",
+    "delete-account",
+)
 
 
 def announce(services: Services, text: str, router: Router | None = None) -> int:
@@ -126,6 +145,11 @@ class Control:
             "shutdown": lambda: self.shutdown(rest),
             "reload": self.reload,
             "help": lambda: list(HELP),
+            "accounts": self.accounts,
+            "create-account": lambda: self.create_account(rest),
+            "reset-password": lambda: self.reset_password(rest),
+            "reset-progress": lambda: self.reset_progress(rest),
+            "delete-account": lambda: self.delete_account(rest),
         }
         if not word:
             return []
@@ -164,6 +188,67 @@ class Control:
             for r, left in held
         )
         return lines
+
+    # --- accounts (a password made here is shown once and never logged) ---------------------------
+
+    def accounts(self) -> list[str]:
+        identity = self._services.identity
+        mode = "open" if identity.registration_open else "closed"
+        return [
+            f"accounts: {identity.account_count()} of at most {policy.MAX_ACCOUNTS}; "
+            f"registration {mode}"
+        ]
+
+    def create_account(self, name: str) -> list[str]:
+        if not name or " " in name:
+            return ["usage: create-account <name>"]
+        result = self._services.identity.register(name)
+        if isinstance(result, Refused):
+            return [f"refused: {result.reason}"]
+        account, password = result
+        log.info("account %s created by the operator", account.name)
+        return [f"created {account.name}; password (shown once): {password}"]
+
+    def reset_password(self, name: str) -> list[str]:
+        if not name or " " in name:
+            return ["usage: reset-password <name>"]
+        result = self._services.identity.reset_password(name)
+        if isinstance(result, Refused):
+            return [f"refused: {result.reason}"]
+        log.info("password of %s reset by the operator", name.upper())
+        return [f"new password for {name.upper()} (shown once): {result}"]
+
+    def reset_progress(self, name: str) -> list[str]:
+        if not name or " " in name:
+            return ["usage: reset-progress <name>"]
+        name = name.upper()
+        if (refusal := self._offline_account(name)) is not None:
+            return [refusal]
+        erased = self._services.persistence.erase(identity_key(name, name))
+        log.info("progress of %s reset by the operator", name)
+        return [f"progress of {name} {'erased' if erased else 'was empty'}"]
+
+    def delete_account(self, name: str) -> list[str]:
+        if not name or " " in name:
+            return ["usage: delete-account <name>"]
+        name = name.upper()
+        if (refusal := self._offline_account(name)) is not None:
+            return [refusal]
+        self._services.identity.delete_account(name)
+        self._services.persistence.erase(identity_key(name, name))
+        log.info("account %s deleted by the operator", name)
+        return [f"deleted {name}"]
+
+    def _offline_account(self, name: str) -> str | None:
+        """Why account ``name`` cannot be changed now, None if it can."""
+        identity = self._services.identity
+        if identity.account_online(name):
+            return f"refused: {name} is online; kick it first"
+        if self._services.held.get(identity_key(name, name)) is not None:
+            return f"refused: {name} has a game held for /RESUME; wait for it to expire"
+        if not identity.account_exists(name):
+            return f"refused: no account {name}"
+        return None
 
     def announce(self, text: str) -> list[str]:
         if not text:

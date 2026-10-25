@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -99,6 +101,14 @@ def hash_password(password: str, salt: bytes, iterations: int) -> bytes:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
 
 
+def make_password() -> str:
+    """A random password with no look-alike characters (``policy.GENERATED_PASSWORD_*``)."""
+    return "".join(
+        secrets.choice(policy.GENERATED_PASSWORD_ALPHABET)
+        for _ in range(policy.GENERATED_PASSWORD_LENGTH)
+    )
+
+
 class Identity:
     """Logs players in and out and hands out callsigns."""
 
@@ -108,10 +118,16 @@ class Identity:
         *,
         guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES,
         iterations: int = policy.PBKDF2_ITERATIONS,
+        registration: str = policy.DEFAULT_REGISTRATION,
+        min_password_length: int = policy.MIN_PASSWORD_LENGTH,
+        max_accounts: int = policy.MAX_ACCOUNTS,
     ) -> None:
         self._store = store
         self._guest_names = frozenset(name.upper() for name in guest_names)
         self._iterations = iterations
+        self._registration_open = registration == "open"
+        self._min_password_length = min_password_length
+        self._max_accounts = max_accounts
         self._callsigns: set[str] = set()
         self._accounts: set[str] = set()
 
@@ -186,7 +202,119 @@ class Identity:
             gate.account_succeeded(check.name)
         if check.name in self._accounts:
             return Refused("THAT ACCOUNT IS ALREADY LOGGED IN")
+        if check.stored is not None:
+            self._store.touch_login(check.name)
         return self._admit(check.name, check.name)
+
+    # --- accounts, outside a login -----------------------------------------------------------
+
+    def new_account_refusal(self, name: str, password: str) -> Refused | None:
+        """Why ``name`` (upper case) with ``password`` cannot be a new account, None if it can:
+        every rule a registration must pass, wherever it comes from (a first login now; a
+        registration command or page later). It does not look at the limits on how often."""
+        if (
+            reason := self._new_name_problem(name) or self._new_password_problem(password)
+        ) is not None:
+            return Refused(reason)
+        if self._store.count() >= self._max_accounts:
+            return Refused("THIS SERVER HAS NO ROOM FOR NEW ACCOUNTS")
+        return None
+
+    def _new_name_problem(self, name: str) -> str | None:
+        if not policy.MIN_ACCOUNT_NAME_LENGTH <= len(name) <= policy.MAX_CALLSIGN_LENGTH:
+            return (
+                f"A NEW NAME MUST BE {policy.MIN_ACCOUNT_NAME_LENGTH} TO "
+                f"{policy.MAX_CALLSIGN_LENGTH} CHARACTERS"
+            )
+        if any(ch not in policy.ACCOUNT_NAME_CHARACTERS for ch in name):
+            return "A NEW NAME MAY HOLD ONLY LETTERS, DIGITS, _ AND -"
+        if name in policy.RESERVED_ACCOUNT_NAMES or self._a_guest_could_be(name):
+            return "THAT NAME IS RESERVED"
+        return None
+
+    def _a_guest_could_be(self, callsign: str) -> bool:
+        """Whether ``_allocate_callsign`` could give ``callsign`` to a guest: a guest name cut to
+        12 characters, or with its tail replaced by a number (``JOINGENIE2``)."""
+        for guest in self._guest_names:
+            base = guest[: policy.MAX_CALLSIGN_LENGTH]
+            if callsign == base:
+                return True
+            for n in range(policy.CALLSIGN_FIRST_SUFFIX, policy.CALLSIGN_LAST_SUFFIX + 1):
+                suffix = str(n)
+                if callsign == base[: policy.MAX_CALLSIGN_LENGTH - len(suffix)] + suffix:
+                    return True
+        return False
+
+    def _new_password_problem(self, password: str) -> str | None:
+        if len(password) < self._min_password_length:
+            return (
+                f"A NEW ACCOUNT NEEDS A PASSWORD OF {self._min_password_length} CHARACTERS OR MORE"
+            )
+        if len(password) > policy.MAX_PASSWORD_LENGTH:
+            return "PASSWORD TOO LONG"
+        return None
+
+    def register(self, name: str, password: str | None = None) -> tuple[Account, str] | Refused:
+        """Make an account outside a login (the operator's ``create-account``; a future
+        registration command or page), hashing here and now. Without ``password`` one is made up.
+        Returns the account and its password, to be shown once and never logged."""
+        name = name.strip().upper()
+        password = password if password is not None else make_password()
+        if self._store.get(name) is not None:
+            return Refused("THAT NAME IS TAKEN")
+        if (refusal := self.new_account_refusal(name, password)) is not None:
+            return refusal
+        salt = os.urandom(policy.PBKDF2_SALT_BYTES)
+        account = Account(
+            name, salt, hash_password(password, salt, self._iterations), self._iterations
+        )
+        if not self._store.create(account):
+            return Refused("THAT NAME IS TAKEN")
+        return account, password
+
+    def reset_password(self, name: str) -> str | Refused:
+        """Give account ``name`` a new, made-up password and return it (shown once, never
+        logged). A player logged in stays logged in."""
+        name = name.strip().upper()
+        password = make_password()
+        salt = os.urandom(policy.PBKDF2_SALT_BYTES)
+        account = Account(
+            name, salt, hash_password(password, salt, self._iterations), self._iterations
+        )
+        if not self._store.set_password(account):
+            return Refused("NO SUCH ACCOUNT")
+        return password
+
+    def account_online(self, name: str) -> bool:
+        """True if account ``name`` (upper case) is logged in."""
+        return name in self._accounts
+
+    def account_count(self) -> int:
+        return self._store.count()
+
+    def account_exists(self, name: str) -> bool:
+        return self._store.get(name) is not None
+
+    @property
+    def registration_open(self) -> bool:
+        return self._registration_open
+
+    def delete_account(self, name: str) -> bool:
+        """Remove account ``name`` (upper case); its progress is the caller's to erase."""
+        return self._store.delete(name)
+
+    def prune_unplayed(self, before: float, has_progress: Callable[[str], bool]) -> list[str]:
+        """Delete the accounts nobody has created or logged in to since ``before`` (wall-clock
+        seconds) that hold no progress (``has_progress`` of their record key) and are not online,
+        so names claimed and never played come free (``policy.UNPLAYED_ACCOUNT_DAYS``). Returns
+        their names."""
+        gone = []
+        for name in self._store.stale(before):
+            if name in self._accounts or has_progress(identity_key(name, name)):
+                continue
+            if self._store.delete(name):
+                gone.append(name)
+        return gone
 
     def _account(self, name: str, password: str, gate: LoginGate | None) -> Refused | PasswordCheck:
         if (refusal := self._refuse_account(name, password, gate)) is not None:
@@ -194,6 +322,10 @@ class Identity:
         account = self._store.get(name)
         if account is not None:
             return PasswordCheck(name, password, account.salt, account.iterations, account)
+        if not self._registration_open:
+            return Refused("NO SUCH ACCOUNT: ASK THE OPERATOR FOR ONE")
+        if (refusal := self.new_account_refusal(name, password)) is not None:
+            return refusal
         if gate is not None and not gate.may_register():
             return Refused("TOO MANY NEW ACCOUNTS: TRY AGAIN LATER")
         salt = os.urandom(policy.PBKDF2_SALT_BYTES)
@@ -215,7 +347,7 @@ class Identity:
         return None
 
     def _admit(self, name: str, account: str | None) -> Pilot | Refused:
-        callsign = self._allocate_callsign(name)
+        callsign = self._allocate_callsign(name, guest=account is None)
         if callsign is None:
             return Refused("TOO MANY PILOTS WITH THAT NAME ARE ONLINE")
         self._callsigns.add(callsign)
@@ -223,15 +355,24 @@ class Identity:
             self._accounts.add(account)
         return Pilot(callsign, account)
 
-    def _allocate_callsign(self, name: str) -> str | None:
+    def _allocate_callsign(self, name: str, *, guest: bool) -> str | None:
         """The name cut to 12 characters, or with its tail replaced by a number until free
-        (II §3: ``JOINGENIE``, ``JOINGENIE2`` ... ``JOINGENIE999``)."""
+        (II §3: ``JOINGENIE``, ``JOINGENIE2`` ... ``JOINGENIE999``). A guest also passes over
+        every registered account's callsign, so an account always plays under its own name."""
+
+        def free(callsign: str) -> bool:
+            if callsign in self._callsigns:
+                return False
+            return not (
+                guest and self._store.callsign_registered(callsign, policy.MAX_CALLSIGN_LENGTH)
+            )
+
         base = name[: policy.MAX_CALLSIGN_LENGTH]
-        if base not in self._callsigns:
+        if free(base):
             return base
         for n in range(policy.CALLSIGN_FIRST_SUFFIX, policy.CALLSIGN_LAST_SUFFIX + 1):
             suffix = str(n)
             candidate = base[: policy.MAX_CALLSIGN_LENGTH - len(suffix)] + suffix
-            if candidate not in self._callsigns:
+            if free(candidate):
                 return candidate
         return None

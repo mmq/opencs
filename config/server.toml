@@ -17,6 +17,10 @@ default_city = "B"
 # share, each given its own callsign, and never saved. An empty list turns guests off.
 guest_names = ["JOINGENIE"]
 
+# Whether the first login with an unknown name registers it ("open", II §3) or is refused ("closed":
+# the operator makes accounts with `create-account` on the admin channel).
+registration = "open"
+
 [logging]
 # DEBUG, INFO, WARNING, ERROR or CRITICAL, for everything the server logs.
 level = "INFO"

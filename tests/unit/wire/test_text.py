@@ -30,7 +30,7 @@ def test_lines_split_on_cr_across_chunks() -> None:
 
 def test_empty_lines_preserved_and_lf_ignored() -> None:
     r = LineReader()
-    assert r.feed(b"\r\r\nNAME,PW\r\n") == [b"", b"", b"NAME,PW"]
+    assert r.feed(b"\r\r\nNAME,SECRET\r\n") == [b"", b"", b"NAME,SECRET"]
 
 
 def test_control_bytes_dropped() -> None:

@@ -372,6 +372,55 @@ DEFAULT_GUEST_NAMES = (GUEST_ACCOUNT_NAME,)
 MAX_ACCOUNT_NAME_LENGTH = 32
 MAX_PASSWORD_LENGTH = 64
 
+#: What a *new* account's name and password must be (DESIGN §5); accounts made before these rules
+#: keep logging in as they are. Names: upper-case letters, digits, ``_`` and ``-`` (no spaces or
+#: punctuation to confuse a command line or a reader), 3 to ``MAX_CALLSIGN_LENGTH`` characters, so
+#: an account's callsign is always its whole name, and never one a guest could be given
+#: (``JOINGENIE2``). Passwords: at least 6
+#: characters; the client sends whatever its ``CS.CFG`` holds, so a guess must cost more than a few
+#: tries. Ours.
+ACCOUNT_NAME_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+MIN_ACCOUNT_NAME_LENGTH = 3
+MIN_PASSWORD_LENGTH = 6
+
+#: Names no new account may take: a player called ADMIN or SERVER could pass for the operator. Ours.
+RESERVED_ACCOUNT_NAMES = frozenset(
+    {
+        "ADMIN",
+        "ADMINISTRATOR",
+        "SYSOP",
+        "OPERATOR",
+        "MODERATOR",
+        "SERVER",
+        "SYSTEM",
+        "OPENCS",
+        "GENIE",
+        "GUPPY",
+        "SENTINEL",
+        "MUNCHER",
+    }
+)
+
+#: Most accounts the server holds; past it a first login is refused rather than registered. Ours
+#: (DESIGN §5): within the registration limits a script could otherwise add tens of thousands a day.
+MAX_ACCOUNTS = 10_000
+
+#: An account with no saved progress that nobody has logged in to for this many days is deleted
+#: (at start-up and then every ``ACCOUNT_PRUNE_INTERVAL`` seconds), so names claimed and never
+#: played come free and the table cannot only grow. Ours (DESIGN §5).
+UNPLAYED_ACCOUNT_DAYS = 30
+ACCOUNT_PRUNE_INTERVAL = 24 * 3600.0
+
+#: Whether a first login with an unknown name registers it (II §3, "open") or is refused
+#: ("closed": accounts are made by the operator, ``create-account``). Ours.
+REGISTRATION_MODES = ("open", "closed")
+DEFAULT_REGISTRATION = "open"
+
+#: Length of a password the admin channel makes (``create-account``, ``reset-password``), from an
+#: alphabet without look-alike characters. Ours.
+GENERATED_PASSWORD_LENGTH = 10
+GENERATED_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+
 #: PBKDF2-HMAC-SHA256 work factor and salt size. Ours (DESIGN §5 "salted PBKDF2"). 100 000 rounds
 #: is about 30 ms on a hashing thread (``HASH_WORKERS``), never on the event loop. An account keeps
 #: the count it was registered with, so raising this changes new accounts only.

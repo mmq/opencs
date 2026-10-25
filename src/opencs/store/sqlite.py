@@ -28,7 +28,8 @@ MIGRATIONS: tuple[tuple[str, ...], ...] = (
             salt BLOB NOT NULL,
             password_hash BLOB NOT NULL,
             iterations INTEGER NOT NULL,
-            created REAL NOT NULL
+            created REAL NOT NULL,
+            last_login REAL  -- NULL until the first login; lets an unplayed account be pruned
         )""",
         """CREATE TABLE progress (
             identity TEXT PRIMARY KEY,
@@ -61,6 +62,10 @@ class SqliteStore:
         # Autocommit mode, so every transaction below is an explicit BEGIN .. COMMIT.
         self._db = sqlite3.connect(path, isolation_level=None, timeout=policy.DATABASE_BUSY_TIMEOUT)
         try:
+            if str(path) != ":memory:":
+                # Readers (a backup, a future registration front end) never block the server's
+                # writes, nor it theirs, beyond the busy timeout.
+                self._db.execute("PRAGMA journal_mode=WAL")
             self._migrate(migrations)
         except BaseException:
             self._db.close()
@@ -127,7 +132,8 @@ class SqliteStore:
 
     def create(self, account: Account) -> bool:
         cursor = self._write(
-            "INSERT OR IGNORE INTO accounts VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO accounts (name, salt, password_hash, iterations, created) "
+            "VALUES (?, ?, ?, ?, ?)",
             (
                 account.name,
                 account.salt,
@@ -143,6 +149,29 @@ class SqliteStore:
             "SELECT 1 FROM accounts WHERE substr(name, 1, ?) = ? LIMIT 1", (length, callsign)
         ).fetchone()
         return row is not None
+
+    def count(self) -> int:
+        return int(self._db.execute("SELECT count(*) FROM accounts").fetchone()[0])
+
+    def touch_login(self, name: str) -> None:
+        self._write("UPDATE accounts SET last_login = ? WHERE name = ?", (self._now(), name))
+
+    def stale(self, before: float) -> list[str]:
+        rows = self._db.execute(
+            "SELECT name FROM accounts WHERE coalesce(last_login, created) < ? ORDER BY name",
+            (before,),
+        ).fetchall()
+        return [row[0] for row in rows]
+
+    def set_password(self, account: Account) -> bool:
+        cursor = self._write(
+            "UPDATE accounts SET salt = ?, password_hash = ?, iterations = ? WHERE name = ?",
+            (account.salt, account.password_hash, account.iterations, account.name),
+        )
+        return cursor.rowcount == 1
+
+    def delete(self, name: str) -> bool:
+        return self._write("DELETE FROM accounts WHERE name = ?", (name,)).rowcount == 1
 
     # --- ProgressStore -----------------------------------------------------------------------
 
@@ -173,6 +202,9 @@ class SqliteStore:
                 self._now(),
             ),
         )
+
+    def erase(self, identity: str) -> bool:
+        return self._write("DELETE FROM progress WHERE identity = ?", (identity,)).rowcount == 1
 
 
 def open_stores(

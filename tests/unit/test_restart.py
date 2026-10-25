@@ -141,7 +141,7 @@ def test_bays_and_bay_points_survive_a_server_restart(tmp_path: Path) -> None:
 
 def test_the_wrong_password_after_a_restart_is_still_refused(tmp_path: Path) -> None:
     async def first(port: int, clock: ManualClock, gate: TickGate) -> None:
-        (await login(port, "BOB,right")).writer.close()
+        (await login(port, "BOB,rightpw")).writer.close()
 
     async def second(port: int, clock: ManualClock, gate: TickGate) -> None:
         c = await connect(port)

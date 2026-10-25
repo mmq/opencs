@@ -174,7 +174,7 @@ def login(
     name that is not a guest name logs on as that account with password ``PW`` (II §3: only guest
     names may go without one)."""
     if "," not in account and account.upper() not in policy.DEFAULT_GUEST_NAMES:
-        account += ",PW"
+        account += ",SECRET"
     h = connect(world, address=address)
     h.feed(f"AT\r\nHHH\r\r{account}\r<Not Telling!>\r")
     if enter:

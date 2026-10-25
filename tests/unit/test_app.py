@@ -3,6 +3,7 @@ import contextlib
 import logging
 import socket
 import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,7 +12,15 @@ import pytest
 from fixtures.loopback import TIMEOUT, LogWatch, TickGate, connect, local_config, start
 from fixtures.pods import report
 from opencs import policy
-from opencs.app import Seams, StartupError, ThreadHasher, build_services, main, serve
+from opencs.app import (
+    Seams,
+    StartupError,
+    ThreadHasher,
+    build_services,
+    main,
+    prune_accounts,
+    serve,
+)
 from opencs.cities import run_city
 from opencs.clock import ManualClock
 from opencs.config import AdminConfig, load_config
@@ -317,3 +326,16 @@ def test_password_hashes_run_on_a_thread_and_report_back_on_the_loop() -> None:
     assert worker != loop_thread
     assert reported == loop_thread
     assert loop_ran
+
+
+def test_unplayed_accounts_are_pruned_at_the_interval_and_played_ones_kept() -> None:
+    services = build_services(local_config())
+    for name in ("IDLER", "PLAYER"):
+        pilot = services.identity.login(f"{name},secret")
+        services.identity.release(pilot)  # type: ignore[arg-type]
+    services.persistence._store.save("acct:PLAYER", ProgressRecord((1,) * 9, 0, 0, 0, 0))
+    soon = time.time() + 60
+    assert prune_accounts(services, soon) == []
+    later = soon + policy.UNPLAYED_ACCOUNT_DAYS * 24 * 3600
+    assert prune_accounts(services, later) == ["IDLER"]
+    assert services.identity.account_exists("PLAYER")

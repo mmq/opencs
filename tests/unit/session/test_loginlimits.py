@@ -22,7 +22,7 @@ def attempt(world: World, line: str, address: str) -> bytes:
 def register(world: World, *names: str) -> None:
     """Accounts that exist already, made without the gate."""
     for name in names:
-        pilot = world.identity.login(f"{name},pw")
+        pilot = world.identity.login(f"{name},secret")
         assert isinstance(pilot, Pilot)
         world.identity.release(pilot)
 
@@ -58,7 +58,7 @@ def test_another_address_is_not_affected() -> None:
     register(world, "ACCT", "OTHER")
     for n in range(policy.LOGIN_ATTEMPTS_PER_ADDRESS[0] + 1):
         attempt(world, f"ACCT,wrong{n}", "1.1.1.1")
-    assert not refused(attempt(world, "OTHER,pw", "2.2.2.2"), b"TOO MANY")
+    assert not refused(attempt(world, "OTHER,secret", "2.2.2.2"), b"TOO MANY")
 
 
 def test_guests_cost_nothing() -> None:
@@ -70,17 +70,17 @@ def test_guests_cost_nothing() -> None:
 def test_new_accounts_are_limited_per_address() -> None:
     world = make_world()
     burst = policy.NEW_ACCOUNTS_PER_ADDRESS[0]
-    outs = [attempt(world, f"NEW{n},pw", "1.1.1.1") for n in range(burst + 1)]
+    outs = [attempt(world, f"NEW{n},secret", "1.1.1.1") for n in range(burst + 1)]
     assert not any(refused(o, b"TOO MANY") for o in outs[:burst])
     assert refused(outs[burst], b"TOO MANY NEW ACCOUNTS")
     # An existing account still logs in from that address: only registration is refused.
-    assert refused(attempt(world, "NEW0,pw", "1.1.1.1"), b"PASSWORD: ")
+    assert refused(attempt(world, "NEW0,secret", "1.1.1.1"), b"PASSWORD: ")
 
 
 def test_new_accounts_are_limited_for_the_whole_server() -> None:
     world = make_world()
     burst = policy.NEW_ACCOUNTS_GLOBAL[0]
-    outs = [attempt(world, f"NEW{n},pw", f"10.0.0.{n}") for n in range(burst + 1)]
+    outs = [attempt(world, f"NEW{n},secret", f"10.0.0.{n}") for n in range(burst + 1)]
     assert not any(refused(o, b"TOO MANY") for o in outs[:burst])
     assert refused(outs[burst], b"TOO MANY NEW ACCOUNTS")
 
@@ -132,8 +132,8 @@ def test_wrong_passwords_for_one_account_are_limited_whatever_the_address() -> N
     outs = [attempt(world, "VICTIM,guess", f"10.1.{n}.1") for n in range(burst + 1)]
     assert all(refused(o, b"WRONG PASSWORD") for o in outs[:burst])
     assert refused(outs[burst], b"TOO MANY WRONG PASSWORDS FOR THAT ACCOUNT")
-    assert refused(attempt(world, "VICTIM,pw", "10.2.0.1"), b"TOO MANY WRONG")  # even the owner
-    assert refused(attempt(world, "OTHER,pw", "10.2.0.2"), b"PASSWORD: ")  # others unaffected
+    assert refused(attempt(world, "VICTIM,secret", "10.2.0.1"), b"TOO MANY WRONG")  # even the owner
+    assert refused(attempt(world, "OTHER,secret", "10.2.0.2"), b"PASSWORD: ")  # others unaffected
 
 
 def test_a_locked_account_opens_again_in_minutes_and_a_right_password_refills_it() -> None:
@@ -143,7 +143,7 @@ def test_a_locked_account_opens_again_in_minutes_and_a_right_password_refills_it
     for n in range(burst):
         attempt(world, "VICTIM,guess", f"10.1.{n}.1")
     world.clock.advance(1 / rate)
-    assert refused(attempt(world, "VICTIM,pw", "10.2.0.1"), b"PASSWORD: ")
+    assert refused(attempt(world, "VICTIM,secret", "10.2.0.1"), b"PASSWORD: ")
     # The right password forgot the failures: a whole burst of them is allowed again.
     outs = [attempt(world, "VICTIM,guess", f"10.3.{n}.1") for n in range(burst)]
     assert all(refused(o, b"WRONG PASSWORD") for o in outs)
@@ -155,4 +155,4 @@ def test_a_refused_check_spends_nothing_from_the_account() -> None:
     for n in range(policy.FAILED_LOGINS_PER_ACCOUNT[0] * 3):
         attempt(world, "VICTIM,guess", f"10.1.{n}.1")
     world.clock.advance(1 / policy.FAILED_LOGINS_PER_ACCOUNT[1])  # one failure's worth
-    assert refused(attempt(world, "VICTIM,pw", "10.2.0.1"), b"PASSWORD: ")
+    assert refused(attempt(world, "VICTIM,secret", "10.2.0.1"), b"PASSWORD: ")

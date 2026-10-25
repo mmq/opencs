@@ -271,7 +271,7 @@ def test_who_callsign_gives_location_and_the_record() -> None:
 def test_who_callsign_reads_the_record_of_that_pilot_not_the_askers() -> None:
     world = make_world()
     h = enter_lobby(world)
-    h = enter_lobby(world, "BRAVO,pw")
+    h = enter_lobby(world, "BRAVO,secret")
     other = add(world.lobby, "ALPHA", "A", 0, account="ALPHA")
     assert h.session.member is not None
     world.progress.save(h.session.member.key, ProgressRecord((1,) * 9, 0, 11, 22, 33))
@@ -282,7 +282,7 @@ def test_who_callsign_reads_the_record_of_that_pilot_not_the_askers() -> None:
 
 def test_score_shows_the_players_own_record_and_tells_a_guest_none_is_kept() -> None:
     world = make_world()
-    account = enter_lobby(world, "ALICE,pw")
+    account = enter_lobby(world, "ALICE,secret")
     assert b"NO RECORD YET" in ask(account, "/SCORE")
     world.progress.save("acct:ALICE", ProgressRecord((5,) * 9, -7, 123, 4567, 89))
     out = ask(account, "/SCORE")
@@ -298,7 +298,7 @@ def test_score_shows_the_players_own_record_and_tells_a_guest_none_is_kept() -> 
 
 def test_who_shows_a_guest_without_a_record() -> None:
     world = make_world()
-    h = enter_lobby(world, "ALICE,pw")
+    h = enter_lobby(world, "ALICE,secret")
     enter_lobby(world)
     world.progress.save("JOINGENIE", ProgressRecord((4,) * 9, 3, 1, 2, 3))
     out = ask(h, "/WHO joingenie")
@@ -312,7 +312,7 @@ def test_an_unreadable_record_is_reported_and_the_session_carries_on() -> None:
             raise OSError("gone")
 
     world = make_world(progress=Broken())
-    h = enter_lobby(world, "ALICE,pw")
+    h = enter_lobby(world, "ALICE,secret")
     assert b"CANNOT BE READ" in ask(h, "/SCORE")
     assert b"CANNOT BE READ" in ask(h, "/WHO alice")
     assert b"PILOTS ONLINE" in ask(h, "/STATUS")
@@ -322,7 +322,7 @@ def test_resume_is_refused_for_joingenie_and_for_an_account_with_no_held_game() 
     world = make_world()
     guest = enter_lobby(world)
     assert b"JOINGENIE LOGINS CANNOT RESUME" in ask(guest, "/RESUME")
-    real = enter_lobby(world, "ALPHA,pw")
+    real = enter_lobby(world, "ALPHA,secret")
     out = ask(real, "/RESUME")
     assert b"NO GAME IS HELD FOR YOU" in out
     assert b"JOINGENIE" not in out
@@ -383,9 +383,9 @@ def test_overlong_lines_within_the_budget_are_each_refused_and_do_not_close() ->
 
 def test_a_plain_line_reaches_the_other_chamber_players_but_not_the_sender() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
-    b = enter_lobby(world, "BRAVO,pw")
-    c = enter_lobby(world, "CHARLIE,pw")
+    a = enter_lobby(world, "ALPHA,secret")
+    b = enter_lobby(world, "BRAVO,secret")
+    c = enter_lobby(world, "CHARLIE,secret")
     add(world.lobby, "GAMER", "B", 0)  # in a game: gets nothing, and has no session to check
     a.feed("hello \x01there\x05\r")
     assert a.take() == b""
@@ -396,8 +396,8 @@ def test_a_plain_line_reaches_the_other_chamber_players_but_not_the_sender() -> 
 
 def test_chat_does_not_reach_a_pilot_at_the_genie_prompt() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
-    b = enter_lobby(world, "BRAVO,pw")
+    a = enter_lobby(world, "ALPHA,secret")
+    b = enter_lobby(world, "BRAVO,secret")
     b.feed("/QUIT\r")
     b.take()
     a.feed("anyone there\r")
@@ -552,17 +552,17 @@ def test_go_0_when_the_place_filled_meanwhile_stays_in_the_chamber() -> None:
 
 def test_a_second_player_joins_the_first_players_city() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
+    a = enter_lobby(world, "ALPHA,secret")
     go(a, "/PLAY A")
     a.feed("/GO 0\r")
-    b = enter_lobby(world, "BRAVO,pw")
+    b = enter_lobby(world, "BRAVO,secret")
     assert go(b) == b"\x05E 1 1\r"  # A is the most populated city with room
 
 
 def test_disconnecting_in_the_chamber_or_in_a_game_frees_the_pilot() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
-    b = enter_lobby(world, "BRAVO,pw")
+    a = enter_lobby(world, "ALPHA,secret")
+    b = enter_lobby(world, "BRAVO,secret")
     go(b)
     b.feed("/GO 0\r")
     assert world.lobby.count("B") == 1
@@ -719,7 +719,7 @@ def test_a_new_game_spends_from_the_same_budgets_as_the_last() -> None:
 def test_chat_from_one_address_shares_one_budget_over_its_connections() -> None:
     world = make_world()
     listener = enter_lobby(world, "LISTENER,secret", address="10.0.0.9")
-    talkers = [enter_lobby(world, f"TALKER{n},pw", address="10.0.0.1") for n in range(3)]
+    talkers = [enter_lobby(world, f"TALKER{n},secret", address="10.0.0.1") for n in range(3)]
     listener.take()
     for h in talkers:
         h.feed("hello\r" * policy.CHAMBER_BURST_LINES)

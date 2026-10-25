@@ -10,6 +10,7 @@ import random
 import signal
 import sqlite3
 import sys
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -86,7 +87,11 @@ def build_services(
     router. Without ``stores`` accounts and progress are kept in memory (tests)."""
     clock = clock or MonotonicClock()
     stores = stores or memory_stores()
-    identity = Identity(stores.accounts, guest_names=config.server.guest_names)
+    identity = Identity(
+        stores.accounts,
+        guest_names=config.server.guest_names,
+        registration=config.server.registration,
+    )
     rng = rng or random.Random()
     held = HeldGames(clock)
     lobby = Lobby(config.cities, config.server.default_city, rng, held)
@@ -228,6 +233,29 @@ def _on_sighup(cities: CityManager, config_file: ConfigFile | None) -> Callable[
     return remove
 
 
+def prune_accounts(services: Services, now: float) -> list[str]:
+    """Delete the accounts left unplayed for ``UNPLAYED_ACCOUNT_DAYS`` (wall-clock ``now``)."""
+    before = now - policy.UNPLAYED_ACCOUNT_DAYS * 24 * 3600
+    gone = services.identity.prune_unplayed(
+        before, lambda key: services.persistence.record(key) is not None
+    )
+    if gone:
+        log.info(
+            "removed %d accounts never played in %d days", len(gone), policy.UNPLAYED_ACCOUNT_DAYS
+        )
+    return gone
+
+
+async def _prune_accounts_daily(services: Services) -> None:
+    """``prune_accounts`` now and every ``ACCOUNT_PRUNE_INTERVAL``; a failure waits for the next."""
+    while True:
+        try:
+            prune_accounts(services, time.time())
+        except Exception:
+            log.exception("could not prune unplayed accounts")
+        await asyncio.sleep(policy.ACCOUNT_PRUNE_INTERVAL)
+
+
 async def _listen(
     config: AppConfig,
     services: Services,
@@ -262,6 +290,7 @@ async def _listen(
     control = Control(services, cities, stop, config_file, delay=seams.delay)
     admin: AdminServer | None = None
     reload_signal = _on_sighup(cities, config_file)
+    pruning = asyncio.create_task(_prune_accounts_daily(services))
     try:
         if token is not None and config.server.admin.port is not None:
             admin = AdminServer(control, token, clock)
@@ -281,6 +310,7 @@ async def _listen(
             ready(bound[0][1])
         await stop.wait()
     finally:
+        pruning.cancel()
         reload_signal()
         control.close()
         if admin is not None:

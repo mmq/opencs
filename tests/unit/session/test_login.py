@@ -47,7 +47,7 @@ def test_the_bare_cr_is_skipped_and_the_first_non_empty_line_is_the_account() ->
 
 def test_name_and_password_all_in_one_feed() -> None:
     h = connect(make_world())
-    h.feed("HHH\rBRAVO,pw\r<Not Telling!>\r")
+    h.feed("HHH\rBRAVO,secret\r<Not Telling!>\r")
     assert h.take() == b"CONNECT\r\nU#=PASSWORD: \r\n*"
     assert h.session.pilot is not None
     assert h.session.pilot.callsign == "BRAVO"
@@ -130,9 +130,9 @@ def test_bye_says_goodbye_and_closes() -> None:
 def test_the_account_is_refused_with_a_line_then_the_connection_closes() -> None:
     world = make_world()
     first = connect(world)
-    first.feed("HHH\rALPHA,pw\r")
+    first.feed("HHH\rALPHA,secret\r")
     second = connect(world)
-    second.feed("HHH\rALPHA,pw\r")
+    second.feed("HHH\rALPHA,secret\r")
     assert second.take().endswith(b"THAT ACCOUNT IS ALREADY LOGGED IN\r")
     assert second.io.closed_with == ["login refused"]
     assert second.session.pilot is None
@@ -144,7 +144,7 @@ def test_the_account_is_refused_with_a_line_then_the_connection_closes() -> None
 def test_wrong_password_is_refused() -> None:
     world = make_world()
     a = connect(world)
-    a.feed("HHH\rALPHA,pw\r")
+    a.feed("HHH\rALPHA,secret\r")
     a.session.closed()
     b = connect(world)
     b.feed("HHH\rALPHA,wrong\r")

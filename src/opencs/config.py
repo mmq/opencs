@@ -74,6 +74,8 @@ class ServerConfig:
     default_city: str  # II §4.2: the city a bare /PLAY picks when all are empty
     #: Upper case; empty turns guests off (II §3).
     guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES
+    #: ``policy.REGISTRATION_MODES``: whether a first login registers its name.
+    registration: str = policy.DEFAULT_REGISTRATION
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,7 +410,10 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
             name.strip().upper()
             for name in table.str_list("guest_names", policy.DEFAULT_GUEST_NAMES)
         ),
+        registration=table.string("registration", policy.DEFAULT_REGISTRATION),
     )
+    if config.registration not in policy.REGISTRATION_MODES:
+        raise table.fail("registration", f"must be one of {', '.join(policy.REGISTRATION_MODES)}")
     table.done()
     return config
 

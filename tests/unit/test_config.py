@@ -467,3 +467,16 @@ def test_bad_admin_values_name_the_key(tmp_path: Path, body: str, key: str) -> N
     text = f'default_city = "A"\n[admin]\n{body}\n'
     with pytest.raises(ConfigError, match=f"{key}:"):
         load_config(write_config(tmp_path, {"A": CITY}, server=text))
+
+
+def test_registration_is_open_by_default_and_may_be_closed(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, {"A": CITY})).server.registration == "open"
+    path = write_config(
+        tmp_path, {"A": CITY}, server='default_city = "A"\nregistration = "closed"\n'
+    )
+    assert load_config(path).server.registration == "closed"
+    path = write_config(
+        tmp_path, {"A": CITY}, server='default_city = "A"\nregistration = "maybe"\n'
+    )
+    with pytest.raises(ConfigError, match="registration"):
+        load_config(path)
