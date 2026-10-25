@@ -69,6 +69,8 @@ class Session:
             self.leave_lobby()
             if self.pilot is not None:
                 self.services.identity.release(self.pilot)
+                if self.pilot.is_guest:
+                    self.services.login_limits.guest_out(self.address)
                 self.log.info("logged out")
 
     # --- for the phases ----------------------------------------------------------------------
@@ -118,6 +120,9 @@ class Session:
     def set_pilot(self, pilot: Pilot) -> None:
         self.pilot = pilot
         self.log.callsign = pilot.callsign
+        self.log.context.authenticated = True
+        if pilot.is_guest:
+            self.services.login_limits.guest_in(self.address)
         self.log.info(
             "logged in as %s (%s)", pilot.callsign, "guest" if pilot.is_guest else "account"
         )

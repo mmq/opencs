@@ -25,6 +25,8 @@ class ConnectionContext:
         #: The peer's IP address, which the session layer limits what one source may hold by.
         self.address = address
         self.callsign = "-"
+        #: True once the player has logged in: the listener limits connections that have not.
+        self.authenticated = False
         #: ``STREAM_*``: what the inbound bytes are now. Capture never records the logon.
         self.stream = STREAM_LOGIN
 

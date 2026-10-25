@@ -35,6 +35,10 @@ class LoginGate(Protocol):
         """Whether a new account may be created now."""
         ...
 
+    def may_admit_guest(self) -> bool:
+        """Whether another guest may log in now."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class Pilot:
@@ -100,7 +104,7 @@ class Identity:
         if len(name) > policy.MAX_ACCOUNT_NAME_LENGTH:
             return Refused("LOGIN NAME TOO LONG")
         if name in self._guest_names:
-            return self._guest(name)
+            return self._guest(name, gate)
         if name == policy.GUEST_ACCOUNT_NAME:
             return Refused("GUEST LOGINS ARE TURNED OFF ON THIS SERVER")
         return self._account(name, password, gate)
@@ -115,13 +119,15 @@ class Identity:
         """True if ``callsign`` (upper case) is in use."""
         return callsign in self._callsigns
 
-    def _guest(self, name: str) -> Pilot | Refused:
+    def _guest(self, name: str, gate: LoginGate | None) -> Pilot | Refused:
         # Compare callsigns, not names: ALPHAXYZW would otherwise be played as ALPHAXYZ's callsign.
         base = name[: policy.MAX_CALLSIGN_LENGTH]
         if name != policy.GUEST_ACCOUNT_NAME and self._store.callsign_registered(
             base, policy.MAX_CALLSIGN_LENGTH
         ):
             return Refused("THAT NAME IS A REGISTERED ACCOUNT: LOG IN WITH ITS PASSWORD")
+        if gate is not None and not gate.may_admit_guest():
+            return Refused("TOO MANY GUESTS ONLINE: TRY AGAIN LATER")
         return self._admit(name, None)
 
     def _account(self, name: str, password: str, gate: LoginGate | None) -> Pilot | Refused:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fixtures.sessions import connect, make_world
+from fixtures.sessions import connect, login, make_world
 from opencs import policy
 from opencs.session.chamber import ChamberPhase
 from opencs.session.login import LoginPhase
@@ -227,3 +227,27 @@ def test_nothing_is_processed_after_a_close_request() -> None:
     h.feed("HHH\rBAD,\rJOINGENIE\r")  # an empty password refuses the first account line
     assert h.io.closed
     assert h.session.pilot is None
+
+
+# --- guests ----------------------------------------------------------------------------------
+
+
+def test_an_address_may_have_only_so_many_guests_online() -> None:
+    world = make_world()
+    guests = [login(world, address="10.9.9.9") for _ in range(policy.MAX_GUESTS_PER_ADDRESS)]
+    assert not any(h.io.closed for h in guests)
+    extra = login(world, address="10.9.9.9")
+    assert extra.io.closed_with == ["login refused"]
+    assert b"TOO MANY GUESTS" in extra.take()
+    assert not login(world, "PILOT,secret", address="10.9.9.9").io.closed  # an account is fine
+    guests[0].session.closed()  # one leaves: room again
+    assert not login(world, address="10.9.9.9").io.closed
+
+
+def test_the_server_has_only_so_many_guests_online() -> None:
+    world = make_world()
+    for _ in range(policy.MAX_GUESTS):
+        assert not login(world).io.closed  # each from an address of its own
+    extra = login(world)
+    assert extra.io.closed_with == ["login refused"]
+    assert b"TOO MANY GUESTS" in extra.take()

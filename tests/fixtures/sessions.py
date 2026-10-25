@@ -133,9 +133,13 @@ def make_world(
     return World(clock, identity, lobby, services, progress)
 
 
-def connect(world: World, conn_id: int | None = None, address: str = "?") -> Harness:
+def connect(world: World, conn_id: int | None = None, address: str | None = None) -> Harness:
+    """A new session. Unless ``address`` is given, each connection comes from an address of its
+    own, as players do, so the per-address limits only bite where a test asks for them."""
     io = FakeIO()
     n = conn_id if conn_id is not None else len(world.sessions) + 1
+    if address is None:
+        address = f"10.{len(world.sessions) // 256 % 256}.{len(world.sessions) % 256}.1"
     log = ConnectionLog(logging.getLogger("test.session"), ConnectionContext(n, address))
     harness = Harness(Session(io, world.services, log), io, world)
     world.sessions.append(harness)
@@ -146,7 +150,7 @@ LOGIN = "HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r"
 
 
 def login(
-    world: World, account: str = "JOINGENIE", *, enter: bool = True, address: str = "?"
+    world: World, account: str = "JOINGENIE", *, enter: bool = True, address: str | None = None
 ) -> Harness:
     """A session taken through the logon to the Chamber's version check (or to the ``*``). A bare
     name that is not a guest name logs on as that account with password ``PW`` (II §3: only guest
@@ -160,7 +164,7 @@ def login(
     return h
 
 
-def enter_lobby(world: World, account: str = "JOINGENIE", address: str = "?") -> Harness:
+def enter_lobby(world: World, account: str = "JOINGENIE", address: str | None = None) -> Harness:
     """A session that is in the Chamber, version check answered, output cleared."""
     h = login(world, account, address=address)
     h.feed("CSTTBT 105 150\r")
@@ -173,7 +177,7 @@ def play(
     letter: str = "A",
     team: int = 0,
     account: str = "JOINGENIE",
-    address: str = "?",
+    address: str | None = None,
 ) -> Harness:
     """A session in the Chamber taken through ``/PLAY`` and ``/GO 0`` into the in-game phase."""
     h = enter_lobby(world, account, address)

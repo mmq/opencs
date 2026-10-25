@@ -144,9 +144,10 @@ sudo ufw allow 2399/tcp
 sudo ufw status
 ```
 
-The game listener limits connections to 64 in total and 8 per address (`MAX_CONNECTIONS`,
-`MAX_CONNECTIONS_PER_ADDRESS`); the rest are closed at once. Behind a NAT or a proxy that makes every
-player share one address, raise the per-address limit in `policy.py`. The link is plain TCP carrying the
+The game listener limits connections to 128 in total, 4 per address and 12 per /24
+(`MAX_CONNECTIONS`, `MAX_CONNECTIONS_PER_ADDRESS`, `MAX_CONNECTIONS_PER_SUBNET`), and allows 2 guests per
+address and 24 in all (`MAX_GUESTS_PER_ADDRESS`, `MAX_GUESTS`); the rest are refused at once. Behind a
+NAT or a proxy that makes every player share one address, raise the per-address limits in `policy.py`. The link is plain TCP carrying the
 game's own protocol with no encryption: a password travels in the clear, so tell players to use one they
 use nowhere else.
 

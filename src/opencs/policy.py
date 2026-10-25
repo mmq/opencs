@@ -126,11 +126,26 @@ SHUTDOWN_CANCELED_NOTICE = "SHUTDOWN CANCELED"
 
 # --- Connections (DESIGN §3.3, §5) --------------------------------------------------------------
 
-#: Connections accepted in total and from one address; more are closed at once. Ours (DESIGN §5
-#: "connections in total and per address"): a city holds 16 and there are 3, so 64 is every seat
-#: plus those in the Chamber; 8 per address lets several clients share a host or a NAT.
-MAX_CONNECTIONS = 64
-MAX_CONNECTIONS_PER_ADDRESS = 8
+#: Connections accepted in total, from one address and from one subnet; more are closed at once.
+#: Ours (DESIGN §5 "connections in total and per address"): a city holds 16 and there are 3, so 128
+#: is every seat and as many again in the Chamber and logging in; it bounds memory and the loop's
+#: work, not seats. 4 per address lets a household or a small NAT play together, and 12 per subnet
+#: (``SUBNET_PREFIX_*``) keeps one hosting block from taking every connection.
+MAX_CONNECTIONS = 128
+MAX_CONNECTIONS_PER_ADDRESS = 4
+MAX_CONNECTIONS_PER_SUBNET = 12
+
+#: The prefix lengths of a "subnet" for ``MAX_CONNECTIONS_PER_SUBNET``: a /24 is what one hosting
+#: customer usually holds of IPv4, a /64 the least one is given of IPv6. Ours.
+SUBNET_PREFIX_V4 = 24
+SUBNET_PREFIX_V6 = 64
+
+#: Connections that have not logged in yet (no account line accepted), in all and from one address.
+#: Past the total, the oldest such connection is cut to make room (so silent connections cannot keep
+#: honest players from logging in); past the per-address number, a new one is refused. A client
+#: logs in within a second or two (I §5.1). Ours (DESIGN §5).
+MAX_UNAUTHENTICATED = 16
+MAX_UNAUTHENTICATED_PER_ADDRESS = 2
 
 #: Items (raw writes or messages) a connection may have queued for sending before it is closed.
 #: Ours (DESIGN §3.3): the client handles about 50 packets a second (I §3), so this is over
@@ -237,7 +252,7 @@ LOGIN_PROMPT_DELAY = 0.3
 #: Seconds from connecting to a completed account line; later, seconds of silence tolerated at
 #: the GEnie ``*`` prompt (a player may sit at its menus). Ours (DESIGN §5 "time allowed to log
 #: in"): the spec gives neither.
-LOGIN_TIMEOUT = 60.0
+LOGIN_TIMEOUT = 30.0
 GENIE_IDLE_TIMEOUT = 900.0
 
 #: Most lines accepted from a connection between connecting and entering the Chamber (empty lines
@@ -252,6 +267,16 @@ LOGIN_PREAMBLE_LIMIT = 4096
 #: Players do sit in the Chamber to chat or wait, so this is an hour. Ours (DESIGN §5; our Chamber
 #: idle timeout).
 CHAMBER_IDLE_TIMEOUT = 3600.0
+
+#: The same for a guest: a guest login costs nothing and saves nothing, so a script of guests idling
+#: in the Chamber would otherwise hold connections for an hour each. Ours (DESIGN §5).
+GUEST_CHAMBER_IDLE_TIMEOUT = 900.0
+
+#: Guests online at once, from one source address and in all; past either, a guest login is
+#: refused. A guest needs no password, so these are what stops a script filling every seat with
+#: them. Ours (DESIGN §5): 2 for a household; 24 is half the seats of three cities.
+MAX_GUESTS_PER_ADDRESS = 2
+MAX_GUESTS = 24
 
 #: How long to wait for the reply to ``PRESS RETURN`` before entering anyway, and for ``/GO`` after
 #: ``E <map> <map>``, in seconds. II §4.1 (5 s), I §5.4, II §4.5 (15 s, a server choice).

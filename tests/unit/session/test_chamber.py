@@ -614,7 +614,7 @@ def test_go_0_then_a_quit_frame_in_one_feed_is_not_parsed_as_text() -> None:
 
 
 def test_a_silent_chamber_connection_is_closed_after_the_idle_timeout() -> None:
-    h = enter_lobby(make_world())
+    h = enter_lobby(make_world(), "PILOT,secret")
     h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
     assert not h.io.closed
     h.advance(1)  # the first instant it is over
@@ -623,13 +623,31 @@ def test_a_silent_chamber_connection_is_closed_after_the_idle_timeout() -> None:
 
 
 def test_a_line_restarts_the_idle_clock() -> None:
-    h = enter_lobby(make_world())
+    h = enter_lobby(make_world(), "PILOT,secret")
     h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
     h.feed("/WHO\r")
     h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
     assert not h.io.closed
     h.advance(1)
     assert h.io.closed
+
+
+def test_a_silent_guest_is_closed_sooner() -> None:
+    h = enter_lobby(make_world())
+    h.advance(policy.GUEST_CHAMBER_IDLE_TIMEOUT - 1)
+    assert not h.io.closed
+    h.advance(1)
+    assert h.io.closed_with == ["Chamber idle timeout"]
+
+
+def test_bytes_that_make_no_line_do_not_restart_the_idle_clock() -> None:
+    h = enter_lobby(make_world(), "PILOT,secret")
+    for _ in range(4):
+        h.advance(policy.CHAMBER_IDLE_TIMEOUT / 4 - 1)
+        h.feed(b"\n\x00\x1b")  # dropped by the line reader
+        h.feed("\r")  # an empty line
+    h.advance(4)
+    assert h.io.closed_with == ["Chamber idle timeout"]
 
 
 def test_a_stale_chamber_connection_frees_its_account() -> None:
@@ -701,7 +719,7 @@ def test_a_new_game_spends_from_the_same_budgets_as_the_last() -> None:
 def test_chat_from_one_address_shares_one_budget_over_its_connections() -> None:
     world = make_world()
     listener = enter_lobby(world, "LISTENER,secret", address="10.0.0.9")
-    talkers = [enter_lobby(world, address="10.0.0.1") for _ in range(3)]
+    talkers = [enter_lobby(world, f"TALKER{n},pw", address="10.0.0.1") for n in range(3)]
     listener.take()
     for h in talkers:
         h.feed("hello\r" * policy.CHAMBER_BURST_LINES)

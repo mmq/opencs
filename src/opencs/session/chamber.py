@@ -94,12 +94,8 @@ class ChamberPhase(TextPhase):
 
     # --- time ------------------------------------------------------------------------------
 
-    def feed(self, data: bytes) -> None:
-        self._last_input_at = self.host.now()
-        super().feed(data)
-
     def tick(self, now: float) -> None:
-        if now - self._last_input_at >= policy.CHAMBER_IDLE_TIMEOUT:
+        if now - self._last_input_at >= self._idle_timeout():
             self.host.log.info("nothing heard for %.0f s; closing", now - self._last_input_at)
             self._say(replies.denied("IDLE TOO LONG: DISCONNECTING"))
             self.host.close("Chamber idle timeout")
@@ -122,7 +118,16 @@ class ChamberPhase(TextPhase):
         if self._state is State.LOBBY and self._within_rate():
             self._say(replies.denied("THAT LINE IS TOO LONG"))
 
+    def _idle_timeout(self) -> float:
+        """How long the Chamber waits for a line: a guest, who has nothing saved to come back to
+        and costs nothing to make, waits less (``policy.GUEST_CHAMBER_IDLE_TIMEOUT``)."""
+        if self._member is not None and self._member.account is None:
+            return policy.GUEST_CHAMBER_IDLE_TIMEOUT
+        return policy.CHAMBER_IDLE_TIMEOUT
+
     def on_line(self, line: str) -> None:
+        if line.strip():  # only a line restarts the idle clock, not bytes the reader drops
+            self._last_input_at = self.host.now()
         if self._state is State.VERSION:
             # Whatever comes back (CSTTBT 105 150, a bare CR) is logged and never refused.
             self.host.log.info("version reply: %r", line)

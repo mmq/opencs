@@ -31,13 +31,16 @@ in policy.
 | input | bound | on violation | test |
 |---|---|---|---|
 | TCP accept, total | `MAX_CONNECTIONS` | refused at once | `net/test_listener::test_total_connection_limit_refuses_the_extra_one_at_once` |
-| TCP accept, per address | `MAX_CONNECTIONS_PER_ADDRESS` | refused at once | `net/test_listener::test_per_address_limit` |
+| TCP accept, per address | `MAX_CONNECTIONS_PER_ADDRESS`; an IPv4-mapped IPv6 address counts as its IPv4 one | refused at once | `net/test_listener::test_per_address_limit`, `test_addresses_are_keyed_as_one_host_and_grouped_by_subnet` |
+| TCP accept, per subnet | `MAX_CONNECTIONS_PER_SUBNET` (/24, /64: `SUBNET_PREFIX_*`) | refused at once | `net/test_listener::test_per_subnet_limit` |
+| connections not logged in | `MAX_UNAUTHENTICATED_PER_ADDRESS`; `MAX_UNAUTHENTICATED` in all | per address: refused at once; in all: the oldest not logged in is cut to make room | `net/test_listener::test_an_address_may_have_only_so_many_connections_not_logged_in`, `test_past_the_total_not_logged_in_the_oldest_such_connection_is_cut` |
 | held `/RESUME` slots, per address | `MAX_HELD_PER_ADDRESS` (< connections per address; seats per address = `MAX_SEATS_PER_ADDRESS`) | the drop holds nothing (a death still applies) | `session/test_line_drop_session::test_the_limit_is_per_address`, `test_policy_limits` |
 | dead peers | TCP keepalive (`KEEPALIVE_*`) | the socket ends, the player is dropped | `net/test_listener::test_accepted_sockets_get_keepalive` |
 | time to log in | `LOGIN_TIMEOUT` | close | `session/test_login` (timeout tests) |
 | silence at the `*` prompt | `GENIE_IDLE_TIMEOUT` | close | `session/test_login::test_a_silent_star_prompt_times_out_much_later` |
 | login preamble before `HHH` | `LOGIN_PREAMBLE_LIMIT` bytes | close | `session/test_login`; `fuzz/test_fuzz_net::test_noise_at_the_login_never_raises_and_stays_bounded` |
 | login lines | `LOGIN_MAX_LINES` | close | `session/test_login::test_too_many_lines_close` |
+| guests online (no password, so the cheapest seat) | `MAX_GUESTS_PER_ADDRESS`, `MAX_GUESTS` | refused with a line, close | `session/test_login::test_an_address_may_have_only_so_many_guests_online`, `test_the_server_has_only_so_many_guests_online` |
 | login line length | `MAX_LINE_BYTES` (the line buffer never holds more) | close | `session/test_login::test_an_overlong_account_line_closes`, `fuzz/test_fuzz_net::test_a_login_line_without_a_terminator_is_not_buffered_for_ever` |
 | account name / password length | `MAX_ACCOUNT_NAME_LENGTH`, `MAX_PASSWORD_LENGTH` | refused with a line | `lobby/test_identity::test_name_bounds`, `test_the_password_may_hold_commas_and_must_not_be_empty_or_huge` |
 | password checks, per address and global | `LOGIN_ATTEMPTS_PER_ADDRESS`, `LOGIN_ATTEMPTS_GLOBAL` (PBKDF2 runs on the loop) | refused, close | `session/test_loginlimits` |
@@ -54,7 +57,7 @@ in policy.
 | chat to a client that reads slowly | over `DROPPABLE_WATERMARK` queued items, chat (`Event.droppable`, `Member.congested`) is skipped for that client; game state never is | skipped and tallied (`Lobby.chat_dropped`, `Router.dropped`), so many senders within their budgets cannot overflow a 9600-baud reader's outbox and cut it off | `session/test_chamber::test_a_listener_that_has_stopped_reading_is_skipped_not_cut_off`, `lobby/test_lobby::test_chat_skips_a_member_whose_connection_is_too_far_behind`, `test_routing::test_a_droppable_event_skips_a_congested_player_and_nothing_else_does`, `net/test_connection::test_the_backlog_is_what_is_queued_and_not_yet_written` |
 | chat text | `CHAT_MAX_CHARS`; bytes outside `0x20..0x7e` stripped | truncated, sanitized | `lobby/test_commands`, `wire/test_text` |
 | leaving and re-entering (`/QUIT`, `M 1380;3`) | `CHAMBER_REENTRY_LIMIT` trips; the line budget is the session's, so a trip does not refill it | close | `session/test_chamber::test_leaving_and_reentering_the_chamber_does_not_refill_the_line_budget`, `test_a_flood_spread_over_trips_to_the_star_prompt_still_closes`, `test_leaving_the_chamber_too_often_closes_the_connection`, `test_a_player_who_leaves_the_chamber_now_and_then_is_never_closed` |
-| idle | `CHAMBER_IDLE_TIMEOUT` (an hour) | told, closed; the account is freed | `session/test_chamber::test_a_silent_chamber_connection_is_closed_after_the_idle_timeout`, `test_a_stale_chamber_connection_frees_its_account` |
+| idle | `CHAMBER_IDLE_TIMEOUT` (an hour), `GUEST_CHAMBER_IDLE_TIMEOUT` (15 min) for a guest; only a non-empty line restarts it, not bytes the reader drops | told, closed; the account is freed | `session/test_chamber::test_a_silent_chamber_connection_is_closed_after_the_idle_timeout`, `test_a_silent_guest_is_closed_sooner`, `test_bytes_that_make_no_line_do_not_restart_the_idle_clock`, `test_a_stale_chamber_connection_frees_its_account` |
 | launch (`/GO`) never arrives | `GO_WAIT` | back to the lobby | `session/test_chamber` (launch tests) |
 | arbitrary bytes | all of the above | no exception, buffers bounded | `fuzz/test_fuzz_net::test_noise_in_the_chamber_never_raises_and_stays_bounded` |
 
