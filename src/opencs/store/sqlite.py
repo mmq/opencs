@@ -12,6 +12,7 @@ newer server is refused rather than guessed at.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from collections.abc import Callable, Sequence
@@ -19,6 +20,8 @@ from pathlib import Path
 
 from opencs import policy
 from opencs.store.base import Account, ProgressRecord, Stores
+
+log = logging.getLogger("opencs.store")
 
 #: Append-only. Never edit an entry that has shipped: add a new one.
 MIGRATIONS: tuple[tuple[str, ...], ...] = (
@@ -211,7 +214,13 @@ def open_stores(
     data_dir: Path, *, now: Callable[[], float] = time.time
 ) -> tuple[Stores, SqliteStore]:
     """Create ``data_dir`` if needed and open its database. Returns the stores and the one object
-    to ``close`` when the server stops."""
-    data_dir.mkdir(parents=True, exist_ok=True)
-    db = SqliteStore(data_dir / policy.DATABASE_FILE_NAME, now=now)
+    to ``close`` when the server stops. The directory and the file are made private to the server's
+    user (``policy.DATA_DIR_MODE``, ``DATABASE_FILE_MODE``): they hold the password hashes."""
+    data_dir.mkdir(mode=policy.DATA_DIR_MODE, parents=True, exist_ok=True)
+    path = data_dir / policy.DATABASE_FILE_NAME
+    db = SqliteStore(path, now=now)
+    try:
+        path.chmod(policy.DATABASE_FILE_MODE)
+    except OSError as exc:
+        log.warning("could not make %s private (%s); check its owner and mode", path, exc)
     return Stores(db, db), db

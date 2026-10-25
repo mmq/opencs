@@ -430,6 +430,12 @@ PBKDF2_SALT_BYTES = 16
 #: The SQLite file inside ``data_dir``. Ours (DESIGN §2 "Persistence"; one file, no server).
 DATABASE_FILE_NAME = "opencs.db"
 
+#: Modes of a data directory the server creates and of its database file: the server's user only,
+#: since the file holds the password hashes. (The WAL files beside it follow the process umask;
+#: the systemd unit in OPERATING.md sets ``UMask=0077``.) Ours (DESIGN §5).
+DATA_DIR_MODE = 0o700
+DATABASE_FILE_MODE = 0o600
+
 #: How long a database call waits for another connection's lock before it fails. Ours (DESIGN
 #: §3.3: a save runs on the event loop, which must not stall; SQLite's default is 5 s).
 DATABASE_BUSY_TIMEOUT = 0.2

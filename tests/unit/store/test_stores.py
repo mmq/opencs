@@ -14,7 +14,7 @@ from opencs import policy
 from opencs.lobby.identity import Identity, Pilot
 from opencs.store.base import Account, ProgressRecord, Stores
 from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
-from opencs.store.sqlite import MIGRATIONS, SchemaError, SqliteStore
+from opencs.store.sqlite import MIGRATIONS, SchemaError, SqliteStore, open_stores
 
 STAMP = 1_700_000_000.5
 
@@ -233,4 +233,12 @@ def test_a_progress_record_can_be_erased(stores: Stores) -> None:
 def test_the_database_file_uses_write_ahead_logging(tmp_path: Path) -> None:
     db = SqliteStore(tmp_path / "wal.db")
     assert db._db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    db.close()
+
+
+def test_the_data_directory_and_database_are_private_to_the_server(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    _, db = open_stores(data)
+    assert data.stat().st_mode & 0o777 == policy.DATA_DIR_MODE
+    assert (data / policy.DATABASE_FILE_NAME).stat().st_mode & 0o777 == policy.DATABASE_FILE_MODE
     db.close()

@@ -136,4 +136,21 @@ in policy.
 | shutdown | `SHUTDOWN_DEADLINE`, then connections are aborted | aborted | `net/test_listener::test_stop_aborts_what_outlasts_the_deadline_and_returns`, `test_shutdown::test_a_player_who_never_reads_cannot_hold_the_shutdown_and_is_still_saved` |
 | a shutdown or a kick of a player in a fight | not a death, nothing held | clean leave | `session/test_removal::test_a_kick_under_fire_is_not_a_death_and_holds_nothing` |
 | wire capture | `max_bytes` per file and `CAPTURE_DIR_MAX_BYTES` for the directory (oldest of our files removed first); never the logon; a write error ends the capture only | stops with a note | `net/test_capture::test_a_capture_stops_at_its_cap_with_a_note`, `test_the_logon_is_never_recorded`, `test_an_unwritable_directory_ends_the_capture_not_the_connection`, `test_the_oldest_files_go_when_the_directory_would_pass_its_cap` |
+| the database file (password hashes) | the data directory is made 0700 and `opencs.db` 0600 (`DATA_DIR_MODE`, `DATABASE_FILE_MODE`); the unit's `UMask=0077` covers the WAL files and logs | a warning if it cannot be made private | `store/test_stores::test_the_data_directory_and_database_are_private_to_the_server` |
 | an invalid city file at reload | validated whole first | nothing changes | `test_cities::test_an_invalid_file_changes_nothing_not_even_the_valid_parts` |
+
+## Threat model
+
+The game port is public, and anything may connect to it and send anything. The tables above bound what
+one connection, one address, one subnet, one account and the whole server can make the server do. This
+section lists what those bounds do **not** cover, and why.
+
+| risk | why it stays | what limits it |
+|---|---|---|
+| passwords in plain text on the wire | the DOS client speaks the protocol over a modem bridge and cannot do TLS | players are told to use a password of their own (PLAYING.md, OPERATING.md); only salted hashes are stored |
+| cheating: scores, bays, hits and positions come from the client | the client runs the game and reports it (I §9); the server cannot recompute it | sanity checks and counters (`shooter_mismatches`, `unsafe_shots`, `owed` legs); `reset-progress` for the operator |
+| account names can be probed (an unknown name registers, a known one says WRONG PASSWORD) | the logon has no other way to tell a new player from a returning one (II §3) | the per-address, per-account and global login limits; `registration = "closed"` |
+| a botnet with many /24s | per-address and per-subnet limits only go so far against many sources | total caps (`max_connections`, `max_unauthenticated`, `max_guests`, `LOGIN_ATTEMPTS_GLOBAL`), eviction of the oldest connection not logged in, and the firewall in front |
+| a volumetric flood (bandwidth, SYN) | it never reaches the process | the hosting provider; the kernel's SYN cookies; the firewall rate limit (OPERATING.md, "Checklist: a public server") |
+| a local user on the host and the admin channel | loopback only, by design | the token, its attempt limit; see "Operations" above |
+| locking an account with wrong passwords | a per-account limit is what stops distributed guessing | it refills in minutes (`FAILED_LOGINS_PER_ACCOUNT`) and a right password resets it |

@@ -114,12 +114,41 @@ Restart=on-failure
 ProtectSystem=strict
 ReadWritePaths=/var/lib/opencs /var/log/opencs /var/lib/opencs-captures
 NoNewPrivileges=true
+# Sandboxing: the server needs its port, its data and log directories and nothing else.
+# `systemd-analyze security opencs` scores what is left.
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Resource ceilings: a bug or a flood cannot take the machine with it.
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=1024
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 The paths in `server.toml` are relative to the file, and `/etc` is read-only under `ProtectSystem=strict`.
+`ProtectHome=true` hides `/home` and `/root`, so the `.venv` must use a Python outside them (the install
+above uses `/usr/bin/python3.12`). `UMask=0077` keeps every file the server makes (the database and its
+WAL files, logs, captures) readable by the `opencs` user only; the server also makes the database file
+mode 0600 itself. `LimitNOFILE=1024` is well above `[limits] max_connections` plus the files it keeps
+open; raise both together.
 `--data-dir` puts the database in a writable place; the log file and capture directory take absolute paths
 that match `ReadWritePaths` (as in the configuration above).
 
@@ -419,6 +448,30 @@ Restart=on-failure
 ProtectSystem=strict
 ReadWritePaths=/var/lib/opencs-%i /var/log/opencs
 NoNewPrivileges=true
+# Sandboxing: the server needs its port, its data and log directories and nothing else.
+# `systemd-analyze security opencs@one` scores what is left.
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Resource ceilings: a bug or a flood cannot take the machine with it.
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=1024
 
 [Install]
 WantedBy=multi-user.target
@@ -436,3 +489,42 @@ sudo systemctl enable --now opencs@one opencs@two
 
 Players of each server use the port of theirs in the phonebook. The two do not share accounts, cities or
 held games, and a pilot can be online on both at once.
+
+## Checklist: a public server
+
+Anyone can connect any program to the game port, so before opening it to the internet:
+
+1. **Firewall.** Open only the game port (`sudo ufw allow 2399/tcp`), never the admin port. As an outer
+   layer against connection floods, let the kernel refuse an address that opens connections too fast,
+   before the server sees it: `sudo ufw limit 2399/tcp` (6 new connections in 30 s per address), or
+   with nftables, `tcp dport 2399 ct state new meter opencs { ip saddr limit rate over 20/minute } drop`
+   and `tcp dport 2399 meter opencs-count { ip saddr ct count over 8 } reject`. The server's own limits
+   (`[limits]`, and 10 connections in a burst then one every 6 s per address) still apply behind it.
+2. **Reachable from outside.** Forward TCP 2399 on the router to the host's LAN address. If the host has
+   no public address (carrier-grade NAT), forward through a VPS or a tunnel (for example `ssh -R`). Give
+   players the public IP or a DNS name, and check it from a machine on another network:
+   `nc -vz <address> 2399` must report success. A home connection's address can change; a dynamic DNS
+   name helps.
+3. **The unit.** Use the sandboxed unit above, so a bug cannot reach past `/var/lib/opencs` and the
+   log directory, nor take more than its memory and task limits.
+4. **Guests and registration.** Guests need no password and are capped at 2 per address and 24 in all.
+   Set `guest_names = []` to turn them off. With `registration = "closed"`, only the accounts you make
+   with `create-account` exist. Open registration is limited per address and server-wide, capped at
+   `max_accounts`, and accounts never played are removed after `unplayed_account_days`.
+5. **Logs to watch.** Every refused connection is logged as `refusing ADDRESS: REASON` (at most once a
+   minute per address, with a count of those held back), and every refused login as
+   `login refused from ADDRESS: REASON`. A fail2ban filter for the first:
+
+   ```ini
+   # /etc/fail2ban/filter.d/opencs.conf
+   [Definition]
+   failregex = refusing <HOST>: connecting too often
+   ```
+
+   with a jail on `journalctl -u opencs` (`backend = systemd`, `journalmatch = _SYSTEMD_UNIT=opencs.service`).
+6. **Passwords.** The game sends them in plain text and nothing can change that, so tell players to use
+   one they use nowhere else. The server stores only salted PBKDF2 hashes, refuses guessing per address,
+   per account and server-wide, and hashes on its own threads, so a login flood cannot stall the games.
+7. **Backups** (above), and an upgrade path you have tried (`tools/smoke.sh` after each one).
+
+What the server cannot defend against alone is in `docs/robustness.md`, "Threat model".
