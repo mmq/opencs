@@ -291,6 +291,13 @@ CHAMBER_LINES_PER_SECOND = 2.0
 CHAMBER_FLOOD_DROPS = 40
 CHAMBER_FLOOD_WINDOW = 10.0
 
+#: Trips from the Chamber to the ``*`` prompt (``/QUIT``) one connection may make, a token bucket
+#: ``(burst, per second)``; past it the connection is closed. Each trip can come back with
+#: ``M 1380;3``, so this bounds how often a client can leave and re-enter. The rate limits are the
+#: session's and survive the trip (``session/budgets.py``); this bounds the work of the trip itself.
+#: A player leaves the Chamber a few times a session. Ours.
+CHAMBER_REENTRY_LIMIT = (3, 1 / 60)
+
 #: How long after a bare ``/CITY`` a bare city letter counts as the button's second half and gets
 #: the hint line (II §4.2: "within 2 min"), in seconds.
 CITY_HINT_WINDOW = 120.0

@@ -13,6 +13,7 @@ from opencs.connlog import ConnectionLog
 from opencs.lobby import replies
 from opencs.lobby.identity import Pilot
 from opencs.lobby.lobby import Member
+from opencs.session.budgets import Budgets
 from opencs.session.chamber import ChamberPhase
 from opencs.session.ingame import InGamePhase, Stage
 from opencs.session.io import SessionIO
@@ -38,6 +39,8 @@ class Session:
         self.notice: str | None = None
         #: Why the server closed the connection, None while it has not (a drop by the peer).
         self.close_reason: str | None = None
+        #: The connection's rate limits, which outlive every phase (DESIGN §5).
+        self.budgets = Budgets(services.clock.now())
         self._released = False
         services.sessions.add(self)
         self.phase: Phase = LoginPhase(self)

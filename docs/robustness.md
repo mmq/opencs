@@ -8,7 +8,7 @@ Tests are `tests/unit/...` unless a directory is given; names are test functions
 
 ## Accounting: what is counted, and when a connection is closed
 
-One rule per phase, no lifetime totals (a noisy modem must not be kicked for a few bad checksums a
+Every bucket and counter below belongs to the connection, not the phase (`session/budgets.py`, ADR 9): leaving the Chamber, re-entering it or starting another game never refills one. One rule per phase, no lifetime totals (a noisy modem must not be kicked for a few bad checksums a
 minute; I §4.1 says a frame that does not decode is dropped, never a reason to close).
 
 | phase | counted as bad | window and limit | on excess |
@@ -51,6 +51,7 @@ in policy.
 | line length | `MAX_LINE_BYTES` (client armed buffer 512, I §5.2) | line discarded and charged to the line bucket below (so a stream of them closes the connection); within the budget, "too long" | `session/test_chamber::test_an_overlong_line_is_refused_not_relayed`, `test_a_stream_of_overlong_lines_is_a_flood_and_closes_the_connection`, `wire/test_text` |
 | line rate | token bucket, then `CHAMBER_FLOOD_*` | dropped with one warning; close on a sustained flood | `session/test_chamber::test_a_burst_of_chat_is_cut_to_the_budget_and_the_sender_is_warned_once`, `test_sustained_flooding_closes_the_connection`, `test_honest_pace_is_never_limited` |
 | chat text | `CHAT_MAX_CHARS`; bytes outside `0x20..0x7e` stripped | truncated, sanitized | `lobby/test_commands`, `wire/test_text` |
+| leaving and re-entering (`/QUIT`, `M 1380;3`) | `CHAMBER_REENTRY_LIMIT` trips; the line budget is the session's, so a trip does not refill it | close | `session/test_chamber::test_leaving_and_reentering_the_chamber_does_not_refill_the_line_budget`, `test_a_flood_spread_over_trips_to_the_star_prompt_still_closes`, `test_leaving_the_chamber_too_often_closes_the_connection`, `test_a_player_who_leaves_the_chamber_now_and_then_is_never_closed` |
 | idle | `CHAMBER_IDLE_TIMEOUT` (an hour) | told, closed; the account is freed | `session/test_chamber::test_a_silent_chamber_connection_is_closed_after_the_idle_timeout`, `test_a_stale_chamber_connection_frees_its_account` |
 | launch (`/GO`) never arrives | `GO_WAIT` | back to the lobby | `session/test_chamber` (launch tests) |
 | arbitrary bytes | all of the above | no exception, buffers bounded | `fuzz/test_fuzz_net::test_noise_in_the_chamber_never_raises_and_stays_bounded` |

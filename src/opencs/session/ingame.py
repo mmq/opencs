@@ -29,9 +29,7 @@ from opencs.messages import (
     server_payload,
 )
 from opencs.messages.limits import CHAT_STYLE_OPEN, SYSTEM_SENDER
-from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import Phase
-from opencs.session.ratelimit import TokenBucket
 from opencs.wire.codec import BYTE_MIN
 from opencs.wire.frame import Frame, FrameReader, build_frame
 from opencs.wire.text import QuitScanner
@@ -71,24 +69,12 @@ class InGamePhase(Phase):
         super().__init__(host)
         self.stage = Stage.PLAYING
         self._reader = FrameReader()
-        self._bad = WindowedCounter(policy.MAX_BAD_INPUT, policy.BAD_INPUT_WINDOW)
+        # The rate limits are the session's, not this game's (session/budgets.py).
+        self._bad = host.budgets.bad_input
         self._bad_seen = 0
-        # Budgets for the messages the city relays to everyone (policy.RELAY_LIMIT_*).
+        self._relay_buckets = host.budgets.relay
+        self._frame_bucket = host.budgets.frames
         now = host.now()
-        self._relay_buckets: dict[type[ClientMessage], TokenBucket] = {
-            client.PodState: TokenBucket(*policy.RELAY_LIMIT_POD_STATE, now),
-            client.Shot: TokenBucket(*policy.RELAY_LIMIT_SHOT, now),
-            client.HitReport: TokenBucket(*policy.RELAY_LIMIT_HIT, now),
-            client.Chat: TokenBucket(*policy.RELAY_LIMIT_CHAT, now),
-            client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
-            client.TowerOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
-            client.ModuleOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
-            client.EffectRequest: TokenBucket(*policy.RELAY_LIMIT_EFFECT, now),
-            client.AirSupport: TokenBucket(*policy.RELAY_LIMIT_EFFECT, now),
-            client.PickupRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
-            client.EjectRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
-        }
-        self._frame_bucket = TokenBucket(*policy.FRAME_LIMIT, now)
         #: Messages dropped for exceeding their relay budget: a tally, not bad input (see
         #: ``handle``).
         self.relay_drops = 0

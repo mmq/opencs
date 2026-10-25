@@ -639,3 +639,60 @@ def test_a_stale_chamber_connection_frees_its_account() -> None:
     h.advance(policy.CHAMBER_IDLE_TIMEOUT)
     h.session.closed()  # the connection reacts to the close
     assert isinstance(world.identity.login("PILOT,secret"), Pilot)
+
+
+def _requeue(h: Harness) -> None:
+    """``/QUIT`` to the ``*`` prompt and straight back into the Chamber, past the version check."""
+    h.feed("/QUIT\r")
+    h.feed("M 1380;3\r")
+    h.feed("\r")
+
+
+def test_leaving_and_reentering_the_chamber_does_not_refill_the_line_budget() -> None:
+    h = enter_lobby(make_world())
+    h.feed("x\r" * (policy.CHAMBER_BURST_LINES - 1))  # the /QUIT below is the last token
+    _requeue(h)
+    assert phase_of(h) is ChamberPhase
+    h.take()
+    h.feed("x\r")
+    assert b"TOO MANY LINES" in h.take()
+
+
+def test_a_flood_spread_over_trips_to_the_star_prompt_still_closes() -> None:
+    h = enter_lobby(make_world())
+    for _ in range(20):  # each burst leaves the last token for the /QUIT, as a flooder would
+        if h.io.closed:
+            break
+        h.feed("x\r" * (policy.CHAMBER_BURST_LINES - 1))
+        _requeue(h)
+    assert h.io.closed
+
+
+def test_leaving_the_chamber_too_often_closes_the_connection() -> None:
+    h = enter_lobby(make_world())
+    burst = policy.CHAMBER_REENTRY_LIMIT[0]
+    for _ in range(burst):
+        h.advance(5.0)
+        _requeue(h)
+    assert not h.io.closed
+    h.advance(5.0)
+    h.feed("/QUIT\r")
+    assert h.io.closed_with == ["Chamber re-entry flood"]
+
+
+def test_a_player_who_leaves_the_chamber_now_and_then_is_never_closed() -> None:
+    h = enter_lobby(make_world())
+    for _ in range(10):
+        h.advance(1 / policy.CHAMBER_REENTRY_LIMIT[1])
+        _requeue(h)
+    assert not h.io.closed
+    assert phase_of(h) is ChamberPhase
+
+
+def test_a_new_game_spends_from_the_same_budgets_as_the_last() -> None:
+    h = enter_lobby(make_world())
+    first = InGamePhase(h.session)
+    second = InGamePhase(h.session)
+    assert first._frame_bucket is second._frame_bucket is h.session.budgets.frames
+    assert first._relay_buckets is second._relay_buckets
+    assert first._bad is second._bad

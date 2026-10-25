@@ -16,9 +16,7 @@ from opencs import policy
 from opencs.connlog import STREAM_CHAMBER
 from opencs.lobby import commands, replies
 from opencs.lobby.lobby import Denied, Member, Placement
-from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import TextPhase
-from opencs.session.ratelimit import TokenBucket
 from opencs.wire.text import arm_line
 from opencs.world.resume import ResumeRecord
 
@@ -67,10 +65,9 @@ class ChamberPhase(TextPhase):
         self._city_list_at: float | None = None
         self._handlers = self._handler_table()
         self._late_reply_possible = False
-        self._bucket = TokenBucket(
-            policy.CHAMBER_BURST_LINES, policy.CHAMBER_LINES_PER_SECOND, host.now()
-        )
-        self._drops = WindowedCounter(policy.CHAMBER_FLOOD_DROPS, policy.CHAMBER_FLOOD_WINDOW)
+        # The session's, so leaving and re-entering the Chamber does not refill them.
+        self._bucket = host.budgets.chamber_lines
+        self._drops = host.budgets.chamber_drops
         self._warned = False
         self._last_input_at = host.now()
 
@@ -281,6 +278,10 @@ class ChamberPhase(TextPhase):
 
     def _quit(self) -> None:
         """``/QUIT``: GEnie's buttons come back and the ``*`` prompt (II §4.1)."""
+        if not self.host.budgets.reentries.take(self.host.now()):
+            self.host.log.warning("closing: left the Chamber too often")
+            self.host.close("Chamber re-entry flood")
+            return
         self.host.leave_lobby()
         self.host.io.send_raw(arm_line("B"))
         self.host.to_login_prompt()
