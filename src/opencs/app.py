@@ -29,7 +29,7 @@ from opencs.lobby.lobby import Lobby
 from opencs.logsetup import configure_logging
 from opencs.net.capture import CaptureFactory
 from opencs.net.connection import ConnectionIO, SessionFactory
-from opencs.net.listener import Listener
+from opencs.net.listener import ConnectionLimits, Listener
 from opencs.routing import Router
 from opencs.session.held import HeldGames
 from opencs.session.loginlimits import LoginLimits
@@ -87,10 +87,13 @@ def build_services(
     router. Without ``stores`` accounts and progress are kept in memory (tests)."""
     clock = clock or MonotonicClock()
     stores = stores or memory_stores()
+    limits = config.server.limits
     identity = Identity(
         stores.accounts,
         guest_names=config.server.guest_names,
         registration=config.server.registration,
+        min_password_length=limits.min_password_length,
+        max_accounts=limits.max_accounts,
     )
     rng = rng or random.Random()
     held = HeldGames(clock)
@@ -104,7 +107,11 @@ def build_services(
         Router(),
         Persistence(stores.progress, clock),
         held,
-        LoginLimits(clock),
+        LoginLimits(
+            clock,
+            max_guests=limits.max_guests,
+            max_guests_per_address=limits.max_guests_per_address,
+        ),
         hasher=ThreadHasher(),
     )
 
@@ -233,24 +240,24 @@ def _on_sighup(cities: CityManager, config_file: ConfigFile | None) -> Callable[
     return remove
 
 
-def prune_accounts(services: Services, now: float) -> list[str]:
-    """Delete the accounts left unplayed for ``UNPLAYED_ACCOUNT_DAYS`` (wall-clock ``now``)."""
-    before = now - policy.UNPLAYED_ACCOUNT_DAYS * 24 * 3600
+def prune_accounts(
+    services: Services, now: float, days: int = policy.UNPLAYED_ACCOUNT_DAYS
+) -> list[str]:
+    """Delete the accounts left unplayed for ``days`` (wall-clock ``now``)."""
+    before = now - days * 24 * 3600
     gone = services.identity.prune_unplayed(
         before, lambda key: services.persistence.record(key) is not None
     )
     if gone:
-        log.info(
-            "removed %d accounts never played in %d days", len(gone), policy.UNPLAYED_ACCOUNT_DAYS
-        )
+        log.info("removed %d accounts never played in %d days", len(gone), days)
     return gone
 
 
-async def _prune_accounts_daily(services: Services) -> None:
+async def _prune_accounts_daily(services: Services, days: int) -> None:
     """``prune_accounts`` now and every ``ACCOUNT_PRUNE_INTERVAL``; a failure waits for the next."""
     while True:
         try:
-            prune_accounts(services, time.time())
+            prune_accounts(services, time.time(), days)
         except Exception:
             log.exception("could not prune unplayed accounts")
         await asyncio.sleep(policy.ACCOUNT_PRUNE_INTERVAL)
@@ -273,9 +280,17 @@ async def _listen(
             config.server.admin, os.environ if seams.environ is None else seams.environ
         )
     )  # before anything starts: a channel without a token must stop the server, not run open
+    limits = config.server.limits
     listener = Listener(
         build_session_factory(services),
         clock,
+        limits=ConnectionLimits(
+            total=limits.max_connections,
+            per_address=limits.max_connections_per_address,
+            per_subnet=limits.max_connections_per_subnet,
+            unauthenticated=limits.max_unauthenticated,
+            unauthenticated_per_address=limits.max_unauthenticated_per_address,
+        ),
         sleep=seams.tick_sleep,
         capture=_capture_factory(config),
     )
@@ -290,7 +305,9 @@ async def _listen(
     control = Control(services, cities, stop, config_file, delay=seams.delay)
     admin: AdminServer | None = None
     reload_signal = _on_sighup(cities, config_file)
-    pruning = asyncio.create_task(_prune_accounts_daily(services))
+    pruning = asyncio.create_task(
+        _prune_accounts_daily(services, config.server.limits.unplayed_account_days)
+    )
     try:
         if token is not None and config.server.admin.port is not None:
             admin = AdminServer(control, token, clock)

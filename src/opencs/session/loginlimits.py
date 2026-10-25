@@ -19,8 +19,16 @@ from opencs.ratelimit import KeyedBuckets, TokenBucket
 class LoginLimits:
     """The buckets, shared by every session."""
 
-    def __init__(self, clock: Clock) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        *,
+        max_guests: int = policy.MAX_GUESTS,
+        max_guests_per_address: int = policy.MAX_GUESTS_PER_ADDRESS,
+    ) -> None:
         self._clock = clock
+        self._max_guests = max_guests
+        self._max_guests_per_address = max_guests_per_address
         now = clock.now()
         self._attempts = KeyedBuckets(*policy.LOGIN_ATTEMPTS_PER_ADDRESS)
         self._attempts_global = TokenBucket(*policy.LOGIN_ATTEMPTS_GLOBAL, now)
@@ -40,10 +48,10 @@ class LoginLimits:
         self._failures.forget(name)
 
     def may_admit_guest(self, address: str) -> bool:
-        """Whether a guest from ``address`` may log in now (``policy.MAX_GUESTS*``)."""
+        """Whether a guest from ``address`` may log in now (``max_guests*``)."""
         return (
-            self._guests[address] < policy.MAX_GUESTS_PER_ADDRESS
-            and self._guests.total() < policy.MAX_GUESTS
+            self._guests[address] < self._max_guests_per_address
+            and self._guests.total() < self._max_guests
         )
 
     def guest_in(self, address: str) -> None:

@@ -48,6 +48,21 @@ enabled = false
 # callsigns = ["ALPHA"]
 # max_bytes = 4000000
 
+# Limits an operator may need to tune (docs/OPERATING.md has every key and its range). The defaults
+# suit a public server where each player has an address of their own; behind a shared NAT raise the
+# per-address ones.
+# [limits]
+# max_connections = 128
+# max_connections_per_address = 4
+# max_connections_per_subnet = 12
+# max_unauthenticated = 16
+# max_unauthenticated_per_address = 2
+# max_guests = 24
+# max_guests_per_address = 2
+# max_accounts = 10000
+# min_password_length = 6
+# unplayed_account_days = 30
+
 # The operator channel (docs/OPERATING.md): a line-oriented TCP port on 127.0.0.1 only, off unless
 # `port` is set. It needs a token of at least 16 characters, given here or (better) in the
 # environment variable named by `token_env` (default OPENCS_ADMIN_TOKEN).

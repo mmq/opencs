@@ -144,10 +144,11 @@ sudo ufw allow 2399/tcp
 sudo ufw status
 ```
 
-The game listener limits connections to 128 in total, 4 per address and 12 per /24
-(`MAX_CONNECTIONS`, `MAX_CONNECTIONS_PER_ADDRESS`, `MAX_CONNECTIONS_PER_SUBNET`), and allows 2 guests per
-address and 24 in all (`MAX_GUESTS_PER_ADDRESS`, `MAX_GUESTS`); the rest are refused at once. Behind a
-NAT or a proxy that makes every player share one address, raise the per-address limits in `policy.py`. The link is plain TCP carrying the
+The game listener limits connections to 128 in total, 4 per address and 12 per /24, and allows 2 guests
+per address and 24 in all; the rest are refused at once. An address that connects more than 10 times in
+a burst (then once every 6 s) is refused too. Each
+`[limits]` key defaults to the `policy.py` value of the same name in capitals (`MAX_CONNECTIONS`,
+`MAX_CONNECTIONS_PER_ADDRESS`, ...), where the reasons for the numbers are given. The link is plain TCP carrying the
 game's own protocol with no encryption: a password travels in the clear, so tell players to use one they
 use nowhere else.
 
@@ -174,7 +175,17 @@ start; **only the city files are re-read by `reload`** (below).
 | `cities_dir` | `"cities"` | a directory | one `*.toml` per city |
 | `default_city` | `"B"` | a loaded city | what a bare `/PLAY` picks when every city is empty |
 | `guest_names` | `["JOINGENIE"]` | names; `[]` turns guests off | the guest names (II §3): no password check, the only names several players may share, never saved |
-| `registration` | `"open"` | `"open"`, `"closed"` | open: a first login with an unknown name registers it (new names: 3-12 of `A-Z 0-9 _ -`, not reserved; passwords of 6 or more). Closed: it is refused, and the operator makes accounts with `create-account`. Either way at most `MAX_ACCOUNTS`, and accounts never played are removed after `UNPLAYED_ACCOUNT_DAYS` |
+| `registration` | `"open"` | `"open"`, `"closed"` | open: a first login with an unknown name registers it (new names: 3-12 of `A-Z 0-9 _ -`, not reserved; passwords of 6 or more). Closed: it is refused, and the operator makes accounts with `create-account`. Either way at most `[limits] max_accounts`, and accounts never played are removed after `[limits] unplayed_account_days` |
+| `[limits] max_connections` | `128` | 1-10000 | connections at once, in all |
+| `[limits] max_connections_per_address` | `4` | 3 to the subnet limit | connections at once from one IP address |
+| `[limits] max_connections_per_subnet` | `12` | the address limit to the total | connections at once from one /24 (IPv4) or /64 (IPv6) |
+| `[limits] max_unauthenticated` | `16` | 1 to the total | connections not yet logged in; past it the oldest of them is cut |
+| `[limits] max_unauthenticated_per_address` | `2` | 1 to the smaller of the two above | connections not yet logged in from one address; past it a new one is refused |
+| `[limits] max_guests` | `24` | 0 to the total | guests online at once |
+| `[limits] max_guests_per_address` | `2` | 0 to the address limit | guests online at once from one address |
+| `[limits] max_accounts` | `10000` | 1 to 1e7 | accounts in all; past it a first login is refused |
+| `[limits] min_password_length` | `6` | 1-64 | the shortest password of a new account (existing ones are not checked) |
+| `[limits] unplayed_account_days` | `30` | 1-36500 | an account with no saved progress and no login for this long is removed |
 | `[logging] level` | `"INFO"` | DEBUG, INFO, WARNING, ERROR, CRITICAL | for everything the server logs |
 | `[logging.levels] <layer>` | none | a layer below; a level | overrides `level` for `opencs.<layer>` |
 | `[logging] file` | none (stderr only) | a path | also log to this file, rotating |
@@ -350,7 +361,7 @@ error changes nothing and the first one is reported. Then, per city:
 
 A running game is never changed under its players (II §17). A `/PLAY` begun against the old
 configuration just before the swap is told "CITY x FILLED UP: TRY AGAIN". A change to `server.toml` (the
-port, logging, capture, admin, `default_city`, `guest_names`, `registration`) needs a restart; a reload says that it saw one. A
+port, logging, capture, admin, `default_city`, `guest_names`, `registration`, `[limits]`) needs a restart; a reload says that it saw one. A
 config whose `default_city` is missing or has `enabled = false` is refused at validation, at start-up and
 on `reload` alike (nothing changes), so the lobby always has a city to offer.
 

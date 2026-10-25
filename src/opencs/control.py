@@ -195,7 +195,7 @@ class Control:
         identity = self._services.identity
         mode = "open" if identity.registration_open else "closed"
         return [
-            f"accounts: {identity.account_count()} of at most {policy.MAX_ACCOUNTS}; "
+            f"accounts: {identity.account_count()} of at most {identity.max_accounts}; "
             f"registration {mode}"
         ]
 

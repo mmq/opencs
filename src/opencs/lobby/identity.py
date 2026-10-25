@@ -299,6 +299,10 @@ class Identity:
     def registration_open(self) -> bool:
         return self._registration_open
 
+    @property
+    def max_accounts(self) -> int:
+        return self._max_accounts
+
     def delete_account(self, name: str) -> bool:
         """Remove account ``name`` (upper case); its progress is the caller's to erase."""
         return self._store.delete(name)

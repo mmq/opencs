@@ -23,7 +23,8 @@ from opencs.app import (
 )
 from opencs.cities import run_city
 from opencs.clock import ManualClock
-from opencs.config import AdminConfig, load_config
+from opencs.config import AdminConfig, LimitsConfig, load_config
+from opencs.lobby.identity import Refused
 from opencs.messages import ServerMessage, client, client_payload, server
 from opencs.routing import Router
 from opencs.store.base import ProgressRecord
@@ -339,3 +340,44 @@ def test_unplayed_accounts_are_pruned_at_the_interval_and_played_ones_kept() -> 
     later = soon + policy.UNPLAYED_ACCOUNT_DAYS * 24 * 3600
     assert prune_accounts(services, later) == ["IDLER"]
     assert services.identity.account_exists("PLAYER")
+
+
+def test_the_configured_limits_reach_identity_and_the_login_limits() -> None:
+    config = local_config()
+    tuned = LimitsConfig(max_guests_per_address=1, max_accounts=1, min_password_length=8)
+    services = build_services(replace(config, server=replace(config.server, limits=tuned)))
+    assert services.identity.max_accounts == 1
+    assert isinstance(services.identity.login("ALICE,sevench"), Refused)  # 7 < 8
+    assert not isinstance(services.identity.login("ALICE,eightchr"), Refused)
+    assert services.identity.login("BOB,eightchr") == Refused(
+        "THIS SERVER HAS NO ROOM FOR NEW ACCOUNTS"
+    )
+    gate = services.login_limits.gate("10.0.0.1")
+    assert gate.may_admit_guest()
+    services.login_limits.guest_in("10.0.0.1")
+    assert not gate.may_admit_guest()
+
+
+def test_the_configured_connection_limits_reach_the_listener() -> None:
+    async def scenario() -> list[bytes]:
+        config = local_config()
+        tuned = LimitsConfig(
+            max_connections_per_address=3,
+            max_connections_per_subnet=3,
+            max_unauthenticated_per_address=3,
+        )
+        config = replace(config, server=replace(config.server, limits=tuned))
+        stop, task, port = await start(config)
+        clients = [await connect(port) for _ in range(3)]
+        for c in clients:
+            await c.send("HHH")
+            await c.expect(b"CONNECT")
+        extra = await connect(port)
+        refused = await asyncio.wait_for(extra.reader.read(), TIMEOUT)
+        for c in (*clients, extra):
+            c.writer.close()
+        stop.set()
+        await asyncio.wait_for(task, TIMEOUT)
+        return [refused]
+
+    assert asyncio.run(scenario()) == [b""]
