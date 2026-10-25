@@ -1,8 +1,10 @@
-"""Server-wide limits on password checks and new accounts (DESIGN §5 "login attempts").
+"""Server-wide limits on logins (DESIGN §5 "login attempts").
 
-PBKDF2 runs on the event loop, so a flood of logins, from one address or many, would stall every
-city. Each costly step spends a token from the source address's bucket and from a global one; the
-numbers are in ``policy``. The gate handed to ``Identity`` is made per attempt.
+A password check costs a PBKDF2 run on one of a few hashing threads, so a flood of logins, from one
+address or many, would hold every other login up. Each costly step spends a token from the source
+address's bucket and from a global one; wrong passwords also spend from the account's own, so many
+addresses cannot take turns guessing one account; and guests, who cost no check, are counted
+online. The numbers are in ``policy``. The gate handed to ``Identity`` is made per attempt.
 """
 
 from __future__ import annotations
@@ -25,6 +27,17 @@ class LoginLimits:
         self._accounts = KeyedBuckets(*policy.NEW_ACCOUNTS_PER_ADDRESS)
         self._accounts_global = TokenBucket(*policy.NEW_ACCOUNTS_GLOBAL, now)
         self._guests: Counter[str] = Counter()  # guests online, by address
+        self._failures = KeyedBuckets(*policy.FAILED_LOGINS_PER_ACCOUNT)  # by account name
+
+    def may_try_account(self, name: str) -> bool:
+        """Whether account ``name`` has wrong passwords to spare (``FAILED_LOGINS_PER_ACCOUNT``)."""
+        return self._failures.has_token(name, self._clock.now())
+
+    def account_failed(self, name: str) -> None:
+        self._failures.take(name, self._clock.now())
+
+    def account_succeeded(self, name: str) -> None:
+        self._failures.forget(name)
 
     def may_admit_guest(self, address: str) -> bool:
         """Whether a guest from ``address`` may log in now (``policy.MAX_GUESTS*``)."""
@@ -73,3 +86,12 @@ class AddressGate:
 
     def may_admit_guest(self) -> bool:
         return self._limits.may_admit_guest(self._address)
+
+    def may_try_account(self, name: str) -> bool:
+        return self._limits.may_try_account(name)
+
+    def account_failed(self, name: str) -> None:
+        self._limits.account_failed(name)
+
+    def account_succeeded(self, name: str) -> None:
+        self._limits.account_succeeded(name)

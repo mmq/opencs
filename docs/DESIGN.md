@@ -192,7 +192,7 @@ in `world/view.py` as one `ClientView` per player, owned by the city. Sessions d
 - **Never send what crashes the client** (spec II §8): message constructors validate their fields
   (`'c'` KIND, `'R'` ranges, `'T'` classes, chat bytes) and raise in our code rather than on a player's
   screen.
-- **Passwords:** salted PBKDF2 from `hashlib`, never stored or logged in clear.
+- **Passwords:** salted PBKDF2 from `hashlib`, never stored or logged in clear, hashed on a small thread pool (`app.ThreadHasher`) so a login never stalls the loop; the session hands the work over through `Services.hasher` and stays sans-IO.
 - **Bugs vs bad input:** an exception inside a `City` is a bug — logged with the triggering request, the
   request dropped, the city kept running.
 

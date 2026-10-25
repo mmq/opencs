@@ -187,15 +187,27 @@ KEEPALIVE_INTERVAL = 15
 KEEPALIVE_PROBES = 4
 
 #: Limits on password checks and on new accounts across connections (DESIGN §5 "login attempts"):
-#: PBKDF2 runs on the event loop (~30 ms), so every check is metered. Each is a token bucket
+#: each PBKDF2 run (~30 ms) takes a ``HASH_WORKERS`` thread, so every check is metered. Each is a
+#: token bucket
 #: ``(burst, per second)``, per source address and for the whole server. A player mistypes a
 #: password a few times at most; a household behind one address may log several people in at once
 #: (``MAX_CONNECTIONS_PER_ADDRESS``). A first login registers an account (II §3), so
 #: registrations are limited harder: they cost a stored row each. Ours (the spec sets none).
 LOGIN_ATTEMPTS_PER_ADDRESS = (8, 1 / 20)
-LOGIN_ATTEMPTS_GLOBAL = (20, 3.0)
+LOGIN_ATTEMPTS_GLOBAL = (60, 10.0)
 NEW_ACCOUNTS_PER_ADDRESS = (3, 1 / 300)
 NEW_ACCOUNTS_GLOBAL = (10, 0.5)
+
+#: Wrong passwords for one account, from anywhere: a token bucket ``(burst, per second)``, spent
+#: only by a wrong password; while it is empty the account's logins are refused without a check,
+#: and a right password refills it. The per-address and global limits do not stop a guesser with
+#: many addresses aiming at one account; this does, and since it refills in minutes it cannot lock
+#: the owner out for long. Ours (DESIGN §5).
+FAILED_LOGINS_PER_ACCOUNT = (5, 1 / 60)
+
+#: Threads that hash passwords (``PBKDF2_ITERATIONS``), so a login never stalls the event loop. A
+#: login waits for one of them; ``LOGIN_ATTEMPTS_GLOBAL`` bounds the queue. Ours (DESIGN §3.3).
+HASH_WORKERS = 2
 
 #: Most source addresses a limiter tracks; past it the oldest are forgotten. Ours (DESIGN §5).
 MAX_TRACKED_SOURCES = 4096
@@ -361,8 +373,8 @@ MAX_ACCOUNT_NAME_LENGTH = 32
 MAX_PASSWORD_LENGTH = 64
 
 #: PBKDF2-HMAC-SHA256 work factor and salt size. Ours (DESIGN §5 "salted PBKDF2"). 100 000 rounds
-#: is about 30 ms, which blocks the event loop once per login; raise it when logins move to a
-#: thread.
+#: is about 30 ms on a hashing thread (``HASH_WORKERS``), never on the event loop. An account keeps
+#: the count it was registered with, so raising this changes new accounts only.
 PBKDF2_ITERATIONS = 100_000
 PBKDF2_SALT_BYTES = 16
 

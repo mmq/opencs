@@ -11,6 +11,7 @@ import signal
 import sqlite3
 import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +50,31 @@ class StartupError(Exception):
 DEFAULT_CONFIG_PATH = Path("config") / "server.toml"
 
 
+class ThreadHasher:
+    """Password hashes on ``HASH_WORKERS`` threads (``session.phases.Hasher``), so a login never
+    stalls the event loop. ``hashlib``'s PBKDF2 releases the GIL while it runs."""
+
+    def __init__(self, workers: int = policy.HASH_WORKERS) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="opencs-hash")
+
+    def submit(self, work: Callable[[], bytes], done: Callable[[bytes], None]) -> None:
+        future = asyncio.get_running_loop().run_in_executor(self._executor, work)
+
+        def finished(f: asyncio.Future[bytes]) -> None:  # on the loop
+            if f.cancelled():
+                return
+            if (exc := f.exception()) is not None:
+                log.error("a password hash failed", exc_info=exc)
+                return  # the login times out
+            done(f.result())
+
+        future.add_done_callback(finished)
+
+    def close(self) -> None:
+        """Drop what is waiting; a hash already running finishes on its own."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+
 def build_services(
     config: AppConfig,
     *,
@@ -74,6 +100,7 @@ def build_services(
         Persistence(stores.progress, clock),
         held,
         LoginLimits(clock),
+        hasher=ThreadHasher(),
     )
 
 
@@ -259,6 +286,8 @@ async def _listen(
         if admin is not None:
             await admin.stop()
         await _shutdown(services, listener, cities, seams.shutdown_deadline)
+        if isinstance(services.hasher, ThreadHasher):
+            services.hasher.close()
 
 
 async def _run(config: AppConfig, config_file: ConfigFile) -> None:

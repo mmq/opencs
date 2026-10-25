@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from fixtures.lobbies import city
@@ -19,7 +19,7 @@ from opencs.routing import Router
 from opencs.session.held import HeldGames
 from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
-from opencs.session.phases import Services
+from opencs.session.phases import Hasher, InlineHasher, Services
 from opencs.session.session import Session
 from opencs.store.base import ProgressStore
 from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
@@ -27,6 +27,22 @@ from opencs.world.city import City
 from opencs.world.ids import IdRange
 
 FAST_ITERATIONS = 1000
+
+
+class DeferredHasher:
+    """Keeps each hash until the test runs it, as a busy hashing thread would."""
+
+    def __init__(self) -> None:
+        self.waiting: list[tuple[Callable[[], bytes], Callable[[bytes], None]]] = []
+
+    def submit(self, work: Callable[[], bytes], done: Callable[[bytes], None]) -> None:
+        self.waiting.append((work, done))
+
+    def run(self) -> None:
+        """Finish every waiting hash, oldest first."""
+        waiting, self.waiting = self.waiting, []
+        for work, done in waiting:
+            done(work())
 
 
 @dataclass
@@ -108,6 +124,7 @@ def make_world(
     start: float = 100.0,
     progress: ProgressStore | None = None,
     id_ranges: Mapping[IdRange, tuple[int, int]] | None = None,
+    hasher: Hasher | None = None,
 ) -> World:
     clock = ManualClock(start)
     identity = Identity(MemoryAccountStore(), iterations=FAST_ITERATIONS)
@@ -129,6 +146,7 @@ def make_world(
         Persistence(progress, clock),
         held,
         LoginLimits(clock),
+        hasher=hasher or InlineHasher(),
     )
     return World(clock, identity, lobby, services, progress)
 

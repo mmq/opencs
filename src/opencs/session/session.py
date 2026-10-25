@@ -165,6 +165,12 @@ class Session:
     def to_ingame(self) -> None:
         self._switch(InGamePhase(self))
 
+    def call(self, fn: Callable[..., None], *args: object) -> None:
+        """Run ``fn`` for work that finished outside ``feed`` and ``tick`` (a password check), as
+        the connection runs those: nothing escapes, and nothing runs once the session has closed."""
+        if self._active:
+            self._guard(fn, *args)
+
     def hand_over(self, data: bytes) -> None:
         """Give bytes the previous phase did not consume to the current one."""
         if data and self._active:

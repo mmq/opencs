@@ -9,9 +9,9 @@ to the next one unchanged: the client starts sending binary frames right after t
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from opencs import policy
 from opencs.clock import Clock
@@ -33,6 +33,22 @@ if TYPE_CHECKING:
 CR = b"\r"
 
 
+class Hasher(Protocol):
+    """Runs password hashes (PBKDF2, DESIGN §5) away from the caller. The session layer is
+    sans-IO, so it only hands work over; the app supplies threads (``app.ThreadHasher``)."""
+
+    def submit(self, work: Callable[[], bytes], done: Callable[[bytes], None]) -> None:
+        """Run ``work`` and call ``done`` with its result on the event loop, later or at once."""
+        ...
+
+
+class InlineHasher:
+    """Runs the hash at once, on the caller's thread: for tests and tools."""
+
+    def submit(self, work: Callable[[], bytes], done: Callable[[bytes], None]) -> None:
+        done(work())
+
+
 @dataclass(frozen=True, slots=True)
 class Services:
     """What every session shares."""
@@ -52,6 +68,8 @@ class Services:
     chat_limits: KeyedBuckets = field(
         default_factory=lambda: KeyedBuckets(*policy.CHAT_PER_ADDRESS)
     )
+    #: Where password hashes run.
+    hasher: Hasher = field(default_factory=InlineHasher)
 
 
 class Phase(ABC):
@@ -97,8 +115,20 @@ class TextPhase(Phase):
     def on_overlong(self) -> None:
         """A line exceeded ``policy.MAX_LINE_BYTES`` and was discarded."""
 
+    def holding(self) -> bool:
+        """True while the phase waits for something (a password check) and takes no lines: the
+        bytes after the current line are kept for it to ``feed`` itself when the wait is over."""
+        return False
+
+    def hold(self, data: bytes) -> None:
+        """Keep ``data`` while ``holding``. A phase that can hold overrides this."""
+        raise NotImplementedError
+
     def feed(self, data: bytes) -> None:
         while data and self.host.active:
+            if self.holding():
+                self.hold(data)
+                return
             cr = data.find(CR)
             chunk, data = (data, b"") if cr < 0 else (data[: cr + 1], data[cr + 1 :])
             for line in self._lines.feed(chunk):

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import socket
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,7 +11,7 @@ import pytest
 from fixtures.loopback import TIMEOUT, LogWatch, TickGate, connect, local_config, start
 from fixtures.pods import report
 from opencs import policy
-from opencs.app import Seams, StartupError, build_services, main, serve
+from opencs.app import Seams, StartupError, ThreadHasher, build_services, main, serve
 from opencs.cities import run_city
 from opencs.clock import ManualClock
 from opencs.config import AdminConfig, load_config
@@ -284,3 +285,35 @@ def test_an_admin_port_in_use_is_named_as_the_admin_port() -> None:
                 await serve(config, stop=asyncio.Event(), seams=Seams(stores=memory_stores()))
 
     asyncio.run(asyncio.wait_for(scenario(), TIMEOUT))
+
+
+def test_password_hashes_run_on_a_thread_and_report_back_on_the_loop() -> None:
+    async def scenario() -> tuple[int, int, int, bool]:
+        hasher = ThreadHasher(workers=1)
+        release = threading.Event()
+        worked_on: list[int] = []
+        done_on: list[int] = []
+        finished = asyncio.Event()
+
+        def work() -> bytes:
+            worked_on.append(threading.get_ident())
+            release.wait(5)
+            return b"digest"
+
+        def done(digest: bytes) -> None:
+            assert digest == b"digest"
+            done_on.append(threading.get_ident())
+            finished.set()
+
+        hasher.submit(work, done)
+        await asyncio.sleep(0.01)  # the loop is free while the hash runs
+        loop_ran_meanwhile = not finished.is_set()
+        release.set()
+        await asyncio.wait_for(finished.wait(), 5)
+        hasher.close()
+        return worked_on[0], done_on[0], threading.get_ident(), loop_ran_meanwhile
+
+    worker, reported, loop_thread, loop_ran = asyncio.run(scenario())
+    assert worker != loop_thread
+    assert reported == loop_thread
+    assert loop_ran

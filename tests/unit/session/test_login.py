@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from fixtures.sessions import connect, login, make_world
+from fixtures.sessions import DeferredHasher, connect, login, make_world
 from opencs import policy
+from opencs.lobby.identity import Pilot
 from opencs.session.chamber import ChamberPhase
 from opencs.session.login import LoginPhase
 
@@ -251,3 +252,63 @@ def test_the_server_has_only_so_many_guests_online() -> None:
     extra = login(world)
     assert extra.io.closed_with == ["login refused"]
     assert b"TOO MANY GUESTS" in extra.take()
+
+
+# --- the password check runs off the event loop ------------------------------------------------
+
+
+def test_lines_sent_during_the_password_check_are_read_once_it_is_done() -> None:
+    hasher = DeferredHasher()
+    world = make_world(hasher=hasher)
+    h = connect(world)
+    # The real client does not wait for the prompts.
+    h.feed("HHH\rPILOT,secret\r<Not Telling!>\rM 1380;3\rCSTTBT 105 150\r")
+    assert isinstance(h.session.phase, LoginPhase)
+    assert b"PASSWORD" not in h.take()
+    hasher.run()
+    out = h.take()
+    assert b"PASSWORD: " in out
+    assert isinstance(h.session.phase, ChamberPhase)
+    assert h.session.pilot is not None and h.session.pilot.callsign == "PILOT"
+
+
+def test_a_check_that_finishes_after_the_player_hung_up_does_nothing() -> None:
+    hasher = DeferredHasher()
+    world = make_world(hasher=hasher)
+    h = connect(world)
+    h.feed("HHH\rPILOT,secret\r")
+    h.session.closed()
+    hasher.run()
+    assert h.session.pilot is None
+    assert not world.identity.callsign_online("PILOT")
+
+
+def test_a_registration_whose_player_hung_up_stores_nothing() -> None:
+    hasher = DeferredHasher()
+    world = make_world(hasher=hasher)
+    h = connect(world)
+    h.feed("HHH\rNEWBIE,secret\r")
+    h.session.closed()
+    hasher.run()
+    assert isinstance(world.identity.login("NEWBIE,different"), Pilot)  # the name was still free
+
+
+def test_a_flood_during_the_password_check_closes() -> None:
+    world = make_world(hasher=DeferredHasher())
+    h = connect(world)
+    h.feed("HHH\rPILOT,secret\r")
+    h.feed(b"x" * (policy.LOGIN_PREAMBLE_LIMIT + 1))
+    assert h.io.closed_with == ["too much input during the password check"]
+
+
+def test_two_logins_of_one_account_racing_through_the_check_admit_one() -> None:
+    hasher = DeferredHasher()
+    world = make_world(hasher=hasher)
+    world.identity.release(world.identity.login("PILOT,secret"))  # type: ignore[arg-type]
+    first, second = connect(world), connect(world)
+    first.feed("HHH\rPILOT,secret\r")
+    second.feed("HHH\rPILOT,secret\r")
+    hasher.run()
+    assert not first.io.closed
+    assert second.io.closed_with == ["login refused"]
+    assert b"ALREADY LOGGED IN" in second.take()

@@ -25,6 +25,10 @@ class TokenBucket:
         """True if the bucket has refilled completely: it remembers nothing worth keeping."""
         return self._tokens + max(0.0, now - self._at) * self._rate >= self._capacity
 
+    def has_token(self, now: float) -> bool:
+        """True if a ``take`` at ``now`` would succeed; spends nothing."""
+        return self._tokens + max(0.0, now - self._at) * self._rate >= 1.0
+
     def take(self, now: float) -> bool:
         """Spend one token at ``now``; False, spending nothing, if there is none."""
         self._tokens = min(self._capacity, self._tokens + max(0.0, now - self._at) * self._rate)
@@ -55,6 +59,16 @@ class KeyedBuckets:
                 self._prune(now)
             bucket = self._buckets[key] = TokenBucket(self._capacity, self._rate, now)
         return bucket.take(now)
+
+    def has_token(self, key: str, now: float) -> bool:
+        """True if a ``take`` for ``key`` at ``now`` would succeed; spends nothing and remembers
+        nothing (a key never seen has a full bucket)."""
+        bucket = self._buckets.get(key)
+        return bucket is None or bucket.has_token(now)
+
+    def forget(self, key: str) -> None:
+        """Drop ``key``'s bucket: it starts full again."""
+        self._buckets.pop(key, None)
 
     def __len__(self) -> int:
         return len(self._buckets)
