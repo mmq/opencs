@@ -50,6 +50,8 @@ in policy.
 |---|---|---|---|
 | line length | `MAX_LINE_BYTES` (client armed buffer 512, I §5.2) | line discarded and charged to the line bucket below (so a stream of them closes the connection); within the budget, "too long" | `session/test_chamber::test_an_overlong_line_is_refused_not_relayed`, `test_a_stream_of_overlong_lines_is_a_flood_and_closes_the_connection`, `wire/test_text` |
 | line rate | token bucket, then `CHAMBER_FLOOD_*` | dropped with one warning; close on a sustained flood | `session/test_chamber::test_a_burst_of_chat_is_cut_to_the_budget_and_the_sender_is_warned_once`, `test_sustained_flooding_closes_the_connection`, `test_honest_pace_is_never_limited` |
+| chat, per source address | `CHAT_PER_ADDRESS`, shared by every connection of the address, in the Chamber and in game | dropped (the Chamber warns once), not counted | `session/test_chamber::test_chat_from_one_address_shares_one_budget_over_its_connections`, `session/test_ingame::test_chat_from_one_address_shares_one_budget_over_its_connections` |
+| chat to a client that reads slowly | over `DROPPABLE_WATERMARK` queued items, chat (`Event.droppable`, `Member.congested`) is skipped for that client; game state never is | skipped and tallied (`Lobby.chat_dropped`, `Router.dropped`), so many senders within their budgets cannot overflow a 9600-baud reader's outbox and cut it off | `session/test_chamber::test_a_listener_that_has_stopped_reading_is_skipped_not_cut_off`, `lobby/test_lobby::test_chat_skips_a_member_whose_connection_is_too_far_behind`, `test_routing::test_a_droppable_event_skips_a_congested_player_and_nothing_else_does`, `net/test_connection::test_the_backlog_is_what_is_queued_and_not_yet_written` |
 | chat text | `CHAT_MAX_CHARS`; bytes outside `0x20..0x7e` stripped | truncated, sanitized | `lobby/test_commands`, `wire/test_text` |
 | leaving and re-entering (`/QUIT`, `M 1380;3`) | `CHAMBER_REENTRY_LIMIT` trips; the line budget is the session's, so a trip does not refill it | close | `session/test_chamber::test_leaving_and_reentering_the_chamber_does_not_refill_the_line_budget`, `test_a_flood_spread_over_trips_to_the_star_prompt_still_closes`, `test_leaving_the_chamber_too_often_closes_the_connection`, `test_a_player_who_leaves_the_chamber_now_and_then_is_never_closed` |
 | idle | `CHAMBER_IDLE_TIMEOUT` (an hour) | told, closed; the account is freed | `session/test_chamber::test_a_silent_chamber_connection_is_closed_after_the_idle_timeout`, `test_a_stale_chamber_connection_frees_its_account` |
@@ -86,7 +88,7 @@ in policy.
 |---|---|---|
 | inbound line buffer | `MAX_LINE_BYTES` | `fuzz/test_fuzz_net` |
 | inbound frame buffer | `MAX_PENDING` (238 bytes) | `fuzz/test_fuzz_net` |
-| outbox | `OUTBOX_LIMIT` items, then that connection is aborted; the others are not delayed | `net/test_connection::test_overflow_at_exactly_limit_plus_one`, `test_outbox_isolation` (real sockets) |
+| outbox | `OUTBOX_LIMIT` items, then that connection is aborted; the others are not delayed. Chat stops being queued at `DROPPABLE_WATERMARK` | `net/test_connection::test_overflow_at_exactly_limit_plus_one`, `test_outbox_isolation` (real sockets) |
 | shot log | `SHOT_LOG_MAX` | `world/test_combat`; ceiling in `fuzz/test_fuzz_session::test_a_long_hostile_run_leaves_each_players_records_bounded` |
 | hit set, loadout and score ledgers, attack history | aged out or fixed size | same ceiling test |
 | a client's view | `ever_held` is bounded by the id ranges | `longrun/test_city_48h` |

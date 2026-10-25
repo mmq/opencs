@@ -36,6 +36,8 @@ class FakeIO:
     raw: list[bytes] = field(default_factory=list)
     messages: list[ServerMessage] = field(default_factory=list)
     closed_with: list[str] = field(default_factory=list)
+    #: What ``backlog`` reports: set it to play a client that has stopped reading.
+    queued: int = 0
 
     def send_raw(self, data: bytes) -> None:
         self.raw.append(data)
@@ -45,6 +47,9 @@ class FakeIO:
 
     def send_first(self, msg: ServerMessage) -> None:
         self.messages.insert(0, msg)
+
+    def backlog(self) -> int:
+        return self.queued
 
     def close(self, reason: str) -> None:
         self.closed_with.append(reason)

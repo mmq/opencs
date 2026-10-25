@@ -15,9 +15,13 @@ from opencs.world.seating import JoinResult
 @dataclass
 class Recorder:
     got: list[ServerMessage] = field(default_factory=list)
+    behind: bool = False
 
     def send(self, msg: ServerMessage) -> None:
         self.got.append(msg)
+
+    def congested(self) -> bool:
+        return self.behind
 
 
 @dataclass
@@ -126,3 +130,11 @@ def test_events_are_delivered_in_order() -> None:
     first, second = server.ReleaseDrop(0), server.Destroy(0)
     t.router.deliver(t.city, [Event(first, ToPlayer(0)), Event(second, ToPlayer(0))])
     assert t.sinks[0].got == [first, second]
+
+
+def test_a_droppable_event_skips_a_congested_player_and_nothing_else_does() -> None:
+    t = table()
+    t.sinks[1].behind = True
+    t.router.deliver(t.city, [Event(MSG, ToAll(), droppable=True), Event(MSG, ToAll())])
+    assert [len(t.sinks[pid].got) for pid in sorted(t.sinks)] == [2, 1, 2, 2]
+    assert t.router.dropped == 1

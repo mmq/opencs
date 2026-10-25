@@ -66,7 +66,10 @@ type Audience = ToPlayer | ToPlayers | ToAll | ToAllExcept | ToTeam | ToHolders
 
 @dataclass(frozen=True, slots=True)
 class Event:
-    """A server message and its audience."""
+    """A server message and its audience. A ``droppable`` one (a player's chat) is not sent to a
+    player whose connection is already far behind: losing it costs nothing, while queueing it could
+    overflow the outbox and cut that player off (DESIGN §5)."""
 
     message: ServerMessage
     audience: Audience
+    droppable: bool = False

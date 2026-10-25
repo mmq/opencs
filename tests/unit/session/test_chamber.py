@@ -696,3 +696,28 @@ def test_a_new_game_spends_from_the_same_budgets_as_the_last() -> None:
     assert first._frame_bucket is second._frame_bucket is h.session.budgets.frames
     assert first._relay_buckets is second._relay_buckets
     assert first._bad is second._bad
+
+
+def test_chat_from_one_address_shares_one_budget_over_its_connections() -> None:
+    world = make_world()
+    listener = enter_lobby(world, "LISTENER,secret", address="10.0.0.9")
+    talkers = [enter_lobby(world, address="10.0.0.1") for _ in range(3)]
+    listener.take()
+    for h in talkers:
+        h.feed("hello\r" * policy.CHAMBER_BURST_LINES)
+    assert listener.take().count(b"hello") == policy.CHAT_PER_ADDRESS[0]
+    assert all(b"TOO MANY LINES" in h.take() for h in talkers[1:])
+
+
+def test_a_listener_that_has_stopped_reading_is_skipped_not_cut_off() -> None:
+    world = make_world()
+    listener = enter_lobby(world, "LISTENER,secret", address="10.0.0.9")
+    talker = enter_lobby(world, address="10.0.0.1")
+    listener.take()
+    listener.io.queued = policy.DROPPABLE_WATERMARK + 1
+    talker.feed("hello\r")
+    assert b"hello" not in listener.take()
+    assert world.services.lobby.chat_dropped == 1
+    listener.io.queued = 0  # caught up
+    talker.feed("again\r")
+    assert b"again" in listener.take()

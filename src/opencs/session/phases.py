@@ -13,6 +13,7 @@ from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
+from opencs import policy
 from opencs.clock import Clock
 from opencs.connlog import STREAM_LOGIN
 from opencs.lobby.identity import Identity
@@ -21,6 +22,7 @@ from opencs.routing import Router
 from opencs.session.held import HeldGames
 from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
+from opencs.session.ratelimit import KeyedBuckets
 from opencs.session.registry import SessionRegistry
 from opencs.wire.text import LineReader
 from opencs.world.city import City
@@ -46,6 +48,10 @@ class Services:
     login_limits: LoginLimits
     #: Every live session, for the admin channel (DESIGN §6).
     sessions: SessionRegistry = field(default_factory=SessionRegistry)
+    #: Chat, per source address, over all of that address's connections (DESIGN §5).
+    chat_limits: KeyedBuckets = field(
+        default_factory=lambda: KeyedBuckets(*policy.CHAT_PER_ADDRESS)
+    )
 
 
 class Phase(ABC):

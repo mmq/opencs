@@ -147,6 +147,13 @@ READ_CHUNK = 4096
 #: Seconds a closing connection may take to flush its queue before it is cut. Ours.
 CLOSE_FLUSH_TIMEOUT = 5.0
 
+#: A connection with more than this many items queued is not sent chat (``Event.droppable``,
+#: ``Member.congested``) until it catches up. The real client reads through an emulated modem, about
+#: 1 KB a second, so many senders, each within its own budget, can still queue chat faster than one
+#: client reads it; without this the outbox overflows (``OUTBOX_LIMIT``) and that player is cut.
+#: Game state is never dropped. A quarter of the outbox leaves room for it. Ours (DESIGN §5).
+DROPPABLE_WATERMARK = OUTBOX_LIMIT // 4
+
 #: TCP keepalive on accepted sockets, so a peer that vanished without a FIN is noticed and its
 #: account freed (DESIGN §5): idle seconds before the first probe, seconds between probes, probes
 #: before the connection is dropped. Ours.
@@ -453,6 +460,13 @@ RELAY_LIMIT_POD_STATE = (12, 8.0)
 FRAME_LIMIT = (200, 100.0)
 RELAY_LIMIT_SHOT = (40, 16.0)
 RELAY_LIMIT_CHAT = (8, 2.0)
+
+#: Chat from one source address, over all its connections, in the Chamber and in game together: a
+#: token bucket ``(burst, per second)``. A connection's own budget (``CHAMBER_*``,
+#: ``RELAY_LIMIT_CHAT``) would otherwise multiply by ``MAX_CONNECTIONS_PER_ADDRESS``. Excess lines
+#: are dropped (the Chamber warns once). One and a half players' worth, for a household. Ours
+#: (DESIGN §5).
+CHAT_PER_ADDRESS = (12, 3.0)
 RELAY_LIMIT_GRENADE = (8, 4.0)
 
 # --- Combat and scoring (I §9.1, I §9.2, I §9.2, II §9; DESIGN §3.1 ``combat``/``scoring``) ------

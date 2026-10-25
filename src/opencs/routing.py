@@ -32,12 +32,18 @@ class Sink(Protocol):
 
     def send(self, msg: ServerMessage) -> None: ...
 
+    def congested(self) -> bool:
+        """True if the player is so far behind that droppable events are skipped."""
+        ...
+
 
 class Router:
     """The directory of ``(city letter, player id) -> sink`` and the audience resolver."""
 
     def __init__(self) -> None:
         self._sinks: dict[tuple[str, int], Sink] = {}
+        #: Droppable events (chat) not sent to a congested player.
+        self.dropped = 0
 
     def register(self, letter: str, player_id: int, sink: Sink) -> None:
         self._sinks[(letter, player_id)] = sink
@@ -65,7 +71,8 @@ class Router:
 
     def deliver(self, city: City, events: Iterable[Event]) -> None:
         """Send each event to the sinks of its audience. A player with no sink (not yet seated in
-        a session, or gone) is skipped; one sink failing never stops the others."""
+        a session, or gone) is skipped, and so is a droppable event to a congested sink; one sink
+        failing never stops the others."""
         letter = city.config.letter
         for event in events:
             for player_id in self.resolve(city, event.audience):
@@ -73,6 +80,9 @@ class Router:
                 if sink is None:
                     continue
                 try:
+                    if event.droppable and sink.congested():
+                        self.dropped += 1
+                        continue
                     sink.send(event.message)
                 except Exception:
                     log.exception("delivery to player %d of city %s failed", player_id, letter)

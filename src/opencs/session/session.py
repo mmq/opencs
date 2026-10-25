@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from opencs import policy
 from opencs.connlog import ConnectionLog
 from opencs.lobby import replies
 from opencs.lobby.identity import Pilot
@@ -126,9 +127,13 @@ class Session:
         assert self.pilot is not None
         self.leave_lobby()
         self.member = self.services.lobby.join(
-            self.pilot.callsign, self.pilot.account, self.io.send_raw
+            self.pilot.callsign, self.pilot.account, self.io.send_raw, self.congested
         )
         return self.member
+
+    def congested(self) -> bool:
+        """True while the connection is too far behind to be sent chat (DESIGN §5)."""
+        return self.io.backlog() > policy.DROPPABLE_WATERMARK
 
     def leave_lobby(self) -> None:
         if self.member is not None:

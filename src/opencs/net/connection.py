@@ -44,6 +44,8 @@ class ConnectionIO(Protocol):
 
     def send_first(self, msg: ServerMessage) -> None: ...
 
+    def backlog(self) -> int: ...
+
     def close(self, reason: str) -> None: ...
 
 
@@ -128,6 +130,10 @@ class Connection:
         """Queue a message ahead of everything already queued: the latency ping's reply, whose
         delay the client measures and shows (I §8.7)."""
         self._enqueue(msg, front=True)
+
+    def backlog(self) -> int:
+        """Items queued and not yet written: how far behind the client is reading."""
+        return len(self._outbox)
 
     def close(self, reason: str) -> None:
         """Send what is queued, then close. A client that does not read is cut after

@@ -26,6 +26,11 @@ class SessionIO(Protocol):
         """Like ``send`` but ahead of everything already queued: the ping reply (I §8.7)."""
         ...
 
+    def backlog(self) -> int:
+        """Items queued and not yet written. Chat is not queued for a client this far behind
+        (``policy.DROPPABLE_WATERMARK``), so it cannot fill the outbox and get the client cut."""
+        ...
+
     def close(self, reason: str) -> None:
         """Flush what is queued, then close the connection."""
         ...

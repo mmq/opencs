@@ -252,7 +252,7 @@ class ChamberPhase(TextPhase):
         self._say(replies.score(self.member.callsign, record))
 
     def _chat(self, command: commands.Say) -> None:
-        self.host.services.lobby.relay_chat(self.member, command.text)
+        self._relay(command.text)
 
     def _city_list(self, command: commands.CityList) -> None:
         self._city_list_at = self.host.now()
@@ -274,7 +274,17 @@ class ChamberPhase(TextPhase):
         if recent and self.host.services.lobby.city(letter) is not None:
             self._say(replies.city_hint(letter))
         else:
-            self.host.services.lobby.relay_chat(self.member, text)
+            self._relay(text)
+
+    def _relay(self, text: str) -> None:
+        """Relay a line of chat, within the budget of the sender's address, which its other
+        connections share (``policy.CHAT_PER_ADDRESS``)."""
+        if not self.host.services.chat_limits.take(self.host.address, self.host.now()):
+            if not self._warned:
+                self._warned = True
+                self._say(replies.denied("TOO MANY LINES: SLOW DOWN"))
+            return
+        self.host.services.lobby.relay_chat(self.member, text)
 
     def _quit(self) -> None:
         """``/QUIT``: GEnie's buttons come back and the ``*`` prompt (II §4.1)."""

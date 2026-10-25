@@ -26,6 +26,8 @@ class Member:
     callsign: str
     account: str | None
     deliver: Callable[[bytes], None] = field(repr=False)
+    #: True while the member's connection is too far behind for chat (``Event.droppable``).
+    congested: Callable[[], bool] = field(repr=False, default=lambda: False)
     city: str | None = None
     team: int | None = None
 
@@ -81,6 +83,8 @@ class Lobby:
         reservations: Reservations | None = None,
     ) -> None:
         self._cities = {c.letter: c for c in cities if c.enabled}
+        #: Chat lines not sent to a member whose connection was too far behind.
+        self.chat_dropped = 0
         self._default = default_city
         self._rng = rng
         self._members: list[Member] = []
@@ -88,9 +92,15 @@ class Lobby:
 
     # --- members ---------------------------------------------------------------------------
 
-    def join(self, callsign: str, account: str | None, deliver: Callable[[bytes], None]) -> Member:
+    def join(
+        self,
+        callsign: str,
+        account: str | None,
+        deliver: Callable[[bytes], None],
+        congested: Callable[[], bool] = lambda: False,
+    ) -> Member:
         """Add a player, in the Chamber."""
-        member = Member(callsign, account, deliver)
+        member = Member(callsign, account, deliver, congested)
         self._members.append(member)
         return member
 
@@ -241,7 +251,8 @@ class Lobby:
 
     def relay_chat(self, sender: Member, text: str) -> int:
         """Send ``CALLSIGN: text`` to every other member in the Chamber, never to the sender nor
-        to players in a game (II §4.3). Returns how many received it.
+        to players in a game (II §4.3). Returns how many received it: a member whose connection is
+        too far behind (``Member.congested``) is skipped and counted in ``chat_dropped``.
 
         The text is stripped to ``0x20..0x7e`` and cut to ``CHAT_MAX_CHARS``: a ``0x01`` or
         ``0x05`` would arm command mode on the receiver (II §4.3).
@@ -250,10 +261,14 @@ class Lobby:
         if not clean.strip():
             return 0
         data = replies.chat_line(sender.callsign, clean.decode("ascii"))
-        others = [m for m in self._members if m.in_chamber and m is not sender]
-        for member in others:
+        sent = 0
+        for member in [m for m in self._members if m.in_chamber and m is not sender]:
+            if member.congested():
+                self.chat_dropped += 1
+                continue
             member.deliver(data)
-        return len(others)
+            sent += 1
+        return sent
 
 
 def _call(member: Member) -> str:

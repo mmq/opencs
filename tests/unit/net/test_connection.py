@@ -334,3 +334,15 @@ def test_overflow_at_exactly_limit_plus_one() -> None:
 
     assert asyncio.run(scenario(5)) is False
     assert asyncio.run(scenario(4)) is True
+
+
+def test_the_backlog_is_what_is_queued_and_not_yet_written() -> None:
+    async def scenario() -> list[int]:
+        connection, _, _, _ = build()
+        seen = [connection.backlog()]
+        connection.send_raw(b"x")
+        connection.send(server.PingReply())
+        seen.append(connection.backlog())
+        return seen
+
+    assert asyncio.run(scenario()) == [0, 2]

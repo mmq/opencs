@@ -59,6 +59,9 @@ class _Sink:
         if self._phase.stage is Stage.PLAYING:
             self._phase.host.io.send(msg)
 
+    def congested(self) -> bool:
+        return self._phase.host.congested()
+
 
 class InGamePhase(Phase):
     """Binary frames in, city calls and routed events out."""
@@ -307,8 +310,7 @@ class InGamePhase(Phase):
             case client.Acks() | client.Flags():
                 pass  # acknowledgments; the client's own 'S' is not relayed (I §8)
             case _:
-                bucket = self._relay_buckets.get(type(message))
-                if bucket is not None and not bucket.take(self.host.now()):
+                if not self._within_budget(message):
                     # Dropped, but not bad input: an honest client's backlog after a stall of up
                     # to SILENCE_SECONDS arrives at once and can exceed a budget. The budget bounds
                     # the relay; the frame bucket and framing failures are the bad-input signal.
@@ -319,6 +321,17 @@ class InGamePhase(Phase):
                         self._refuse_order(message)  # a tower's point comes back (I §9.4.2)
                     return
                 self._to_city(message)
+
+    def _within_budget(self, message: ClientMessage) -> bool:
+        """Spend the message's relay budget: its kind's on this connection and, for chat, the
+        source address's, which its other connections share (``policy.CHAT_PER_ADDRESS``)."""
+        now = self.host.now()
+        bucket = self._relay_buckets.get(type(message))
+        if bucket is not None and not bucket.take(now):
+            return False
+        if isinstance(message, client.Chat):
+            return self.host.services.chat_limits.take(self.host.address, now)
+        return True
 
     def _note_shot(self, shot: client.Shot) -> None:
         """Let the city log a shot that is dropped unrelayed (II §9.3)."""
