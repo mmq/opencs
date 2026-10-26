@@ -51,6 +51,8 @@ files = ["src"]
 testpaths = ["tests"]
 pythonpath = ["tests"]
 addopts = "-ra --strict-markers -m 'not judge'"
+# A passing test's tmp_path is removed at the end of the run; a failing one's is kept to inspect.
+tmp_path_retention_policy = "failed"
 markers = [
     "e2e: starts a server subprocess",
     "judge: runs tools/judge.py against a server it starts (slow, real time); deselected by default, run with -m judge",

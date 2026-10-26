@@ -257,12 +257,14 @@ def test_main_rejects_an_out_of_range_port() -> None:
     assert info.value.code == 2
 
 
-def test_main_reports_a_port_in_use(capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_reports_a_port_in_use(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     with socket.socket() as taken:
         taken.bind(("127.0.0.1", 0))
         taken.listen()
         port = taken.getsockname()[1]
-        code = main(["--config", str(SHIPPED), "--host", "127.0.0.1", "--port", str(port)])
+        # The database opens before the port: keep it out of the checkout's data/.
+        args = ["--host", "127.0.0.1", "--port", str(port), "--data-dir", str(tmp_path)]
+        code = main(["--config", str(SHIPPED), *args])
     err = capsys.readouterr().err
     assert code == 1
     assert f"cannot listen on 127.0.0.1:{port}" in err
