@@ -250,3 +250,15 @@ def test_blank_chat_after_sanitizing_is_not_relayed() -> None:
     assert lobby.relay_chat(sender, "\x01\x05") == 0
     assert lobby.relay_chat(sender, "   ") == 0
     assert got == []
+
+
+def test_chat_skips_a_member_whose_connection_is_too_far_behind() -> None:
+    lobby = make()
+    sender = add(lobby, "SENDER")
+    fast: list[bytes] = []
+    slow: list[bytes] = []
+    lobby.join("FAST", None, fast.append)
+    lobby.join("SLOW", None, slow.append, congested=lambda: True)
+    assert lobby.relay_chat(sender, "hello") == 1
+    assert fast and not slow
+    assert lobby.chat_dropped == 1

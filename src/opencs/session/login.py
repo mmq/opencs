@@ -19,11 +19,12 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 from opencs import policy
-from opencs.lobby.identity import Refused
+from opencs.lobby.identity import PasswordCheck, Pilot, Refused
 from opencs.session.phases import TextPhase
 from opencs.wire.text import HHHScanner, plain_line
 
 if TYPE_CHECKING:
+    from opencs.session.loginlimits import AddressGate
     from opencs.session.session import Session
 
 CONNECT = b"CONNECT\r\n"
@@ -41,6 +42,7 @@ class Stage(Enum):
 
     HHH = auto()
     ACCOUNT = auto()
+    CHECKING = auto()  # the password is being hashed; lines wait
     PROMPT = auto()  # account accepted, waiting to send the "*" prompt
     STAR = auto()  # at GEnie's "*" level
 
@@ -58,6 +60,7 @@ class LoginPhase(TextPhase):
         self._prompt_due: float | None = None
         self._not_telling_expected = False
         self._deadline = 0.0
+        self._held = b""  # bytes that arrived while CHECKING
 
     def enter(self) -> None:
         now = self.host.now()
@@ -85,6 +88,17 @@ class LoginPhase(TextPhase):
     def on_overlong(self) -> None:
         self.host.close("login line too long")
 
+    def holding(self) -> bool:
+        return self._stage is Stage.CHECKING
+
+    def hold(self, data: bytes) -> None:
+        """The client does not wait for the prompts (it sends ``<Not Telling!>`` and may send
+        ``M 1380;3`` at once), so what follows the account line is kept, within the preamble
+        limit, and read when the check is done."""
+        self._held += data
+        if len(self._held) > policy.LOGIN_PREAMBLE_LIMIT:
+            self.host.close("too much input during the password check")
+
     def on_line(self, line: str) -> None:
         self._lines_seen += 1
         if self._lines_seen > policy.LOGIN_MAX_LINES:
@@ -102,11 +116,31 @@ class LoginPhase(TextPhase):
             self._star_line(text)
 
     def _account(self, text: str) -> None:
-        result = self.host.services.identity.login(
-            text, self.host.services.login_limits.gate(self.host.address)
-        )
+        gate = self.host.services.login_limits.gate(self.host.address)
+        result = self.host.services.identity.begin(text, gate)
+        if isinstance(result, PasswordCheck):
+            self._stage = Stage.CHECKING
+            check = result
+
+            def done(digest: bytes) -> None:
+                self.host.call(self._checked, check, digest, gate)
+
+            self.host.services.hasher.submit(check.hash, done)
+            return
+        self._answer(result)
+
+    def _checked(self, check: PasswordCheck, digest: bytes, gate: AddressGate) -> None:
+        """The password check is done: answer, then read what arrived meanwhile."""
+        if self.host.phase is not self or self._stage is not Stage.CHECKING:
+            return
+        self._answer(self.host.services.identity.complete(check, digest, gate))
+        held, self._held = self._held, b""
+        if held:
+            self.feed(held)
+
+    def _answer(self, result: Pilot | Refused) -> None:
         if isinstance(result, Refused):
-            self.host.log.info("login refused: %s", result.reason)
+            self.host.log.info("login refused from %s: %s", self.host.address, result.reason)
             self.host.io.send_raw(plain_line(result.reason))
             self.host.close("login refused")
             return

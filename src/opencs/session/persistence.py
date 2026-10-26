@@ -58,6 +58,13 @@ class Persistence:
         stored = self.record(key)
         return None if stored is None else to_saved(stored)
 
+    def erase(self, key: str) -> bool:
+        """Remove the stored record of ``key``, and any write of it still waiting (the operator's
+        ``reset-progress``, ``delete-account``). The player must not be in a game, or its next
+        report would write the record again."""
+        waiting = self._retry.pop(key, None) is not None
+        return self._store.erase(key) or waiting
+
     def flush(self, city: City) -> None:
         """Write what ``city`` reports as changed, after the waiting retries."""
         self._write(city.take_progress())

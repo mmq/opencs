@@ -114,12 +114,41 @@ Restart=on-failure
 ProtectSystem=strict
 ReadWritePaths=/var/lib/opencs /var/log/opencs /var/lib/opencs-captures
 NoNewPrivileges=true
+# Sandboxing: the server needs its port, its data and log directories and nothing else.
+# `systemd-analyze security opencs` scores what is left.
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Resource ceilings: a bug or a flood cannot take the machine with it.
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=1024
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 The paths in `server.toml` are relative to the file, and `/etc` is read-only under `ProtectSystem=strict`.
+`ProtectHome=true` hides `/home` and `/root`, so the `.venv` must use a Python outside them (the install
+above uses `/usr/bin/python3.12`). `UMask=0077` keeps every file the server makes (the database and its
+WAL files, logs, captures) readable by the `opencs` user only; the server also makes the database file
+mode 0600 itself. `LimitNOFILE=1024` is well above `[limits] max_connections` plus the files it keeps
+open; raise both together.
 `--data-dir` puts the database in a writable place; the log file and capture directory take absolute paths
 that match `ReadWritePaths` (as in the configuration above).
 
@@ -144,9 +173,11 @@ sudo ufw allow 2399/tcp
 sudo ufw status
 ```
 
-The game listener limits connections to 64 in total and 8 per address (`MAX_CONNECTIONS`,
-`MAX_CONNECTIONS_PER_ADDRESS`); the rest are closed at once. Behind a NAT or a proxy that makes every
-player share one address, raise the per-address limit in `policy.py`. The link is plain TCP carrying the
+The game listener limits connections to 128 in total, 4 per address and 12 per /24, and allows 2 guests
+per address and 24 in all; the rest are refused at once. An address that connects more than 10 times in
+a burst (then once every 6 s) is refused too. Each
+`[limits]` key defaults to the `policy.py` value of the same name in capitals (`MAX_CONNECTIONS`,
+`MAX_CONNECTIONS_PER_ADDRESS`, ...), where the reasons for the numbers are given. The link is plain TCP carrying the
 game's own protocol with no encryption: a password travels in the clear, so tell players to use one they
 use nowhere else.
 
@@ -173,6 +204,17 @@ start; **only the city files are re-read by `reload`** (below).
 | `cities_dir` | `"cities"` | a directory | one `*.toml` per city |
 | `default_city` | `"B"` | a loaded city | what a bare `/PLAY` picks when every city is empty |
 | `guest_names` | `["JOINGENIE"]` | names; `[]` turns guests off | the guest names (II §3): no password check, the only names several players may share, never saved |
+| `registration` | `"open"` | `"open"`, `"closed"` | open: a first login with an unknown name registers it (new names: 3-12 of `A-Z 0-9 _ -`, not reserved; passwords of 6 or more). Closed: it is refused, and the operator makes accounts with `create-account`. Either way at most `[limits] max_accounts`, and accounts never played are removed after `[limits] unplayed_account_days` |
+| `[limits] max_connections` | `128` | 1-10000 | connections at once, in all |
+| `[limits] max_connections_per_address` | `4` | 3 to the subnet limit | connections at once from one IP address |
+| `[limits] max_connections_per_subnet` | `12` | the address limit to the total | connections at once from one /24 (IPv4) or /64 (IPv6) |
+| `[limits] max_unauthenticated` | `16` | 1 to the total | connections not yet logged in; past it the oldest of them is cut |
+| `[limits] max_unauthenticated_per_address` | `2` | 1 to the smaller of the two above | connections not yet logged in from one address; past it a new one is refused |
+| `[limits] max_guests` | `24` | 0 to the total | guests online at once |
+| `[limits] max_guests_per_address` | `2` | 0 to the address limit | guests online at once from one address |
+| `[limits] max_accounts` | `10000` | 1 to 1e7 | accounts in all; past it a first login is refused |
+| `[limits] min_password_length` | `6` | 1-64 | the shortest password of a new account (existing ones are not checked) |
+| `[limits] unplayed_account_days` | `30` | 1-36500 | an account with no saved progress and no login for this long is removed |
 | `[logging] level` | `"INFO"` | DEBUG, INFO, WARNING, ERROR, CRITICAL | for everything the server logs |
 | `[logging.levels] <layer>` | none | a layer below; a level | overrides `level` for `opencs.<layer>` |
 | `[logging] file` | none (stderr only) | a path | also log to this file, rotating |
@@ -292,6 +334,11 @@ port) or restart the server, which resets the limits.
 | `guppy <team> home` | the failsafe for a stranded team guppy (below); `<team>` is RED, BLUE, GREEN, BLACK or 0-3; applies in every city that has that team's guppy |
 | `shutdown [seconds]` | with no argument, stops now; with seconds (at most 3600), announces and stops then. `shutdown cancel` withdraws a pending one |
 | `reload` | re-read the city files (below) |
+| `accounts` | how many accounts there are, the cap (`MAX_ACCOUNTS`) and whether registration is open |
+| `create-account <name>` | make an account with a new random password, shown once in the reply and never logged. The name follows the rules for new accounts. The way to give players accounts when `registration = "closed"` |
+| `reset-password <name>` | give an account a new random password, shown once and never logged; a player logged in stays logged in |
+| `reset-progress <name>` | erase an account's saved progress (bays, points, score). Refused while it is online or has a game held for `/RESUME` |
+| `delete-account <name>` | remove an account and its progress, freeing the name. Refused while it is online or held |
 | `help`, `quit` | |
 
 ### The stranded guppy
@@ -343,16 +390,17 @@ error changes nothing and the first one is reported. Then, per city:
 
 A running game is never changed under its players (II §17). A `/PLAY` begun against the old
 configuration just before the swap is told "CITY x FILLED UP: TRY AGAIN". A change to `server.toml` (the
-port, logging, capture, admin, `default_city`, `guest_names`) needs a restart; a reload says that it saw one. A
+port, logging, capture, admin, `default_city`, `guest_names`, `registration`, `[limits]`) needs a restart; a reload says that it saw one. A
 config whose `default_city` is missing or has `enabled = false` is refused at validation, at start-up and
 on `reload` alike (nothing changes), so the lobby always has a city to offer.
 
 
 ## Backups
 
-State is one SQLite file, `<data_dir>/opencs.db` (accounts with salted PBKDF2 hashes, and progress). It
-is written after every progress change, so back it up while the server runs with SQLite's own tool, never
-by copying the file:
+State is one SQLite file, `<data_dir>/opencs.db` (accounts with salted PBKDF2 hashes, and progress), in
+write-ahead-log mode, so `opencs.db-wal` and `opencs.db-shm` sit beside it while the server runs. It is
+written after every progress change, so back it up while the server runs with SQLite's own tool, never by
+copying the files:
 
 ```bash
 sudo sqlite3 /var/lib/opencs/opencs.db ".backup '/var/backups/opencs-$(date +%F).db'"
@@ -400,6 +448,30 @@ Restart=on-failure
 ProtectSystem=strict
 ReadWritePaths=/var/lib/opencs-%i /var/log/opencs
 NoNewPrivileges=true
+# Sandboxing: the server needs its port, its data and log directories and nothing else.
+# `systemd-analyze security opencs@one` scores what is left.
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+# Resource ceilings: a bug or a flood cannot take the machine with it.
+MemoryMax=512M
+TasksMax=64
+LimitNOFILE=1024
 
 [Install]
 WantedBy=multi-user.target
@@ -417,3 +489,42 @@ sudo systemctl enable --now opencs@one opencs@two
 
 Players of each server use the port of theirs in the phonebook. The two do not share accounts, cities or
 held games, and a pilot can be online on both at once.
+
+## Checklist: a public server
+
+Anyone can connect any program to the game port, so before opening it to the internet:
+
+1. **Firewall.** Open only the game port (`sudo ufw allow 2399/tcp`), never the admin port. As an outer
+   layer against connection floods, let the kernel refuse an address that opens connections too fast,
+   before the server sees it: `sudo ufw limit 2399/tcp` (6 new connections in 30 s per address), or
+   with nftables, `tcp dport 2399 ct state new meter opencs { ip saddr limit rate over 20/minute } drop`
+   and `tcp dport 2399 meter opencs-count { ip saddr ct count over 8 } reject`. The server's own limits
+   (`[limits]`, and 10 connections in a burst then one every 6 s per address) still apply behind it.
+2. **Reachable from outside.** Forward TCP 2399 on the router to the host's LAN address. If the host has
+   no public address (carrier-grade NAT), forward through a VPS or a tunnel (for example `ssh -R`). Give
+   players the public IP or a DNS name, and check it from a machine on another network:
+   `nc -vz <address> 2399` must report success. A home connection's address can change; a dynamic DNS
+   name helps.
+3. **The unit.** Use the sandboxed unit above, so a bug cannot reach past `/var/lib/opencs` and the
+   log directory, nor take more than its memory and task limits.
+4. **Guests and registration.** Guests need no password and are capped at 2 per address and 24 in all.
+   Set `guest_names = []` to turn them off. With `registration = "closed"`, only the accounts you make
+   with `create-account` exist. Open registration is limited per address and server-wide, capped at
+   `max_accounts`, and accounts never played are removed after `unplayed_account_days`.
+5. **Logs to watch.** Every refused connection is logged as `refusing ADDRESS: REASON` (at most once a
+   minute per address, with a count of those held back), and every refused login as
+   `login refused from ADDRESS: REASON`. A fail2ban filter for the first:
+
+   ```ini
+   # /etc/fail2ban/filter.d/opencs.conf
+   [Definition]
+   failregex = refusing <HOST>: connecting too often
+   ```
+
+   with a jail on `journalctl -u opencs` (`backend = systemd`, `journalmatch = _SYSTEMD_UNIT=opencs.service`).
+6. **Passwords.** The game sends them in plain text and nothing can change that, so tell players to use
+   one they use nowhere else. The server stores only salted PBKDF2 hashes, refuses guessing per address,
+   per account and server-wide, and hashes on its own threads, so a login flood cannot stall the games.
+7. **Backups** (above), and an upgrade path you have tried (`tools/smoke.sh` after each one).
+
+What the server cannot defend against alone is in `docs/robustness.md`, "Threat model".

@@ -8,17 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import itertools
 import logging
 import socket
 from collections import Counter
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from opencs import policy
 from opencs.clock import Clock
 from opencs.connlog import ConnectionContext
 from opencs.net.capture import CaptureFactory
 from opencs.net.connection import Connection, SessionFactory
+from opencs.ratelimit import KeyedBuckets
 
 log = logging.getLogger("opencs.net")
 
@@ -41,16 +44,87 @@ def enable_keepalive(sock: socket.socket | None) -> None:
                 sock.setsockopt(socket.IPPROTO_TCP, option, value)
 
 
+def normalize_address(address: str) -> str:
+    """``address`` as the limits key it: an IPv4-mapped IPv6 address (``::ffff:1.2.3.4``, from a
+    dual-stack socket) as the IPv4 address it is, so the same host is never two sources."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return str(ip.ipv4_mapped)
+    return str(ip)
+
+
+def subnet_of(address: str) -> str:
+    """The network ``address`` is limited with (``policy.SUBNET_PREFIX_*``): a host with a block of
+    addresses must not get a block of allowances."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    prefix = policy.SUBNET_PREFIX_V4 if ip.version == 4 else policy.SUBNET_PREFIX_V6
+    return str(ipaddress.ip_network(f"{ip}/{prefix}", strict=False))
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionLimits:
+    """What the listener admits (``policy.MAX_CONNECTIONS*``, ``policy.MAX_UNAUTHENTICATED*``)."""
+
+    total: int = policy.MAX_CONNECTIONS
+    per_address: int = policy.MAX_CONNECTIONS_PER_ADDRESS
+    per_subnet: int = policy.MAX_CONNECTIONS_PER_SUBNET
+    unauthenticated: int = policy.MAX_UNAUTHENTICATED
+    unauthenticated_per_address: int = policy.MAX_UNAUTHENTICATED_PER_ADDRESS
+    #: New connections from one address: a token bucket ``(burst, per second)``.
+    connect_rate: tuple[int, float] = policy.CONNECT_RATE_PER_ADDRESS
+
+
+class RefusalLog:
+    """Logs refused connections without letting a flood of them flood the log (DESIGN §6).
+
+    The first refusal of an address is logged at once; later ones within ``REFUSAL_LOG_INTERVAL``
+    are counted and summed up in one line with the next refusal after it. The line's shape is
+    stable, ``refusing ADDRESS: REASON`` with `` (and N more since the last line)`` when some were
+    held back, so a firewall tool can match it. Bounded by ``MAX_TRACKED_SOURCES``.
+    """
+
+    def __init__(self, clock: Clock) -> None:
+        self._clock = clock
+        self._last: dict[str, tuple[float, int]] = {}  # address -> (logged at, held back since)
+
+    def refused(self, address: str, reason: str) -> None:
+        now = self._clock.now()
+        logged_at, held = self._last.get(address, (None, 0))
+        if logged_at is not None and now - logged_at < policy.REFUSAL_LOG_INTERVAL:
+            self._last[address] = (logged_at, held + 1)
+            return
+        if len(self._last) >= policy.MAX_TRACKED_SOURCES:
+            self._last = {
+                a: v for a, v in self._last.items() if now - v[0] < policy.REFUSAL_LOG_INTERVAL
+            }
+            while len(self._last) >= policy.MAX_TRACKED_SOURCES:
+                del self._last[next(iter(self._last))]
+        more = f" (and {held} more since the last line)" if held else ""
+        log.warning("refusing %s: %s%s", address, reason, more)
+        self._last[address] = (now, 0)
+
+
 class Listener:
-    """Accept, count and track connections."""
+    """Accept, count and track connections.
+
+    A new connection is refused at once past the total, per-address or per-subnet limit, or when its
+    address already has ``limits.unauthenticated_per_address`` connections that have not logged in.
+    Past ``limits.unauthenticated`` such connections in all, the oldest of them is cut to make room,
+    so connections that never log in can hold the logon only until honest ones arrive.
+    """
 
     def __init__(
         self,
         factory: SessionFactory,
         clock: Clock,
         *,
-        max_connections: int = policy.MAX_CONNECTIONS,
-        max_per_address: int = policy.MAX_CONNECTIONS_PER_ADDRESS,
+        limits: ConnectionLimits = ConnectionLimits(),  # noqa: B008  (frozen, so shared safely)
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         capture: CaptureFactory | None = None,
     ) -> None:
@@ -58,11 +132,13 @@ class Listener:
         self._factory = factory
         self._clock = clock
         self._sleep = sleep
-        self._max = max_connections
-        self._max_per_address = max_per_address
+        self._limits = limits
+        self._connect_rate = KeyedBuckets(*limits.connect_rate)
+        self._refusals = RefusalLog(clock)
         self._ids = itertools.count(1)
-        self._connections: dict[int, Connection] = {}
+        self._connections: dict[int, Connection] = {}  # oldest first
         self._per_address: Counter[str] = Counter()
+        self._per_subnet: Counter[str] = Counter()
         self._server: asyncio.Server | None = None
         self._stopping = False
 
@@ -112,18 +188,16 @@ class Listener:
 
     async def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         peer = writer.get_extra_info("peername")
-        address = str(peer[0]) if peer else "?"
+        address = normalize_address(str(peer[0])) if peer else "?"
+        subnet = subnet_of(address)
         if self._stopping:
             await self._refuse(writer)
             return
-        if len(self._connections) >= self._max:
-            log.warning("refusing %s: %d connections", address, len(self._connections))
+        if (reason := self._over_limit(address, subnet)) is not None:
+            self._refusals.refused(address, reason)
             await self._refuse(writer)
             return
-        if self._per_address[address] >= self._max_per_address:
-            log.warning("refusing %s: %d from that address", address, self._per_address[address])
-            await self._refuse(writer)
-            return
+        self._make_room_to_log_in()
         enable_keepalive(writer.get_extra_info("socket"))
         conn_id = next(self._ids)
         context = ConnectionContext(conn_id, address)
@@ -140,7 +214,8 @@ class Listener:
         )
         self._connections[conn_id] = connection
         self._per_address[address] += 1
-        log.info("[conn=%d -] accepted from %s", conn_id, address)
+        self._per_subnet[subnet] += 1
+        log.debug("[conn=%d -] accepted from %s", conn_id, address)
         try:
             await connection.run()
         finally:
@@ -148,6 +223,41 @@ class Listener:
             self._per_address[address] -= 1
             if not self._per_address[address]:
                 del self._per_address[address]
+            self._per_subnet[subnet] -= 1
+            if not self._per_subnet[subnet]:
+                del self._per_subnet[subnet]
+
+    def _over_limit(self, address: str, subnet: str) -> str | None:
+        """Why a new connection from ``address`` is refused, None if it is not. Every attempt
+        spends from the address's connect rate, refused or not: a reconnect loop stays refused."""
+        if not self._connect_rate.take(address, self._clock.now()):
+            return "connecting too often"
+        if len(self._connections) >= self._limits.total:
+            return f"{len(self._connections)} connections"
+        if self._per_address[address] >= self._limits.per_address:
+            return f"{self._per_address[address]} from that address"
+        if self._per_subnet[subnet] >= self._limits.per_subnet:
+            return f"{self._per_subnet[subnet]} from {subnet}"
+        logging_in = sum(1 for c in self._logging_in() if c.context.address == address)
+        if logging_in >= self._limits.unauthenticated_per_address:
+            return f"{logging_in} from that address not logged in"
+        return None
+
+    def _logging_in(self) -> list[Connection]:
+        """The connections that have not logged in, oldest first."""
+        return [c for c in self._connections.values() if not c.context.authenticated]
+
+    def _make_room_to_log_in(self) -> None:
+        """At ``limits.unauthenticated`` connections not logged in, cut the oldest of them."""
+        waiting = self._logging_in()
+        if len(waiting) >= self._limits.unauthenticated:
+            oldest = waiting[0]
+            log.warning(
+                "%d connections not logged in; cutting the oldest, from %s",
+                len(waiting),
+                oldest.context.address,
+            )
+            oldest.abort("making room: too many connections not logged in")
 
     @staticmethod
     async def _refuse(writer: asyncio.StreamWriter) -> None:

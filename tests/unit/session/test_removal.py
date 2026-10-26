@@ -126,7 +126,7 @@ def test_a_kick_of_a_player_already_leaving_does_nothing_more() -> None:
 def test_the_registry_lists_live_sessions_by_callsign() -> None:
     world = make_world()
     h = alice(world)
-    other = enter_lobby(world, "BOB,PW")
+    other = enter_lobby(world, "BOB,SECRET")
     registry = world.services.sessions
     assert registry.all() == [h.session, other.session]
     assert registry.by_callsign("ALICE") == [h.session]

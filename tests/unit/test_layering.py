@@ -24,10 +24,11 @@ ALLOWED: dict[str, set[str]] = {
         "config",
         "clock",
         "connlog",
+        "ratelimit",
         "world",
         "routing",
     },
-    "net": {"wire", "messages", "policy", "clock", "connlog"},
+    "net": {"wire", "messages", "policy", "clock", "connlog", "ratelimit"},
     "world": {"wire", "messages", "policy", "config"},
     "routing": {"messages", "world"},
 }

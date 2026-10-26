@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from fixtures.lobbies import city
@@ -19,7 +19,7 @@ from opencs.routing import Router
 from opencs.session.held import HeldGames
 from opencs.session.loginlimits import LoginLimits
 from opencs.session.persistence import Persistence
-from opencs.session.phases import Services
+from opencs.session.phases import Hasher, InlineHasher, Services
 from opencs.session.session import Session
 from opencs.store.base import ProgressStore
 from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
@@ -29,6 +29,22 @@ from opencs.world.ids import IdRange
 FAST_ITERATIONS = 1000
 
 
+class DeferredHasher:
+    """Keeps each hash until the test runs it, as a busy hashing thread would."""
+
+    def __init__(self) -> None:
+        self.waiting: list[tuple[Callable[[], bytes], Callable[[bytes], None]]] = []
+
+    def submit(self, work: Callable[[], bytes], done: Callable[[bytes], None]) -> None:
+        self.waiting.append((work, done))
+
+    def run(self) -> None:
+        """Finish every waiting hash, oldest first."""
+        waiting, self.waiting = self.waiting, []
+        for work, done in waiting:
+            done(work())
+
+
 @dataclass
 class FakeIO:
     """Records what a session sends; ``close`` is recorded, not acted on."""
@@ -36,6 +52,8 @@ class FakeIO:
     raw: list[bytes] = field(default_factory=list)
     messages: list[ServerMessage] = field(default_factory=list)
     closed_with: list[str] = field(default_factory=list)
+    #: What ``backlog`` reports: set it to play a client that has stopped reading.
+    queued: int = 0
 
     def send_raw(self, data: bytes) -> None:
         self.raw.append(data)
@@ -45,6 +63,9 @@ class FakeIO:
 
     def send_first(self, msg: ServerMessage) -> None:
         self.messages.insert(0, msg)
+
+    def backlog(self) -> int:
+        return self.queued
 
     def close(self, reason: str) -> None:
         self.closed_with.append(reason)
@@ -103,6 +124,7 @@ def make_world(
     start: float = 100.0,
     progress: ProgressStore | None = None,
     id_ranges: Mapping[IdRange, tuple[int, int]] | None = None,
+    hasher: Hasher | None = None,
 ) -> World:
     clock = ManualClock(start)
     identity = Identity(MemoryAccountStore(), iterations=FAST_ITERATIONS)
@@ -124,13 +146,18 @@ def make_world(
         Persistence(progress, clock),
         held,
         LoginLimits(clock),
+        hasher=hasher or InlineHasher(),
     )
     return World(clock, identity, lobby, services, progress)
 
 
-def connect(world: World, conn_id: int | None = None, address: str = "?") -> Harness:
+def connect(world: World, conn_id: int | None = None, address: str | None = None) -> Harness:
+    """A new session. Unless ``address`` is given, each connection comes from an address of its
+    own, as players do, so the per-address limits only bite where a test asks for them."""
     io = FakeIO()
     n = conn_id if conn_id is not None else len(world.sessions) + 1
+    if address is None:
+        address = f"10.{len(world.sessions) // 256 % 256}.{len(world.sessions) % 256}.1"
     log = ConnectionLog(logging.getLogger("test.session"), ConnectionContext(n, address))
     harness = Harness(Session(io, world.services, log), io, world)
     world.sessions.append(harness)
@@ -141,13 +168,13 @@ LOGIN = "HHH\rJOINGENIE\r<Not Telling!>\rM 1380;3\r"
 
 
 def login(
-    world: World, account: str = "JOINGENIE", *, enter: bool = True, address: str = "?"
+    world: World, account: str = "JOINGENIE", *, enter: bool = True, address: str | None = None
 ) -> Harness:
     """A session taken through the logon to the Chamber's version check (or to the ``*``). A bare
     name that is not a guest name logs on as that account with password ``PW`` (II §3: only guest
     names may go without one)."""
     if "," not in account and account.upper() not in policy.DEFAULT_GUEST_NAMES:
-        account += ",PW"
+        account += ",SECRET"
     h = connect(world, address=address)
     h.feed(f"AT\r\nHHH\r\r{account}\r<Not Telling!>\r")
     if enter:
@@ -155,7 +182,7 @@ def login(
     return h
 
 
-def enter_lobby(world: World, account: str = "JOINGENIE", address: str = "?") -> Harness:
+def enter_lobby(world: World, account: str = "JOINGENIE", address: str | None = None) -> Harness:
     """A session that is in the Chamber, version check answered, output cleared."""
     h = login(world, account, address=address)
     h.feed("CSTTBT 105 150\r")
@@ -168,7 +195,7 @@ def play(
     letter: str = "A",
     team: int = 0,
     account: str = "JOINGENIE",
-    address: str = "?",
+    address: str | None = None,
 ) -> Harness:
     """A session in the Chamber taken through ``/PLAY`` and ``/GO 0`` into the in-game phase."""
     h = enter_lobby(world, account, address)

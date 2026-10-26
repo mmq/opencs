@@ -136,7 +136,7 @@ class CitySim:
         n = self.joined + self.refused
         account = self.rng.random() < 0.4
         name = f"ACC{self.rng.randrange(8)}" if account else f"G{self.rng.randrange(40)}"
-        line = f"{name},pw" if account else policy.GUEST_ACCOUNT_NAME  # guests share JOINGENIE
+        line = f"{name},secret" if account else policy.GUEST_ACCOUNT_NAME  # guests share JOINGENIE
         if any(c.name == name and c.stage != "gone" for c in self.clients):
             self.refused += 1
             return

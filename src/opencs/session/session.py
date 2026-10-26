@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from opencs import policy
 from opencs.connlog import ConnectionLog
 from opencs.lobby import replies
 from opencs.lobby.identity import Pilot
 from opencs.lobby.lobby import Member
+from opencs.session.budgets import Budgets
 from opencs.session.chamber import ChamberPhase
 from opencs.session.ingame import InGamePhase, Stage
 from opencs.session.io import SessionIO
@@ -38,6 +40,8 @@ class Session:
         self.notice: str | None = None
         #: Why the server closed the connection, None while it has not (a drop by the peer).
         self.close_reason: str | None = None
+        #: The connection's rate limits, which outlive every phase (DESIGN §5).
+        self.budgets = Budgets(services.clock.now())
         self._released = False
         services.sessions.add(self)
         self.phase: Phase = LoginPhase(self)
@@ -65,6 +69,8 @@ class Session:
             self.leave_lobby()
             if self.pilot is not None:
                 self.services.identity.release(self.pilot)
+                if self.pilot.is_guest:
+                    self.services.login_limits.guest_out(self.address)
                 self.log.info("logged out")
 
     # --- for the phases ----------------------------------------------------------------------
@@ -114,8 +120,14 @@ class Session:
     def set_pilot(self, pilot: Pilot) -> None:
         self.pilot = pilot
         self.log.callsign = pilot.callsign
+        self.log.context.authenticated = True
+        if pilot.is_guest:
+            self.services.login_limits.guest_in(self.address)
         self.log.info(
-            "logged in as %s (%s)", pilot.callsign, "guest" if pilot.is_guest else "account"
+            "logged in as %s (%s) from %s",
+            pilot.callsign,
+            "guest" if pilot.is_guest else "account",
+            self.address,
         )
 
     def join_lobby(self) -> Member:
@@ -123,9 +135,13 @@ class Session:
         assert self.pilot is not None
         self.leave_lobby()
         self.member = self.services.lobby.join(
-            self.pilot.callsign, self.pilot.account, self.io.send_raw
+            self.pilot.callsign, self.pilot.account, self.io.send_raw, self.congested
         )
         return self.member
+
+    def congested(self) -> bool:
+        """True while the connection is too far behind to be sent chat (DESIGN §5)."""
+        return self.io.backlog() > policy.DROPPABLE_WATERMARK
 
     def leave_lobby(self) -> None:
         if self.member is not None:
@@ -148,6 +164,12 @@ class Session:
 
     def to_ingame(self) -> None:
         self._switch(InGamePhase(self))
+
+    def call(self, fn: Callable[..., None], *args: object) -> None:
+        """Run ``fn`` for work that finished outside ``feed`` and ``tick`` (a password check), as
+        the connection runs those: nothing escapes, and nothing runs once the session has closed."""
+        if self._active:
+            self._guard(fn, *args)
 
     def hand_over(self, data: bytes) -> None:
         """Give bytes the previous phase did not consume to the current one."""

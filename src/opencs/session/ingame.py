@@ -29,9 +29,7 @@ from opencs.messages import (
     server_payload,
 )
 from opencs.messages.limits import CHAT_STYLE_OPEN, SYSTEM_SENDER
-from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import Phase
-from opencs.session.ratelimit import TokenBucket
 from opencs.wire.codec import BYTE_MIN
 from opencs.wire.frame import Frame, FrameReader, build_frame
 from opencs.wire.text import QuitScanner
@@ -61,6 +59,9 @@ class _Sink:
         if self._phase.stage is Stage.PLAYING:
             self._phase.host.io.send(msg)
 
+    def congested(self) -> bool:
+        return self._phase.host.congested()
+
 
 class InGamePhase(Phase):
     """Binary frames in, city calls and routed events out."""
@@ -71,24 +72,12 @@ class InGamePhase(Phase):
         super().__init__(host)
         self.stage = Stage.PLAYING
         self._reader = FrameReader()
-        self._bad = WindowedCounter(policy.MAX_BAD_INPUT, policy.BAD_INPUT_WINDOW)
+        # The rate limits are the session's, not this game's (session/budgets.py).
+        self._bad = host.budgets.bad_input
         self._bad_seen = 0
-        # Budgets for the messages the city relays to everyone (policy.RELAY_LIMIT_*).
+        self._relay_buckets = host.budgets.relay
+        self._frame_bucket = host.budgets.frames
         now = host.now()
-        self._relay_buckets: dict[type[ClientMessage], TokenBucket] = {
-            client.PodState: TokenBucket(*policy.RELAY_LIMIT_POD_STATE, now),
-            client.Shot: TokenBucket(*policy.RELAY_LIMIT_SHOT, now),
-            client.HitReport: TokenBucket(*policy.RELAY_LIMIT_HIT, now),
-            client.Chat: TokenBucket(*policy.RELAY_LIMIT_CHAT, now),
-            client.Grenade: TokenBucket(*policy.RELAY_LIMIT_GRENADE, now),
-            client.TowerOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
-            client.ModuleOrder: TokenBucket(*policy.RELAY_LIMIT_ORDER, now),
-            client.EffectRequest: TokenBucket(*policy.RELAY_LIMIT_EFFECT, now),
-            client.AirSupport: TokenBucket(*policy.RELAY_LIMIT_EFFECT, now),
-            client.PickupRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
-            client.EjectRequest: TokenBucket(*policy.RELAY_LIMIT_MODULE_OPS, now),
-        }
-        self._frame_bucket = TokenBucket(*policy.FRAME_LIMIT, now)
         #: Messages dropped for exceeding their relay budget: a tally, not bad input (see
         #: ``handle``).
         self.relay_drops = 0
@@ -321,8 +310,7 @@ class InGamePhase(Phase):
             case client.Acks() | client.Flags():
                 pass  # acknowledgments; the client's own 'S' is not relayed (I §8)
             case _:
-                bucket = self._relay_buckets.get(type(message))
-                if bucket is not None and not bucket.take(self.host.now()):
+                if not self._within_budget(message):
                     # Dropped, but not bad input: an honest client's backlog after a stall of up
                     # to SILENCE_SECONDS arrives at once and can exceed a budget. The budget bounds
                     # the relay; the frame bucket and framing failures are the bad-input signal.
@@ -333,6 +321,17 @@ class InGamePhase(Phase):
                         self._refuse_order(message)  # a tower's point comes back (I §9.4.2)
                     return
                 self._to_city(message)
+
+    def _within_budget(self, message: ClientMessage) -> bool:
+        """Spend the message's relay budget: its kind's on this connection and, for chat, the
+        source address's, which its other connections share (``policy.CHAT_PER_ADDRESS``)."""
+        now = self.host.now()
+        bucket = self._relay_buckets.get(type(message))
+        if bucket is not None and not bucket.take(now):
+            return False
+        if isinstance(message, client.Chat):
+            return self.host.services.chat_limits.take(self.host.address, now)
+        return True
 
     def _note_shot(self, shot: client.Shot) -> None:
         """Let the city log a shot that is dropped unrelayed (II §9.3)."""

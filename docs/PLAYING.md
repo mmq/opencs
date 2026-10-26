@@ -78,11 +78,16 @@ SETTINGS as above.
 | account name | what you get |
 |---|---|
 | `JOINGENIE` (the stock install) | **A guest.** No password is sent. You are given a callsign: the name itself (`JOINGENIE`), with a number after it if that callsign is already online (`JOINGENIE2`, `JOINGENIE3`...). Two unmodified clients can therefore play together. Nothing a guest earns is kept: every game starts as a new player's would, and guests cannot `/RESUME`. A server may name other guest names, or turn guests off. |
-| any other name, with a password | **A real account.** The first login with a name registers its password (there is no sign-up step); later logins must give the same one. The callsign is the name, upper-cased and cut to 12 characters, with its last characters replaced by a number if that callsign is already online (`ALEXANDERTHE1` and `ALEXANDERTHE2` become `ALEXANDERTHE` and `ALEXANDERTH2`, whichever logs in first gets the plain one). Progress is saved to the account, and `/RESUME` works. Only one login per account at a time. |
+| any other name, with a password | **A real account.** The first login with a name registers its password (there is no sign-up step); later logins must give the same one. Your callsign is your account name. Progress is saved to the account, and `/RESUME` works. Only one login per account at a time. |
 
-Names may be up to 32 characters and passwords up to 64. A name other than a guest name with no password,
-a wrong password, a name that is already online, or too many attempts in a short time is refused with a
-line saying so. Choose a password you use nowhere else: the server stores only a salted hash, but the
+A new name must be 3 to 12 characters of letters, digits, `_` and `-` (no spaces), and not one the
+server keeps for itself (such as `ADMIN`, `SERVER`, or a guest's callsign like `JOINGENIE2`); a new
+password must be 6 to 64 characters. A name
+other than a guest name with no password, a wrong password, a name that is already online, or too many
+attempts in a short time is refused with a line saying so. After five wrong passwords for one account,
+from anywhere, that account waits a few minutes before it can be tried again. A server may also turn off
+registration, in which case the operator gives you an account, and it removes accounts that were made
+and never played after 30 days. Choose a password you use nowhere else: the server stores only a salted hash, but the
 link is plain text.
 
 After the script finishes the game shows the online-service menu. Press GO (or F1); the Chamber opens.

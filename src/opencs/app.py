@@ -10,7 +10,9 @@ import random
 import signal
 import sqlite3
 import sys
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +29,7 @@ from opencs.lobby.lobby import Lobby
 from opencs.logsetup import configure_logging
 from opencs.net.capture import CaptureFactory
 from opencs.net.connection import ConnectionIO, SessionFactory
-from opencs.net.listener import Listener
+from opencs.net.listener import ConnectionLimits, Listener
 from opencs.routing import Router
 from opencs.session.held import HeldGames
 from opencs.session.loginlimits import LoginLimits
@@ -49,6 +51,31 @@ class StartupError(Exception):
 DEFAULT_CONFIG_PATH = Path("config") / "server.toml"
 
 
+class ThreadHasher:
+    """Password hashes on ``HASH_WORKERS`` threads (``session.phases.Hasher``), so a login never
+    stalls the event loop. ``hashlib``'s PBKDF2 releases the GIL while it runs."""
+
+    def __init__(self, workers: int = policy.HASH_WORKERS) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="opencs-hash")
+
+    def submit(self, work: Callable[[], bytes], done: Callable[[bytes], None]) -> None:
+        future = asyncio.get_running_loop().run_in_executor(self._executor, work)
+
+        def finished(f: asyncio.Future[bytes]) -> None:  # on the loop
+            if f.cancelled():
+                return
+            if (exc := f.exception()) is not None:
+                log.error("a password hash failed", exc_info=exc)
+                return  # the login times out
+            done(f.result())
+
+        future.add_done_callback(finished)
+
+    def close(self) -> None:
+        """Drop what is waiting; a hash already running finishes on its own."""
+        self._executor.shutdown(wait=False, cancel_futures=True)
+
+
 def build_services(
     config: AppConfig,
     *,
@@ -60,7 +87,14 @@ def build_services(
     router. Without ``stores`` accounts and progress are kept in memory (tests)."""
     clock = clock or MonotonicClock()
     stores = stores or memory_stores()
-    identity = Identity(stores.accounts, guest_names=config.server.guest_names)
+    limits = config.server.limits
+    identity = Identity(
+        stores.accounts,
+        guest_names=config.server.guest_names,
+        registration=config.server.registration,
+        min_password_length=limits.min_password_length,
+        max_accounts=limits.max_accounts,
+    )
     rng = rng or random.Random()
     held = HeldGames(clock)
     lobby = Lobby(config.cities, config.server.default_city, rng, held)
@@ -73,7 +107,12 @@ def build_services(
         Router(),
         Persistence(stores.progress, clock),
         held,
-        LoginLimits(clock),
+        LoginLimits(
+            clock,
+            max_guests=limits.max_guests,
+            max_guests_per_address=limits.max_guests_per_address,
+        ),
+        hasher=ThreadHasher(),
     )
 
 
@@ -201,6 +240,29 @@ def _on_sighup(cities: CityManager, config_file: ConfigFile | None) -> Callable[
     return remove
 
 
+def prune_accounts(
+    services: Services, now: float, days: int = policy.UNPLAYED_ACCOUNT_DAYS
+) -> list[str]:
+    """Delete the accounts left unplayed for ``days`` (wall-clock ``now``)."""
+    before = now - days * 24 * 3600
+    gone = services.identity.prune_unplayed(
+        before, lambda key: services.persistence.record(key) is not None
+    )
+    if gone:
+        log.info("removed %d accounts never played in %d days", len(gone), days)
+    return gone
+
+
+async def _prune_accounts_daily(services: Services, days: int) -> None:
+    """``prune_accounts`` now and every ``ACCOUNT_PRUNE_INTERVAL``; a failure waits for the next."""
+    while True:
+        try:
+            prune_accounts(services, time.time(), days)
+        except Exception:
+            log.exception("could not prune unplayed accounts")
+        await asyncio.sleep(policy.ACCOUNT_PRUNE_INTERVAL)
+
+
 async def _listen(
     config: AppConfig,
     services: Services,
@@ -218,9 +280,17 @@ async def _listen(
             config.server.admin, os.environ if seams.environ is None else seams.environ
         )
     )  # before anything starts: a channel without a token must stop the server, not run open
+    limits = config.server.limits
     listener = Listener(
         build_session_factory(services),
         clock,
+        limits=ConnectionLimits(
+            total=limits.max_connections,
+            per_address=limits.max_connections_per_address,
+            per_subnet=limits.max_connections_per_subnet,
+            unauthenticated=limits.max_unauthenticated,
+            unauthenticated_per_address=limits.max_unauthenticated_per_address,
+        ),
         sleep=seams.tick_sleep,
         capture=_capture_factory(config),
     )
@@ -235,6 +305,9 @@ async def _listen(
     control = Control(services, cities, stop, config_file, delay=seams.delay)
     admin: AdminServer | None = None
     reload_signal = _on_sighup(cities, config_file)
+    pruning = asyncio.create_task(
+        _prune_accounts_daily(services, config.server.limits.unplayed_account_days)
+    )
     try:
         if token is not None and config.server.admin.port is not None:
             admin = AdminServer(control, token, clock)
@@ -254,11 +327,14 @@ async def _listen(
             ready(bound[0][1])
         await stop.wait()
     finally:
+        pruning.cancel()
         reload_signal()
         control.close()
         if admin is not None:
             await admin.stop()
         await _shutdown(services, listener, cities, seams.shutdown_deadline)
+        if isinstance(services.hasher, ThreadHasher):
+            services.hasher.close()
 
 
 async def _run(config: AppConfig, config_file: ConfigFile) -> None:

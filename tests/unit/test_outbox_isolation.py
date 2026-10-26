@@ -64,9 +64,10 @@ def test_a_client_that_never_reads_is_cut_and_the_others_still_get_everything() 
         stop, task, port = await start(
             config, clock=clock, services=services, tick_sleep=gate.sleep
         )
-        stalled, _ = await enter(port, "RED")
-        sender, _ = await enter(port, "RED")
-        watcher, _ = await enter(port, "RED")
+        # Accounts, not guests: all three come from 127.0.0.1 (policy.MAX_GUESTS_PER_ADDRESS).
+        stalled, _ = await enter(port, "RED", "STALLED,secret")
+        sender, _ = await enter(port, "RED", "SENDER,secret")
+        watcher, _ = await enter(port, "RED", "WATCHER,secret")
         for c in (stalled, sender, watcher):
             await c.send(frame(report(4, x_off=75, z_off=75)))
         await sender.expect_frame("A")  # everyone has been introduced and is reporting

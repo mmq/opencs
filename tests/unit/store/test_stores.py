@@ -14,7 +14,7 @@ from opencs import policy
 from opencs.lobby.identity import Identity, Pilot
 from opencs.store.base import Account, ProgressRecord, Stores
 from opencs.store.memory import MemoryAccountStore, MemoryProgressStore
-from opencs.store.sqlite import MIGRATIONS, SchemaError, SqliteStore
+from opencs.store.sqlite import MIGRATIONS, SchemaError, SqliteStore, open_stores
 
 STAMP = 1_700_000_000.5
 
@@ -177,10 +177,9 @@ def test_a_locked_database_fails_the_save_quickly_and_recovers(tmp_path: Path) -
     path = tmp_path / "locked.db"
     store = SqliteStore(path)
     record = ProgressRecord((1,) * 9, 0, 5, 6, 7)
-    # A second connection holding a read transaction: the writer's COMMIT cannot get the lock.
+    # A second connection holding the write lock (in WAL mode readers never block a writer).
     other = sqlite3.connect(path, isolation_level=None)
-    other.execute("BEGIN")
-    other.execute("SELECT * FROM progress").fetchall()
+    other.execute("BEGIN IMMEDIATE")
     began = time.monotonic()
     with pytest.raises(sqlite3.OperationalError):
         store.save("A", record)
@@ -192,3 +191,54 @@ def test_a_locked_database_fails_the_save_quickly_and_recovers(tmp_path: Path) -
     store.save("A", record)  # the connection recovered
     assert store.load("A") is not None
     store.close()
+
+
+# --- account upkeep (counts, logins, staleness, passwords, deletion) ----------------------------
+
+
+def test_accounts_are_counted_touched_found_stale_and_deleted(tmp_path: Path) -> None:
+    now = [1000.0]
+    for accounts in (
+        MemoryAccountStore(lambda: now[0]),
+        SqliteStore(tmp_path / "upkeep.db", now=lambda: now[0]),
+    ):
+        assert accounts.create(Account("OLD", b"s", b"h", 1))
+        assert accounts.create(Account("BACK", b"s", b"h", 1))
+        now[0] = 2000.0
+        assert accounts.create(Account("NEW", b"s", b"h", 1))
+        accounts.touch_login("BACK")
+        assert accounts.count() == 3
+        assert accounts.stale(1500.0) == ["OLD"]
+        assert accounts.delete("OLD")
+        assert not accounts.delete("OLD")
+        assert accounts.get("OLD") is None
+        assert accounts.count() == 2
+        now[0] = 1000.0
+
+
+def test_a_password_can_be_replaced_only_on_an_existing_account(stores: Stores) -> None:
+    stores.accounts.create(Account("ALICE", b"s1", b"h1", 1))
+    assert stores.accounts.set_password(Account("ALICE", b"s2", b"h2", 2))
+    assert stores.accounts.get("ALICE") == Account("ALICE", b"s2", b"h2", 2)
+    assert not stores.accounts.set_password(Account("NOBODY", b"s", b"h", 1))
+
+
+def test_a_progress_record_can_be_erased(stores: Stores) -> None:
+    stores.progress.save("acct:ALICE", RECORD)
+    assert stores.progress.erase("acct:ALICE")
+    assert stores.progress.load("acct:ALICE") is None
+    assert not stores.progress.erase("acct:ALICE")
+
+
+def test_the_database_file_uses_write_ahead_logging(tmp_path: Path) -> None:
+    db = SqliteStore(tmp_path / "wal.db")
+    assert db._db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    db.close()
+
+
+def test_the_data_directory_and_database_are_private_to_the_server(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    _, db = open_stores(data)
+    assert data.stat().st_mode & 0o777 == policy.DATA_DIR_MODE
+    assert (data / policy.DATABASE_FILE_NAME).stat().st_mode & 0o777 == policy.DATABASE_FILE_MODE
+    db.close()

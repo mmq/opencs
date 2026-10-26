@@ -16,9 +16,7 @@ from opencs import policy
 from opencs.connlog import STREAM_CHAMBER
 from opencs.lobby import commands, replies
 from opencs.lobby.lobby import Denied, Member, Placement
-from opencs.session.badinput import WindowedCounter
 from opencs.session.phases import TextPhase
-from opencs.session.ratelimit import TokenBucket
 from opencs.wire.text import arm_line
 from opencs.world.resume import ResumeRecord
 
@@ -67,10 +65,9 @@ class ChamberPhase(TextPhase):
         self._city_list_at: float | None = None
         self._handlers = self._handler_table()
         self._late_reply_possible = False
-        self._bucket = TokenBucket(
-            policy.CHAMBER_BURST_LINES, policy.CHAMBER_LINES_PER_SECOND, host.now()
-        )
-        self._drops = WindowedCounter(policy.CHAMBER_FLOOD_DROPS, policy.CHAMBER_FLOOD_WINDOW)
+        # The session's, so leaving and re-entering the Chamber does not refill them.
+        self._bucket = host.budgets.chamber_lines
+        self._drops = host.budgets.chamber_drops
         self._warned = False
         self._last_input_at = host.now()
 
@@ -97,12 +94,8 @@ class ChamberPhase(TextPhase):
 
     # --- time ------------------------------------------------------------------------------
 
-    def feed(self, data: bytes) -> None:
-        self._last_input_at = self.host.now()
-        super().feed(data)
-
     def tick(self, now: float) -> None:
-        if now - self._last_input_at >= policy.CHAMBER_IDLE_TIMEOUT:
+        if now - self._last_input_at >= self._idle_timeout():
             self.host.log.info("nothing heard for %.0f s; closing", now - self._last_input_at)
             self._say(replies.denied("IDLE TOO LONG: DISCONNECTING"))
             self.host.close("Chamber idle timeout")
@@ -125,7 +118,16 @@ class ChamberPhase(TextPhase):
         if self._state is State.LOBBY and self._within_rate():
             self._say(replies.denied("THAT LINE IS TOO LONG"))
 
+    def _idle_timeout(self) -> float:
+        """How long the Chamber waits for a line: a guest, who has nothing saved to come back to
+        and costs nothing to make, waits less (``policy.GUEST_CHAMBER_IDLE_TIMEOUT``)."""
+        if self._member is not None and self._member.account is None:
+            return policy.GUEST_CHAMBER_IDLE_TIMEOUT
+        return policy.CHAMBER_IDLE_TIMEOUT
+
     def on_line(self, line: str) -> None:
+        if line.strip():  # only a line restarts the idle clock, not bytes the reader drops
+            self._last_input_at = self.host.now()
         if self._state is State.VERSION:
             # Whatever comes back (CSTTBT 105 150, a bare CR) is logged and never refused.
             self.host.log.info("version reply: %r", line)
@@ -255,7 +257,7 @@ class ChamberPhase(TextPhase):
         self._say(replies.score(self.member.callsign, record))
 
     def _chat(self, command: commands.Say) -> None:
-        self.host.services.lobby.relay_chat(self.member, command.text)
+        self._relay(command.text)
 
     def _city_list(self, command: commands.CityList) -> None:
         self._city_list_at = self.host.now()
@@ -277,10 +279,24 @@ class ChamberPhase(TextPhase):
         if recent and self.host.services.lobby.city(letter) is not None:
             self._say(replies.city_hint(letter))
         else:
-            self.host.services.lobby.relay_chat(self.member, text)
+            self._relay(text)
+
+    def _relay(self, text: str) -> None:
+        """Relay a line of chat, within the budget of the sender's address, which its other
+        connections share (``policy.CHAT_PER_ADDRESS``)."""
+        if not self.host.services.chat_limits.take(self.host.address, self.host.now()):
+            if not self._warned:
+                self._warned = True
+                self._say(replies.denied("TOO MANY LINES: SLOW DOWN"))
+            return
+        self.host.services.lobby.relay_chat(self.member, text)
 
     def _quit(self) -> None:
         """``/QUIT``: GEnie's buttons come back and the ``*`` prompt (II §4.1)."""
+        if not self.host.budgets.reentries.take(self.host.now()):
+            self.host.log.warning("closing: left the Chamber too often")
+            self.host.close("Chamber re-entry flood")
+            return
         self.host.leave_lobby()
         self.host.io.send_raw(arm_line("B"))
         self.host.to_login_prompt()

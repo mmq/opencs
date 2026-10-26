@@ -1,6 +1,6 @@
 """TokenBucket: bursts, refill, no overdraft."""
 
-from opencs.session.ratelimit import TokenBucket
+from opencs.ratelimit import TokenBucket
 
 
 def test_a_full_bucket_allows_its_capacity_then_refuses() -> None:

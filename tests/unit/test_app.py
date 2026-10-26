@@ -2,6 +2,8 @@ import asyncio
 import contextlib
 import logging
 import socket
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,10 +12,19 @@ import pytest
 from fixtures.loopback import TIMEOUT, LogWatch, TickGate, connect, local_config, start
 from fixtures.pods import report
 from opencs import policy
-from opencs.app import Seams, StartupError, build_services, main, serve
+from opencs.app import (
+    Seams,
+    StartupError,
+    ThreadHasher,
+    build_services,
+    main,
+    prune_accounts,
+    serve,
+)
 from opencs.cities import run_city
 from opencs.clock import ManualClock
-from opencs.config import AdminConfig, load_config
+from opencs.config import AdminConfig, LimitsConfig, load_config
+from opencs.lobby.identity import Refused
 from opencs.messages import ServerMessage, client, client_payload, server
 from opencs.routing import Router
 from opencs.store.base import ProgressRecord
@@ -246,12 +257,14 @@ def test_main_rejects_an_out_of_range_port() -> None:
     assert info.value.code == 2
 
 
-def test_main_reports_a_port_in_use(capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_reports_a_port_in_use(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     with socket.socket() as taken:
         taken.bind(("127.0.0.1", 0))
         taken.listen()
         port = taken.getsockname()[1]
-        code = main(["--config", str(SHIPPED), "--host", "127.0.0.1", "--port", str(port)])
+        # The database opens before the port: keep it out of the checkout's data/.
+        args = ["--host", "127.0.0.1", "--port", str(port), "--data-dir", str(tmp_path)]
+        code = main(["--config", str(SHIPPED), *args])
     err = capsys.readouterr().err
     assert code == 1
     assert f"cannot listen on 127.0.0.1:{port}" in err
@@ -284,3 +297,89 @@ def test_an_admin_port_in_use_is_named_as_the_admin_port() -> None:
                 await serve(config, stop=asyncio.Event(), seams=Seams(stores=memory_stores()))
 
     asyncio.run(asyncio.wait_for(scenario(), TIMEOUT))
+
+
+def test_password_hashes_run_on_a_thread_and_report_back_on_the_loop() -> None:
+    async def scenario() -> tuple[int, int, int, bool]:
+        hasher = ThreadHasher(workers=1)
+        release = threading.Event()
+        worked_on: list[int] = []
+        done_on: list[int] = []
+        finished = asyncio.Event()
+
+        def work() -> bytes:
+            worked_on.append(threading.get_ident())
+            release.wait(5)
+            return b"digest"
+
+        def done(digest: bytes) -> None:
+            assert digest == b"digest"
+            done_on.append(threading.get_ident())
+            finished.set()
+
+        hasher.submit(work, done)
+        await asyncio.sleep(0.01)  # the loop is free while the hash runs
+        loop_ran_meanwhile = not finished.is_set()
+        release.set()
+        await asyncio.wait_for(finished.wait(), 5)
+        hasher.close()
+        return worked_on[0], done_on[0], threading.get_ident(), loop_ran_meanwhile
+
+    worker, reported, loop_thread, loop_ran = asyncio.run(scenario())
+    assert worker != loop_thread
+    assert reported == loop_thread
+    assert loop_ran
+
+
+def test_unplayed_accounts_are_pruned_at_the_interval_and_played_ones_kept() -> None:
+    services = build_services(local_config())
+    for name in ("IDLER", "PLAYER"):
+        pilot = services.identity.login(f"{name},secret")
+        services.identity.release(pilot)  # type: ignore[arg-type]
+    services.persistence._store.save("acct:PLAYER", ProgressRecord((1,) * 9, 0, 0, 0, 0))
+    soon = time.time() + 60
+    assert prune_accounts(services, soon) == []
+    later = soon + policy.UNPLAYED_ACCOUNT_DAYS * 24 * 3600
+    assert prune_accounts(services, later) == ["IDLER"]
+    assert services.identity.account_exists("PLAYER")
+
+
+def test_the_configured_limits_reach_identity_and_the_login_limits() -> None:
+    config = local_config()
+    tuned = LimitsConfig(max_guests_per_address=1, max_accounts=1, min_password_length=8)
+    services = build_services(replace(config, server=replace(config.server, limits=tuned)))
+    assert services.identity.max_accounts == 1
+    assert isinstance(services.identity.login("ALICE,sevench"), Refused)  # 7 < 8
+    assert not isinstance(services.identity.login("ALICE,eightchr"), Refused)
+    assert services.identity.login("BOB,eightchr") == Refused(
+        "THIS SERVER HAS NO ROOM FOR NEW ACCOUNTS"
+    )
+    gate = services.login_limits.gate("10.0.0.1")
+    assert gate.may_admit_guest()
+    services.login_limits.guest_in("10.0.0.1")
+    assert not gate.may_admit_guest()
+
+
+def test_the_configured_connection_limits_reach_the_listener() -> None:
+    async def scenario() -> list[bytes]:
+        config = local_config()
+        tuned = LimitsConfig(
+            max_connections_per_address=3,
+            max_connections_per_subnet=3,
+            max_unauthenticated_per_address=3,
+        )
+        config = replace(config, server=replace(config.server, limits=tuned))
+        stop, task, port = await start(config)
+        clients = [await connect(port) for _ in range(3)]
+        for c in clients:
+            await c.send("HHH")
+            await c.expect(b"CONNECT")
+        extra = await connect(port)
+        refused = await asyncio.wait_for(extra.reader.read(), TIMEOUT)
+        for c in (*clients, extra):
+            c.writer.close()
+        stop.set()
+        await asyncio.wait_for(task, TIMEOUT)
+        return [refused]
+
+    assert asyncio.run(scenario()) == [b""]

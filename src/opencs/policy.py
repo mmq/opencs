@@ -126,11 +126,36 @@ SHUTDOWN_CANCELED_NOTICE = "SHUTDOWN CANCELED"
 
 # --- Connections (DESIGN §3.3, §5) --------------------------------------------------------------
 
-#: Connections accepted in total and from one address; more are closed at once. Ours (DESIGN §5
-#: "connections in total and per address"): a city holds 16 and there are 3, so 64 is every seat
-#: plus those in the Chamber; 8 per address lets several clients share a host or a NAT.
-MAX_CONNECTIONS = 64
-MAX_CONNECTIONS_PER_ADDRESS = 8
+#: Connections accepted in total, from one address and from one subnet; more are closed at once.
+#: Ours (DESIGN §5 "connections in total and per address"): a city holds 16 and there are 3, so 128
+#: is every seat and as many again in the Chamber and logging in; it bounds memory and the loop's
+#: work, not seats. 4 per address lets a household or a small NAT play together, and 12 per subnet
+#: (``SUBNET_PREFIX_*``) keeps one hosting block from taking every connection.
+MAX_CONNECTIONS = 128
+MAX_CONNECTIONS_PER_ADDRESS = 4
+MAX_CONNECTIONS_PER_SUBNET = 12
+
+#: The prefix lengths of a "subnet" for ``MAX_CONNECTIONS_PER_SUBNET``: a /24 is what one hosting
+#: customer usually holds of IPv4, a /64 the least one is given of IPv6. Ours.
+SUBNET_PREFIX_V4 = 24
+SUBNET_PREFIX_V6 = 64
+
+#: Connections that have not logged in yet (no account line accepted), in all and from one address.
+#: Past the total, the oldest such connection is cut to make room (so silent connections cannot keep
+#: honest players from logging in); past the per-address number, a new one is refused. A client
+#: logs in within a second or two (I §5.1). Ours (DESIGN §5).
+MAX_UNAUTHENTICATED = 16
+MAX_UNAUTHENTICATED_PER_ADDRESS = 2
+
+#: New connections from one address, refused or not: a token bucket ``(burst, per second)``. Past
+#: it a connection is closed before a session is made. A player reconnects after a drop or a
+#: mistyped password a few times a minute at most. Ours (DESIGN §5).
+CONNECT_RATE_PER_ADDRESS = (10, 1 / 6)
+
+#: Refused connections from one address are logged at most once in this many seconds, the rest
+#: summed up in the next line (``net.listener.RefusalLog``), so a reconnect flood cannot flood the
+#: log and rotate the useful history away. Ours (DESIGN §6).
+REFUSAL_LOG_INTERVAL = 60.0
 
 #: Items (raw writes or messages) a connection may have queued for sending before it is closed.
 #: Ours (DESIGN §3.3): the client handles about 50 packets a second (I §3), so this is over
@@ -147,6 +172,13 @@ READ_CHUNK = 4096
 #: Seconds a closing connection may take to flush its queue before it is cut. Ours.
 CLOSE_FLUSH_TIMEOUT = 5.0
 
+#: A connection with more than this many items queued is not sent chat (``Event.droppable``,
+#: ``Member.congested``) until it catches up. The real client reads through an emulated modem, about
+#: 1 KB a second, so many senders, each within its own budget, can still queue chat faster than one
+#: client reads it; without this the outbox overflows (``OUTBOX_LIMIT``) and that player is cut.
+#: Game state is never dropped. A quarter of the outbox leaves room for it. Ours (DESIGN §5).
+DROPPABLE_WATERMARK = OUTBOX_LIMIT // 4
+
 #: TCP keepalive on accepted sockets, so a peer that vanished without a FIN is noticed and its
 #: account freed (DESIGN §5): idle seconds before the first probe, seconds between probes, probes
 #: before the connection is dropped. Ours.
@@ -155,15 +187,27 @@ KEEPALIVE_INTERVAL = 15
 KEEPALIVE_PROBES = 4
 
 #: Limits on password checks and on new accounts across connections (DESIGN §5 "login attempts"):
-#: PBKDF2 runs on the event loop (~30 ms), so every check is metered. Each is a token bucket
+#: each PBKDF2 run (~30 ms) takes a ``HASH_WORKERS`` thread, so every check is metered. Each is a
+#: token bucket
 #: ``(burst, per second)``, per source address and for the whole server. A player mistypes a
 #: password a few times at most; a household behind one address may log several people in at once
 #: (``MAX_CONNECTIONS_PER_ADDRESS``). A first login registers an account (II §3), so
 #: registrations are limited harder: they cost a stored row each. Ours (the spec sets none).
 LOGIN_ATTEMPTS_PER_ADDRESS = (8, 1 / 20)
-LOGIN_ATTEMPTS_GLOBAL = (20, 3.0)
+LOGIN_ATTEMPTS_GLOBAL = (60, 10.0)
 NEW_ACCOUNTS_PER_ADDRESS = (3, 1 / 300)
 NEW_ACCOUNTS_GLOBAL = (10, 0.5)
+
+#: Wrong passwords for one account, from anywhere: a token bucket ``(burst, per second)``, spent
+#: only by a wrong password; while it is empty the account's logins are refused without a check,
+#: and a right password refills it. The per-address and global limits do not stop a guesser with
+#: many addresses aiming at one account; this does, and since it refills in minutes it cannot lock
+#: the owner out for long. Ours (DESIGN §5).
+FAILED_LOGINS_PER_ACCOUNT = (5, 1 / 60)
+
+#: Threads that hash passwords (``PBKDF2_ITERATIONS``), so a login never stalls the event loop. A
+#: login waits for one of them; ``LOGIN_ATTEMPTS_GLOBAL`` bounds the queue. Ours (DESIGN §3.3).
+HASH_WORKERS = 2
 
 #: Most source addresses a limiter tracks; past it the oldest are forgotten. Ours (DESIGN §5).
 MAX_TRACKED_SOURCES = 4096
@@ -230,7 +274,7 @@ LOGIN_PROMPT_DELAY = 0.3
 #: Seconds from connecting to a completed account line; later, seconds of silence tolerated at
 #: the GEnie ``*`` prompt (a player may sit at its menus). Ours (DESIGN §5 "time allowed to log
 #: in"): the spec gives neither.
-LOGIN_TIMEOUT = 60.0
+LOGIN_TIMEOUT = 30.0
 GENIE_IDLE_TIMEOUT = 900.0
 
 #: Most lines accepted from a connection between connecting and entering the Chamber (empty lines
@@ -245,6 +289,16 @@ LOGIN_PREAMBLE_LIMIT = 4096
 #: Players do sit in the Chamber to chat or wait, so this is an hour. Ours (DESIGN §5; our Chamber
 #: idle timeout).
 CHAMBER_IDLE_TIMEOUT = 3600.0
+
+#: The same for a guest: a guest login costs nothing and saves nothing, so a script of guests idling
+#: in the Chamber would otherwise hold connections for an hour each. Ours (DESIGN §5).
+GUEST_CHAMBER_IDLE_TIMEOUT = 900.0
+
+#: Guests online at once, from one source address and in all; past either, a guest login is
+#: refused. A guest needs no password, so these are what stops a script filling every seat with
+#: them. Ours (DESIGN §5): 2 for a household; 24 is half the seats of three cities.
+MAX_GUESTS_PER_ADDRESS = 2
+MAX_GUESTS = 24
 
 #: How long to wait for the reply to ``PRESS RETURN`` before entering anyway, and for ``/GO`` after
 #: ``E <map> <map>``, in seconds. II §4.1 (5 s), I §5.4, II §4.5 (15 s, a server choice).
@@ -291,6 +345,13 @@ CHAMBER_LINES_PER_SECOND = 2.0
 CHAMBER_FLOOD_DROPS = 40
 CHAMBER_FLOOD_WINDOW = 10.0
 
+#: Trips from the Chamber to the ``*`` prompt (``/QUIT``) one connection may make, a token bucket
+#: ``(burst, per second)``; past it the connection is closed. Each trip can come back with
+#: ``M 1380;3``, so this bounds how often a client can leave and re-enter. The rate limits are the
+#: session's and survive the trip (``session/budgets.py``); this bounds the work of the trip itself.
+#: A player leaves the Chamber a few times a session. Ours.
+CHAMBER_REENTRY_LIMIT = (3, 1 / 60)
+
 #: How long after a bare ``/CITY`` a bare city letter counts as the button's second half and gets
 #: the hint line (II §4.2: "within 2 min"), in seconds.
 CITY_HINT_WINDOW = 120.0
@@ -311,14 +372,69 @@ DEFAULT_GUEST_NAMES = (GUEST_ACCOUNT_NAME,)
 MAX_ACCOUNT_NAME_LENGTH = 32
 MAX_PASSWORD_LENGTH = 64
 
+#: What a *new* account's name and password must be (DESIGN §5); accounts made before these rules
+#: keep logging in as they are. Names: upper-case letters, digits, ``_`` and ``-`` (no spaces or
+#: punctuation to confuse a command line or a reader), 3 to ``MAX_CALLSIGN_LENGTH`` characters, so
+#: an account's callsign is always its whole name, and never one a guest could be given
+#: (``JOINGENIE2``). Passwords: at least 6
+#: characters; the client sends whatever its ``CS.CFG`` holds, so a guess must cost more than a few
+#: tries. Ours.
+ACCOUNT_NAME_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+MIN_ACCOUNT_NAME_LENGTH = 3
+MIN_PASSWORD_LENGTH = 6
+
+#: Names no new account may take: a player called ADMIN or SERVER could pass for the operator. Ours.
+RESERVED_ACCOUNT_NAMES = frozenset(
+    {
+        "ADMIN",
+        "ADMINISTRATOR",
+        "SYSOP",
+        "OPERATOR",
+        "MODERATOR",
+        "SERVER",
+        "SYSTEM",
+        "OPENCS",
+        "GENIE",
+        "GUPPY",
+        "SENTINEL",
+        "MUNCHER",
+    }
+)
+
+#: Most accounts the server holds; past it a first login is refused rather than registered. Ours
+#: (DESIGN §5): within the registration limits a script could otherwise add tens of thousands a day.
+MAX_ACCOUNTS = 10_000
+
+#: An account with no saved progress that nobody has logged in to for this many days is deleted
+#: (at start-up and then every ``ACCOUNT_PRUNE_INTERVAL`` seconds), so names claimed and never
+#: played come free and the table cannot only grow. Ours (DESIGN §5).
+UNPLAYED_ACCOUNT_DAYS = 30
+ACCOUNT_PRUNE_INTERVAL = 24 * 3600.0
+
+#: Whether a first login with an unknown name registers it (II §3, "open") or is refused
+#: ("closed": accounts are made by the operator, ``create-account``). Ours.
+REGISTRATION_MODES = ("open", "closed")
+DEFAULT_REGISTRATION = "open"
+
+#: Length of a password the admin channel makes (``create-account``, ``reset-password``), from an
+#: alphabet without look-alike characters. Ours.
+GENERATED_PASSWORD_LENGTH = 10
+GENERATED_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
+
 #: PBKDF2-HMAC-SHA256 work factor and salt size. Ours (DESIGN §5 "salted PBKDF2"). 100 000 rounds
-#: is about 30 ms, which blocks the event loop once per login; raise it when logins move to a
-#: thread.
+#: is about 30 ms on a hashing thread (``HASH_WORKERS``), never on the event loop. An account keeps
+#: the count it was registered with, so raising this changes new accounts only.
 PBKDF2_ITERATIONS = 100_000
 PBKDF2_SALT_BYTES = 16
 
 #: The SQLite file inside ``data_dir``. Ours (DESIGN §2 "Persistence"; one file, no server).
 DATABASE_FILE_NAME = "opencs.db"
+
+#: Modes of a data directory the server creates and of its database file: the server's user only,
+#: since the file holds the password hashes. (The WAL files beside it follow the process umask;
+#: the systemd unit in OPERATING.md sets ``UMask=0077``.) Ours (DESIGN §5).
+DATA_DIR_MODE = 0o700
+DATABASE_FILE_MODE = 0o600
 
 #: How long a database call waits for another connection's lock before it fails. Ours (DESIGN
 #: §3.3: a save runs on the event loop, which must not stall; SQLite's default is 5 s).
@@ -446,6 +562,13 @@ RELAY_LIMIT_POD_STATE = (12, 8.0)
 FRAME_LIMIT = (200, 100.0)
 RELAY_LIMIT_SHOT = (40, 16.0)
 RELAY_LIMIT_CHAT = (8, 2.0)
+
+#: Chat from one source address, over all its connections, in the Chamber and in game together: a
+#: token bucket ``(burst, per second)``. A connection's own budget (``CHAMBER_*``,
+#: ``RELAY_LIMIT_CHAT``) would otherwise multiply by ``MAX_CONNECTIONS_PER_ADDRESS``. Excess lines
+#: are dropped (the Chamber warns once). One and a half players' worth, for a household. Ours
+#: (DESIGN §5).
+CHAT_PER_ADDRESS = (12, 3.0)
 RELAY_LIMIT_GRENADE = (8, 4.0)
 
 # --- Combat and scoring (I §9.1, I §9.2, I §9.2, II §9; DESIGN §3.1 ``combat``/``scoring``) ------

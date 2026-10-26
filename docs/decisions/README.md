@@ -10,3 +10,5 @@
 | [0006](0006-policy-centralized.md) | Policy values centralized in `policy.py` and config |
 | [0007](0007-sqlite-behind-protocols.md) | SQLite for persistence, behind store protocols |
 | [0008](0008-written-from-spec.md) | Written from the spec |
+| [0009](0009-limits-per-connection.md) | Rate limits belong to the connection, not the phase |
+| [0010](0010-registration-behind-identity.md) | Every way to make an account goes through `Identity` |

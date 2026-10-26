@@ -4,6 +4,7 @@ shutdown, reload. Text in, text out; the admin channel only carries it."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 
 import pytest
@@ -15,6 +16,7 @@ from opencs.cities import CityManager
 from opencs.control import SHUTDOWN_NOTICE, Control
 from opencs.lobby import replies
 from opencs.messages import ClientMessage, WirePos, client, client_payload, server
+from opencs.store.base import ProgressRecord
 from opencs.wire.frame import build_frame
 
 ALICE = "ALICE,SECRET"
@@ -48,8 +50,8 @@ def test_status_counts_connections_players_by_team_and_held_games() -> None:
     world = make_world()
     ctl, _ = control(world)
     flying(world, ALICE, 1)
-    flying(world, "BOB,PW", 0)
-    enter_lobby(world, "CAROL,PW")
+    flying(world, "BOB,SECRET", 0)
+    enter_lobby(world, "CAROL,SECRET")
     world.clock.advance(125)
     lines = ctl.status()
     assert lines[0] == "uptime: 125 s"
@@ -86,9 +88,9 @@ def test_announce_reaches_players_in_game_and_the_chamber_and_no_one_else() -> N
     world = make_world()
     ctl, _ = control(world)
     flyer = flying(world, ALICE, 1)
-    loading = play(world, "A", 0, "BOB,PW")  # seated but has not sent its first report
+    loading = play(world, "A", 0, "BOB,SECRET")  # seated but has not sent its first report
     loading.io.messages.clear()
-    chamber = enter_lobby(world, "CAROL,PW")
+    chamber = enter_lobby(world, "CAROL,SECRET")
     assert ctl.execute("announce Server restarts at 9") == ["announced to 2"]
     assert flyer.io.messages == [server.Chat(100, 0, b"Server restarts at 9")]  # sender 100
     # still loading: its ring would drop it (our audience rule (clients that have reported))
@@ -101,7 +103,7 @@ def test_announce_text_is_made_printable_and_cut_to_what_the_client_takes() -> N
     world = make_world()
     ctl, _ = control(world)
     flyer = flying(world, ALICE, 1)
-    chamber = enter_lobby(world, "CAROL,PW")
+    chamber = enter_lobby(world, "CAROL,SECRET")
     ctl.announce("a\x05b\x01 ü" + "x" * 400)
     (sent,) = flyer.io.messages
     assert isinstance(sent, server.Chat) and sent.sender == 100
@@ -145,7 +147,7 @@ def test_kick_leaves_other_pilots_alone() -> None:
     world = make_world()
     ctl, _ = control(world)
     a = enter_lobby(world, ALICE)
-    b = enter_lobby(world, "BOB,PW")
+    b = enter_lobby(world, "BOB,SECRET")
     ctl.execute("kick bob")
     assert b.io.closed and not a.io.closed
 
@@ -317,3 +319,53 @@ def test_no_operator_input_raises(line: str) -> None:
         ctl.close()
 
     asyncio.run(scenario())
+
+
+# --- accounts --------------------------------------------------------------------------------
+
+
+def test_the_operator_creates_an_account_and_its_password_is_shown_once_never_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    world = make_world()
+    ctl, _ = control(world)
+    with caplog.at_level(logging.DEBUG):
+        reply = ctl.execute("create-account newpilot")
+    assert len(reply) == 1 and reply[0].startswith("created NEWPILOT; password (shown once): ")
+    password = reply[0].rsplit(" ", 1)[1]
+    assert password not in caplog.text
+    h = enter_lobby(world, f"NEWPILOT,{password}")
+    assert h.session.pilot is not None and h.session.pilot.account == "NEWPILOT"
+    assert ctl.execute("create-account NEWPILOT") == ["refused: THAT NAME IS TAKEN"]
+    assert ctl.execute("create-account ADMIN") == ["refused: THAT NAME IS RESERVED"]
+    assert ctl.execute("accounts") == [
+        f"accounts: 1 of at most {policy.MAX_ACCOUNTS}; registration open"
+    ]
+
+
+def test_the_operator_resets_a_password(caplog: pytest.LogCaptureFixture) -> None:
+    world = make_world()
+    ctl, _ = control(world)
+    enter_lobby(world, "ALICE,oldsecret").session.closed()
+    with caplog.at_level(logging.DEBUG):
+        reply = ctl.execute("reset-password alice")
+    password = reply[0].rsplit(" ", 1)[1]
+    assert password not in caplog.text
+    assert enter_lobby(world, f"ALICE,{password}").session.pilot is not None
+    assert ctl.execute("reset-password NOBODY") == ["refused: NO SUCH ACCOUNT"]
+
+
+def test_progress_and_accounts_are_wiped_only_while_the_player_is_offline() -> None:
+    world = make_world()
+    ctl, _ = control(world)
+    h = enter_lobby(world, "ALICE,secret")
+    world.progress.save("acct:ALICE", ProgressRecord((1,) * 9, 0, 5, 6, 7))
+    assert ctl.execute("reset-progress ALICE") == ["refused: ALICE is online; kick it first"]
+    assert ctl.execute("delete-account ALICE") == ["refused: ALICE is online; kick it first"]
+    h.session.closed()
+    assert ctl.execute("reset-progress alice") == ["progress of ALICE erased"]
+    assert world.progress.load("acct:ALICE") is None
+    assert ctl.execute("delete-account alice") == ["deleted ALICE"]
+    assert world.identity.account_exists("ALICE") is False
+    assert ctl.execute("delete-account ALICE") == ["refused: no account ALICE"]
+    assert ctl.execute("delete-account") == ["usage: delete-account <name>"]

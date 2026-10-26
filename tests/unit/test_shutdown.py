@@ -30,7 +30,7 @@ from opencs.store.memory import memory_stores
 from opencs.store.sqlite import SqliteStore, open_stores
 
 BAYS = (3, 2, 2, 1, 1, 0, 0, 0, 0)
-ACCOUNT, KEY = "SAVER,PW", "acct:SAVER"  # guests are not saved (II §11.3)
+ACCOUNT, KEY = "SAVER,SECRET", "acct:SAVER"  # guests are not saved (II §11.3)
 
 
 def config_in(data_dir: Path) -> AppConfig:

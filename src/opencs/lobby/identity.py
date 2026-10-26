@@ -10,7 +10,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-from dataclasses import dataclass
+import secrets
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from opencs import policy
@@ -33,6 +35,23 @@ class LoginGate(Protocol):
 
     def may_register(self) -> bool:
         """Whether a new account may be created now."""
+        ...
+
+    def may_admit_guest(self) -> bool:
+        """Whether another guest may log in now."""
+        ...
+
+    def may_try_account(self, name: str) -> bool:
+        """Whether a password for account ``name`` may be checked now: not while its recent
+        failures are over their limit, whoever made them."""
+        ...
+
+    def account_failed(self, name: str) -> None:
+        """A wrong password was given for ``name``."""
+        ...
+
+    def account_succeeded(self, name: str) -> None:
+        """The right password was given for ``name``: its failures are forgotten."""
         ...
 
 
@@ -61,9 +80,33 @@ class Refused:
     reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class PasswordCheck:
+    """An account login waiting for its password hash (DESIGN §5). ``hash`` is pure CPU and touches
+    nothing shared, so it may run on another thread; its result goes back to ``Identity.complete``
+    on the event loop. ``stored`` is the account to compare with, None if the login registers it."""
+
+    name: str
+    password: str = field(repr=False)
+    salt: bytes = field(repr=False)
+    iterations: int
+    stored: Account | None
+
+    def hash(self) -> bytes:
+        return hash_password(self.password, self.salt, self.iterations)
+
+
 def hash_password(password: str, salt: bytes, iterations: int) -> bytes:
     """Salted PBKDF2-HMAC-SHA256 of ``password`` (DESIGN §5)."""
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+
+
+def make_password() -> str:
+    """A random password with no look-alike characters (``policy.GENERATED_PASSWORD_*``)."""
+    return "".join(
+        secrets.choice(policy.GENERATED_PASSWORD_ALPHABET)
+        for _ in range(policy.GENERATED_PASSWORD_LENGTH)
+    )
 
 
 class Identity:
@@ -75,14 +118,28 @@ class Identity:
         *,
         guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES,
         iterations: int = policy.PBKDF2_ITERATIONS,
+        registration: str = policy.DEFAULT_REGISTRATION,
+        min_password_length: int = policy.MIN_PASSWORD_LENGTH,
+        max_accounts: int = policy.MAX_ACCOUNTS,
     ) -> None:
         self._store = store
         self._guest_names = frozenset(name.upper() for name in guest_names)
         self._iterations = iterations
+        self._registration_open = registration == "open"
+        self._min_password_length = min_password_length
+        self._max_accounts = max_accounts
         self._callsigns: set[str] = set()
         self._accounts: set[str] = set()
 
     def login(self, line: str, gate: LoginGate | None = None) -> Pilot | Refused:
+        """``begin`` and, for an account, ``complete`` with the hash made here and now. The
+        session runs the hash off the event loop instead; this is for callers that may block."""
+        result = self.begin(line, gate)
+        if isinstance(result, PasswordCheck):
+            return self.complete(result, result.hash(), gate)
+        return result
+
+    def begin(self, line: str, gate: LoginGate | None = None) -> Pilot | Refused | PasswordCheck:
         """Resolve an account line (I §5.1): ``NAME,PASSWORD`` or ``NAME``.
 
         - A configured guest name, with or without anything after it, is a guest: it gets a
@@ -92,6 +149,8 @@ class Identity:
           refused for want of a password.
 
         ``gate`` meters the password checks and registrations; over its limit the login is refused.
+        A guest is answered at once; an account login needs its password hashed first, so the
+        answer is a ``PasswordCheck`` to run and hand to ``complete``.
         """
         name, _, password = line.strip().partition(",")
         name = name.strip().upper()
@@ -100,7 +159,7 @@ class Identity:
         if len(name) > policy.MAX_ACCOUNT_NAME_LENGTH:
             return Refused("LOGIN NAME TOO LONG")
         if name in self._guest_names:
-            return self._guest(name)
+            return self._guest(name, gate)
         if name == policy.GUEST_ACCOUNT_NAME:
             return Refused("GUEST LOGINS ARE TURNED OFF ON THIS SERVER")
         return self._account(name, password, gate)
@@ -115,29 +174,166 @@ class Identity:
         """True if ``callsign`` (upper case) is in use."""
         return callsign in self._callsigns
 
-    def _guest(self, name: str) -> Pilot | Refused:
+    def _guest(self, name: str, gate: LoginGate | None) -> Pilot | Refused:
         # Compare callsigns, not names: ALPHAXYZW would otherwise be played as ALPHAXYZ's callsign.
         base = name[: policy.MAX_CALLSIGN_LENGTH]
         if name != policy.GUEST_ACCOUNT_NAME and self._store.callsign_registered(
             base, policy.MAX_CALLSIGN_LENGTH
         ):
             return Refused("THAT NAME IS A REGISTERED ACCOUNT: LOG IN WITH ITS PASSWORD")
+        if gate is not None and not gate.may_admit_guest():
+            return Refused("TOO MANY GUESTS ONLINE: TRY AGAIN LATER")
         return self._admit(name, None)
 
-    def _account(self, name: str, password: str, gate: LoginGate | None) -> Pilot | Refused:
+    def complete(
+        self, check: PasswordCheck, digest: bytes, gate: LoginGate | None = None
+    ) -> Pilot | Refused:
+        """Finish an account login with ``check.hash()``. The world may have moved on while it
+        ran: the account may have logged in elsewhere, or been registered by another login."""
+        if check.stored is None:
+            account = Account(check.name, check.salt, digest, check.iterations)
+            if not self._store.create(account):
+                return Refused("THAT NAME WAS JUST TAKEN: TRY AGAIN")
+        elif not hmac.compare_digest(check.stored.password_hash, digest):
+            if gate is not None:
+                gate.account_failed(check.name)
+            return Refused("WRONG PASSWORD")
+        if gate is not None:
+            gate.account_succeeded(check.name)
+        if check.name in self._accounts:
+            return Refused("THAT ACCOUNT IS ALREADY LOGGED IN")
+        if check.stored is not None:
+            self._store.touch_login(check.name)
+        return self._admit(check.name, check.name)
+
+    # --- accounts, outside a login -----------------------------------------------------------
+
+    def new_account_refusal(self, name: str, password: str) -> Refused | None:
+        """Why ``name`` (upper case) with ``password`` cannot be a new account, None if it can:
+        every rule a registration must pass, wherever it comes from (a first login now; a
+        registration command or page later). It does not look at the limits on how often."""
+        if (
+            reason := self._new_name_problem(name) or self._new_password_problem(password)
+        ) is not None:
+            return Refused(reason)
+        if self._store.count() >= self._max_accounts:
+            return Refused("THIS SERVER HAS NO ROOM FOR NEW ACCOUNTS")
+        return None
+
+    def _new_name_problem(self, name: str) -> str | None:
+        if not policy.MIN_ACCOUNT_NAME_LENGTH <= len(name) <= policy.MAX_CALLSIGN_LENGTH:
+            return (
+                f"A NEW NAME MUST BE {policy.MIN_ACCOUNT_NAME_LENGTH} TO "
+                f"{policy.MAX_CALLSIGN_LENGTH} CHARACTERS"
+            )
+        if any(ch not in policy.ACCOUNT_NAME_CHARACTERS for ch in name):
+            return "A NEW NAME MAY HOLD ONLY LETTERS, DIGITS, _ AND -"
+        if name in policy.RESERVED_ACCOUNT_NAMES or self._a_guest_could_be(name):
+            return "THAT NAME IS RESERVED"
+        return None
+
+    def _a_guest_could_be(self, callsign: str) -> bool:
+        """Whether ``_allocate_callsign`` could give ``callsign`` to a guest: a guest name cut to
+        12 characters, or with its tail replaced by a number (``JOINGENIE2``)."""
+        for guest in self._guest_names:
+            base = guest[: policy.MAX_CALLSIGN_LENGTH]
+            if callsign == base:
+                return True
+            for n in range(policy.CALLSIGN_FIRST_SUFFIX, policy.CALLSIGN_LAST_SUFFIX + 1):
+                suffix = str(n)
+                if callsign == base[: policy.MAX_CALLSIGN_LENGTH - len(suffix)] + suffix:
+                    return True
+        return False
+
+    def _new_password_problem(self, password: str) -> str | None:
+        if len(password) < self._min_password_length:
+            return (
+                f"A NEW ACCOUNT NEEDS A PASSWORD OF {self._min_password_length} CHARACTERS OR MORE"
+            )
+        if len(password) > policy.MAX_PASSWORD_LENGTH:
+            return "PASSWORD TOO LONG"
+        return None
+
+    def register(self, name: str, password: str | None = None) -> tuple[Account, str] | Refused:
+        """Make an account outside a login (the operator's ``create-account``; a future
+        registration command or page), hashing here and now. Without ``password`` one is made up.
+        Returns the account and its password, to be shown once and never logged."""
+        name = name.strip().upper()
+        password = password if password is not None else make_password()
+        if self._store.get(name) is not None:
+            return Refused("THAT NAME IS TAKEN")
+        if (refusal := self.new_account_refusal(name, password)) is not None:
+            return refusal
+        salt = os.urandom(policy.PBKDF2_SALT_BYTES)
+        account = Account(
+            name, salt, hash_password(password, salt, self._iterations), self._iterations
+        )
+        if not self._store.create(account):
+            return Refused("THAT NAME IS TAKEN")
+        return account, password
+
+    def reset_password(self, name: str) -> str | Refused:
+        """Give account ``name`` a new, made-up password and return it (shown once, never
+        logged). A player logged in stays logged in."""
+        name = name.strip().upper()
+        password = make_password()
+        salt = os.urandom(policy.PBKDF2_SALT_BYTES)
+        account = Account(
+            name, salt, hash_password(password, salt, self._iterations), self._iterations
+        )
+        if not self._store.set_password(account):
+            return Refused("NO SUCH ACCOUNT")
+        return password
+
+    def account_online(self, name: str) -> bool:
+        """True if account ``name`` (upper case) is logged in."""
+        return name in self._accounts
+
+    def account_count(self) -> int:
+        return self._store.count()
+
+    def account_exists(self, name: str) -> bool:
+        return self._store.get(name) is not None
+
+    @property
+    def registration_open(self) -> bool:
+        return self._registration_open
+
+    @property
+    def max_accounts(self) -> int:
+        return self._max_accounts
+
+    def delete_account(self, name: str) -> bool:
+        """Remove account ``name`` (upper case); its progress is the caller's to erase."""
+        return self._store.delete(name)
+
+    def prune_unplayed(self, before: float, has_progress: Callable[[str], bool]) -> list[str]:
+        """Delete the accounts nobody has created or logged in to since ``before`` (wall-clock
+        seconds) that hold no progress (``has_progress`` of their record key) and are not online,
+        so names claimed and never played come free (``policy.UNPLAYED_ACCOUNT_DAYS``). Returns
+        their names."""
+        gone = []
+        for name in self._store.stale(before):
+            if name in self._accounts or has_progress(identity_key(name, name)):
+                continue
+            if self._store.delete(name):
+                gone.append(name)
+        return gone
+
+    def _account(self, name: str, password: str, gate: LoginGate | None) -> Refused | PasswordCheck:
         if (refusal := self._refuse_account(name, password, gate)) is not None:
             return refusal
         account = self._store.get(name)
-        if account is None:
-            created = self._register(name, password, gate)
-            if isinstance(created, Refused):
-                return created
-            account = created
-        if account is None or not hmac.compare_digest(
-            account.password_hash, hash_password(password, account.salt, account.iterations)
-        ):
-            return Refused("WRONG PASSWORD")
-        return self._admit(name, name)
+        if account is not None:
+            return PasswordCheck(name, password, account.salt, account.iterations, account)
+        if not self._registration_open:
+            return Refused("NO SUCH ACCOUNT: ASK THE OPERATOR FOR ONE")
+        if (refusal := self.new_account_refusal(name, password)) is not None:
+            return refusal
+        if gate is not None and not gate.may_register():
+            return Refused("TOO MANY NEW ACCOUNTS: TRY AGAIN LATER")
+        salt = os.urandom(policy.PBKDF2_SALT_BYTES)
+        return PasswordCheck(name, password, salt, self._iterations, None)
 
     def _refuse_account(self, name: str, password: str, gate: LoginGate | None) -> Refused | None:
         """The cheap reasons to turn an account login away, before any hashing; the gate last,
@@ -148,27 +344,14 @@ class Identity:
             return Refused("PASSWORD TOO LONG")
         if name in self._accounts:
             return Refused("THAT ACCOUNT IS ALREADY LOGGED IN")
+        if gate is not None and not gate.may_try_account(name):
+            return Refused("TOO MANY WRONG PASSWORDS FOR THAT ACCOUNT: WAIT A FEW MINUTES")
         if gate is not None and not gate.may_check_password():
             return Refused("TOO MANY LOGIN ATTEMPTS: WAIT A MOMENT")
         return None
 
-    def _register(
-        self, name: str, password: str, gate: LoginGate | None
-    ) -> Account | Refused | None:
-        """The first login of an account stores its password. None: another login registered the
-        name first and it is no longer there to read."""
-        if gate is not None and not gate.may_register():
-            return Refused("TOO MANY NEW ACCOUNTS: TRY AGAIN LATER")
-        salt = os.urandom(policy.PBKDF2_SALT_BYTES)
-        account = Account(
-            name, salt, hash_password(password, salt, self._iterations), self._iterations
-        )
-        if self._store.create(account):
-            return account
-        return self._store.get(name)  # lost a race: check against the winner's
-
     def _admit(self, name: str, account: str | None) -> Pilot | Refused:
-        callsign = self._allocate_callsign(name)
+        callsign = self._allocate_callsign(name, guest=account is None)
         if callsign is None:
             return Refused("TOO MANY PILOTS WITH THAT NAME ARE ONLINE")
         self._callsigns.add(callsign)
@@ -176,15 +359,24 @@ class Identity:
             self._accounts.add(account)
         return Pilot(callsign, account)
 
-    def _allocate_callsign(self, name: str) -> str | None:
+    def _allocate_callsign(self, name: str, *, guest: bool) -> str | None:
         """The name cut to 12 characters, or with its tail replaced by a number until free
-        (II §3: ``JOINGENIE``, ``JOINGENIE2`` ... ``JOINGENIE999``)."""
+        (II §3: ``JOINGENIE``, ``JOINGENIE2`` ... ``JOINGENIE999``). A guest also passes over
+        every registered account's callsign, so an account always plays under its own name."""
+
+        def free(callsign: str) -> bool:
+            if callsign in self._callsigns:
+                return False
+            return not (
+                guest and self._store.callsign_registered(callsign, policy.MAX_CALLSIGN_LENGTH)
+            )
+
         base = name[: policy.MAX_CALLSIGN_LENGTH]
-        if base not in self._callsigns:
+        if free(base):
             return base
         for n in range(policy.CALLSIGN_FIRST_SUFFIX, policy.CALLSIGN_LAST_SUFFIX + 1):
             suffix = str(n)
             candidate = base[: policy.MAX_CALLSIGN_LENGTH - len(suffix)] + suffix
-            if candidate not in self._callsigns:
+            if free(candidate):
                 return candidate
         return None

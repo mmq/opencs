@@ -64,6 +64,7 @@ src/opencs/
   config.py              typed config: ServerConfig, CityConfig (validated from TOML)
   policy.py              every value the server chooses (spec I §10), named, each citing its spec section
   clock.py               Clock protocol; MonotonicClock; ManualClock for tests
+  ratelimit.py           TokenBucket, KeyedBuckets (bounded per-source buckets)
   wire/
     codec.py             bias10, bias88, enc_num, str, grid byte            (spec I §4.3, I §6.1)
     frame.py             build_frame, FrameReader (sans-IO, incremental)    (spec I §4.1)
@@ -84,6 +85,7 @@ src/opencs/
     persistence.py       loads a record before a join, writes what a city reports changed (II §11.3)
     held.py              the games held for dropped players: windows, reserved slots (II §13)
     registry.py          every live session, for the operator (M12)
+    budgets.py           a connection's rate limits, which outlive its phases (ADR 9)
   lobby/
     lobby.py             Lobby: members, locations, city choice, teams (S9)
     commands.py          parsing /PLAY, /CITY, … (pure)
@@ -190,7 +192,7 @@ in `world/view.py` as one `ClientView` per player, owned by the city. Sessions d
 - **Never send what crashes the client** (spec II §8): message constructors validate their fields
   (`'c'` KIND, `'R'` ranges, `'T'` classes, chat bytes) and raise in our code rather than on a player's
   screen.
-- **Passwords:** salted PBKDF2 from `hashlib`, never stored or logged in clear.
+- **Passwords:** salted PBKDF2 from `hashlib`, never stored or logged in clear, hashed on a small thread pool (`app.ThreadHasher`) so a login never stalls the loop; the session hands the work over through `Services.hasher` and stays sans-IO.
 - **Bugs vs bad input:** an exception inside a `City` is a bug — logged with the triggering request, the
   request dropped, the city kept running.
 

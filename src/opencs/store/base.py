@@ -43,6 +43,26 @@ class AccountStore(Protocol):
         callsign belongs to the account, so no guest may take it (II §3)."""
         ...
 
+    def count(self) -> int:
+        """How many accounts there are (``policy.MAX_ACCOUNTS``)."""
+        ...
+
+    def touch_login(self, name: str) -> None:
+        """Note that ``name`` has just logged in (it is not stale)."""
+        ...
+
+    def stale(self, before: float) -> list[str]:
+        """The accounts neither created nor logged in to since ``before`` (wall-clock seconds)."""
+        ...
+
+    def set_password(self, account: Account) -> bool:
+        """Replace the salt, hash and work factor of an existing account; False if there is none."""
+        ...
+
+    def delete(self, name: str) -> bool:
+        """Remove the account; False if there was none. Its progress is the caller's to delete."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class ProgressRecord:
@@ -71,6 +91,10 @@ class ProgressStore(Protocol):
 
     def save(self, identity: str, record: ProgressRecord) -> None:
         """Store ``record`` as the whole record of ``identity``, atomically."""
+        ...
+
+    def erase(self, identity: str) -> bool:
+        """Remove the record of ``identity``; False if there was none."""
         ...
 
 

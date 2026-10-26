@@ -311,3 +311,24 @@ def test_a_real_captures_stream_is_never_limited(name: str) -> None:
                 decoded += 1
     assert decoded > 0 and len(seen) == decoded
     assert not h.io.closed
+
+
+def test_chat_from_one_address_shares_one_budget_over_its_connections() -> None:
+    world = make_world()
+    first = play(world, address="10.0.0.1")
+    second = play(world, address="10.0.0.1", team=1)
+    seen: list[ClientMessage] = []
+    for h in (first, second):
+        phase = h.session.phase
+        assert isinstance(phase, InGamePhase)
+        phase._to_city = seen.append  # type: ignore[method-assign]
+    per_connection, _ = policy.RELAY_LIMIT_CHAT
+    first.feed(CHAT * per_connection)
+    second.feed(CHAT * per_connection)
+    assert len(seen) == policy.CHAT_PER_ADDRESS[0]
+    other = play(world, address="10.0.0.2", team=2)
+    phase = other.session.phase
+    assert isinstance(phase, InGamePhase)
+    phase._to_city = seen.append  # type: ignore[method-assign]
+    other.feed(CHAT)
+    assert len(seen) == policy.CHAT_PER_ADDRESS[0] + 1  # another address has its own

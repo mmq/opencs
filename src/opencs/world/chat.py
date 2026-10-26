@@ -29,7 +29,7 @@ def chat_line(
     else:
         return None
     text = server.sanitize_chat(typed.text)
-    return Event(server.Chat(sender_id, typed.style, text), audience)
+    return Event(server.Chat(sender_id, typed.style, text), audience, droppable=True)
 
 
 def system_line(text: str, audience: Audience | None = None) -> Event:

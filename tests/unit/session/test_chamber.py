@@ -271,7 +271,7 @@ def test_who_callsign_gives_location_and_the_record() -> None:
 def test_who_callsign_reads_the_record_of_that_pilot_not_the_askers() -> None:
     world = make_world()
     h = enter_lobby(world)
-    h = enter_lobby(world, "BRAVO,pw")
+    h = enter_lobby(world, "BRAVO,secret")
     other = add(world.lobby, "ALPHA", "A", 0, account="ALPHA")
     assert h.session.member is not None
     world.progress.save(h.session.member.key, ProgressRecord((1,) * 9, 0, 11, 22, 33))
@@ -282,7 +282,7 @@ def test_who_callsign_reads_the_record_of_that_pilot_not_the_askers() -> None:
 
 def test_score_shows_the_players_own_record_and_tells_a_guest_none_is_kept() -> None:
     world = make_world()
-    account = enter_lobby(world, "ALICE,pw")
+    account = enter_lobby(world, "ALICE,secret")
     assert b"NO RECORD YET" in ask(account, "/SCORE")
     world.progress.save("acct:ALICE", ProgressRecord((5,) * 9, -7, 123, 4567, 89))
     out = ask(account, "/SCORE")
@@ -298,7 +298,7 @@ def test_score_shows_the_players_own_record_and_tells_a_guest_none_is_kept() -> 
 
 def test_who_shows_a_guest_without_a_record() -> None:
     world = make_world()
-    h = enter_lobby(world, "ALICE,pw")
+    h = enter_lobby(world, "ALICE,secret")
     enter_lobby(world)
     world.progress.save("JOINGENIE", ProgressRecord((4,) * 9, 3, 1, 2, 3))
     out = ask(h, "/WHO joingenie")
@@ -312,7 +312,7 @@ def test_an_unreadable_record_is_reported_and_the_session_carries_on() -> None:
             raise OSError("gone")
 
     world = make_world(progress=Broken())
-    h = enter_lobby(world, "ALICE,pw")
+    h = enter_lobby(world, "ALICE,secret")
     assert b"CANNOT BE READ" in ask(h, "/SCORE")
     assert b"CANNOT BE READ" in ask(h, "/WHO alice")
     assert b"PILOTS ONLINE" in ask(h, "/STATUS")
@@ -322,7 +322,7 @@ def test_resume_is_refused_for_joingenie_and_for_an_account_with_no_held_game() 
     world = make_world()
     guest = enter_lobby(world)
     assert b"JOINGENIE LOGINS CANNOT RESUME" in ask(guest, "/RESUME")
-    real = enter_lobby(world, "ALPHA,pw")
+    real = enter_lobby(world, "ALPHA,secret")
     out = ask(real, "/RESUME")
     assert b"NO GAME IS HELD FOR YOU" in out
     assert b"JOINGENIE" not in out
@@ -383,9 +383,9 @@ def test_overlong_lines_within_the_budget_are_each_refused_and_do_not_close() ->
 
 def test_a_plain_line_reaches_the_other_chamber_players_but_not_the_sender() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
-    b = enter_lobby(world, "BRAVO,pw")
-    c = enter_lobby(world, "CHARLIE,pw")
+    a = enter_lobby(world, "ALPHA,secret")
+    b = enter_lobby(world, "BRAVO,secret")
+    c = enter_lobby(world, "CHARLIE,secret")
     add(world.lobby, "GAMER", "B", 0)  # in a game: gets nothing, and has no session to check
     a.feed("hello \x01there\x05\r")
     assert a.take() == b""
@@ -396,8 +396,8 @@ def test_a_plain_line_reaches_the_other_chamber_players_but_not_the_sender() -> 
 
 def test_chat_does_not_reach_a_pilot_at_the_genie_prompt() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
-    b = enter_lobby(world, "BRAVO,pw")
+    a = enter_lobby(world, "ALPHA,secret")
+    b = enter_lobby(world, "BRAVO,secret")
     b.feed("/QUIT\r")
     b.take()
     a.feed("anyone there\r")
@@ -552,17 +552,17 @@ def test_go_0_when_the_place_filled_meanwhile_stays_in_the_chamber() -> None:
 
 def test_a_second_player_joins_the_first_players_city() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
+    a = enter_lobby(world, "ALPHA,secret")
     go(a, "/PLAY A")
     a.feed("/GO 0\r")
-    b = enter_lobby(world, "BRAVO,pw")
+    b = enter_lobby(world, "BRAVO,secret")
     assert go(b) == b"\x05E 1 1\r"  # A is the most populated city with room
 
 
 def test_disconnecting_in_the_chamber_or_in_a_game_frees_the_pilot() -> None:
     world = make_world()
-    a = enter_lobby(world, "ALPHA,pw")
-    b = enter_lobby(world, "BRAVO,pw")
+    a = enter_lobby(world, "ALPHA,secret")
+    b = enter_lobby(world, "BRAVO,secret")
     go(b)
     b.feed("/GO 0\r")
     assert world.lobby.count("B") == 1
@@ -614,7 +614,7 @@ def test_go_0_then_a_quit_frame_in_one_feed_is_not_parsed_as_text() -> None:
 
 
 def test_a_silent_chamber_connection_is_closed_after_the_idle_timeout() -> None:
-    h = enter_lobby(make_world())
+    h = enter_lobby(make_world(), "PILOT,secret")
     h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
     assert not h.io.closed
     h.advance(1)  # the first instant it is over
@@ -623,13 +623,31 @@ def test_a_silent_chamber_connection_is_closed_after_the_idle_timeout() -> None:
 
 
 def test_a_line_restarts_the_idle_clock() -> None:
-    h = enter_lobby(make_world())
+    h = enter_lobby(make_world(), "PILOT,secret")
     h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
     h.feed("/WHO\r")
     h.advance(policy.CHAMBER_IDLE_TIMEOUT - 1)
     assert not h.io.closed
     h.advance(1)
     assert h.io.closed
+
+
+def test_a_silent_guest_is_closed_sooner() -> None:
+    h = enter_lobby(make_world())
+    h.advance(policy.GUEST_CHAMBER_IDLE_TIMEOUT - 1)
+    assert not h.io.closed
+    h.advance(1)
+    assert h.io.closed_with == ["Chamber idle timeout"]
+
+
+def test_bytes_that_make_no_line_do_not_restart_the_idle_clock() -> None:
+    h = enter_lobby(make_world(), "PILOT,secret")
+    for _ in range(4):
+        h.advance(policy.CHAMBER_IDLE_TIMEOUT / 4 - 1)
+        h.feed(b"\n\x00\x1b")  # dropped by the line reader
+        h.feed("\r")  # an empty line
+    h.advance(4)
+    assert h.io.closed_with == ["Chamber idle timeout"]
 
 
 def test_a_stale_chamber_connection_frees_its_account() -> None:
@@ -639,3 +657,85 @@ def test_a_stale_chamber_connection_frees_its_account() -> None:
     h.advance(policy.CHAMBER_IDLE_TIMEOUT)
     h.session.closed()  # the connection reacts to the close
     assert isinstance(world.identity.login("PILOT,secret"), Pilot)
+
+
+def _requeue(h: Harness) -> None:
+    """``/QUIT`` to the ``*`` prompt and straight back into the Chamber, past the version check."""
+    h.feed("/QUIT\r")
+    h.feed("M 1380;3\r")
+    h.feed("\r")
+
+
+def test_leaving_and_reentering_the_chamber_does_not_refill_the_line_budget() -> None:
+    h = enter_lobby(make_world())
+    h.feed("x\r" * (policy.CHAMBER_BURST_LINES - 1))  # the /QUIT below is the last token
+    _requeue(h)
+    assert phase_of(h) is ChamberPhase
+    h.take()
+    h.feed("x\r")
+    assert b"TOO MANY LINES" in h.take()
+
+
+def test_a_flood_spread_over_trips_to_the_star_prompt_still_closes() -> None:
+    h = enter_lobby(make_world())
+    for _ in range(20):  # each burst leaves the last token for the /QUIT, as a flooder would
+        if h.io.closed:
+            break
+        h.feed("x\r" * (policy.CHAMBER_BURST_LINES - 1))
+        _requeue(h)
+    assert h.io.closed
+
+
+def test_leaving_the_chamber_too_often_closes_the_connection() -> None:
+    h = enter_lobby(make_world())
+    burst = policy.CHAMBER_REENTRY_LIMIT[0]
+    for _ in range(burst):
+        h.advance(5.0)
+        _requeue(h)
+    assert not h.io.closed
+    h.advance(5.0)
+    h.feed("/QUIT\r")
+    assert h.io.closed_with == ["Chamber re-entry flood"]
+
+
+def test_a_player_who_leaves_the_chamber_now_and_then_is_never_closed() -> None:
+    h = enter_lobby(make_world())
+    for _ in range(10):
+        h.advance(1 / policy.CHAMBER_REENTRY_LIMIT[1])
+        _requeue(h)
+    assert not h.io.closed
+    assert phase_of(h) is ChamberPhase
+
+
+def test_a_new_game_spends_from_the_same_budgets_as_the_last() -> None:
+    h = enter_lobby(make_world())
+    first = InGamePhase(h.session)
+    second = InGamePhase(h.session)
+    assert first._frame_bucket is second._frame_bucket is h.session.budgets.frames
+    assert first._relay_buckets is second._relay_buckets
+    assert first._bad is second._bad
+
+
+def test_chat_from_one_address_shares_one_budget_over_its_connections() -> None:
+    world = make_world()
+    listener = enter_lobby(world, "LISTENER,secret", address="10.0.0.9")
+    talkers = [enter_lobby(world, f"TALKER{n},secret", address="10.0.0.1") for n in range(3)]
+    listener.take()
+    for h in talkers:
+        h.feed("hello\r" * policy.CHAMBER_BURST_LINES)
+    assert listener.take().count(b"hello") == policy.CHAT_PER_ADDRESS[0]
+    assert all(b"TOO MANY LINES" in h.take() for h in talkers[1:])
+
+
+def test_a_listener_that_has_stopped_reading_is_skipped_not_cut_off() -> None:
+    world = make_world()
+    listener = enter_lobby(world, "LISTENER,secret", address="10.0.0.9")
+    talker = enter_lobby(world, address="10.0.0.1")
+    listener.take()
+    listener.io.queued = policy.DROPPABLE_WATERMARK + 1
+    talker.feed("hello\r")
+    assert b"hello" not in listener.take()
+    assert world.services.lobby.chat_dropped == 1
+    listener.io.queued = 0  # caught up
+    talker.feed("again\r")
+    assert b"again" in listener.take()

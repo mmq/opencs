@@ -50,6 +50,23 @@ class CaptureConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class LimitsConfig:
+    """``[limits]``: the limits an operator may need to tune for their network (DESIGN §5). Every
+    default is the ``policy`` value of the same name in capitals."""
+
+    max_connections: int = policy.MAX_CONNECTIONS
+    max_connections_per_address: int = policy.MAX_CONNECTIONS_PER_ADDRESS
+    max_connections_per_subnet: int = policy.MAX_CONNECTIONS_PER_SUBNET
+    max_unauthenticated: int = policy.MAX_UNAUTHENTICATED
+    max_unauthenticated_per_address: int = policy.MAX_UNAUTHENTICATED_PER_ADDRESS
+    max_guests: int = policy.MAX_GUESTS
+    max_guests_per_address: int = policy.MAX_GUESTS_PER_ADDRESS
+    max_accounts: int = policy.MAX_ACCOUNTS
+    min_password_length: int = policy.MIN_PASSWORD_LENGTH
+    unplayed_account_days: int = policy.UNPLAYED_ACCOUNT_DAYS
+
+
+@dataclass(frozen=True, slots=True)
 class AdminConfig:
     """``[admin]``: the local operator channel (DESIGN §6). Off unless ``port`` is given. The token
     is ``token`` if set, else the environment variable ``token_env`` names; the channel does not
@@ -74,6 +91,9 @@ class ServerConfig:
     default_city: str  # II §4.2: the city a bare /PLAY picks when all are empty
     #: Upper case; empty turns guests off (II §3).
     guest_names: tuple[str, ...] = policy.DEFAULT_GUEST_NAMES
+    #: ``policy.REGISTRATION_MODES``: whether a first login registers its name.
+    registration: str = policy.DEFAULT_REGISTRATION
+    limits: LimitsConfig = LimitsConfig()
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,6 +409,50 @@ def _parse_admin(table: _Table, game_port: int) -> AdminConfig:
     return config
 
 
+def _parse_limits(table: _Table) -> LimitsConfig:
+    section = table.table("limits")
+    d = LimitsConfig()
+    total = section.integer("max_connections", d.max_connections, low=1, high=10_000)
+    per_subnet = section.integer(
+        "max_connections_per_subnet", d.max_connections_per_subnet, low=1, high=total
+    )
+    # More than the games one address may have held (MAX_HELD_PER_ADDRESS): see that value.
+    per_address = section.integer(
+        "max_connections_per_address",
+        d.max_connections_per_address,
+        low=policy.MAX_HELD_PER_ADDRESS + 1,
+        high=per_subnet,
+    )
+    unauthenticated = section.integer(
+        "max_unauthenticated", d.max_unauthenticated, low=1, high=total
+    )
+    config = LimitsConfig(
+        max_connections=total,
+        max_connections_per_address=per_address,
+        max_connections_per_subnet=per_subnet,
+        max_unauthenticated=unauthenticated,
+        max_unauthenticated_per_address=section.integer(
+            "max_unauthenticated_per_address",
+            d.max_unauthenticated_per_address,
+            low=1,
+            high=min(per_address, unauthenticated),
+        ),
+        max_guests=section.integer("max_guests", d.max_guests, low=0, high=total),
+        max_guests_per_address=section.integer(
+            "max_guests_per_address", d.max_guests_per_address, low=0, high=per_address
+        ),
+        max_accounts=section.integer("max_accounts", d.max_accounts, low=1, high=10_000_000),
+        min_password_length=section.integer(
+            "min_password_length", d.min_password_length, low=1, high=policy.MAX_PASSWORD_LENGTH
+        ),
+        unplayed_account_days=section.integer(
+            "unplayed_account_days", d.unplayed_account_days, low=1, high=36_500
+        ),
+    )
+    section.done()
+    return config
+
+
 def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
     table = _Table(path, data)
     base = path.parent
@@ -408,7 +472,11 @@ def _parse_server(path: Path, data: Mapping[str, Any]) -> ServerConfig:
             name.strip().upper()
             for name in table.str_list("guest_names", policy.DEFAULT_GUEST_NAMES)
         ),
+        registration=table.string("registration", policy.DEFAULT_REGISTRATION),
+        limits=_parse_limits(table),
     )
+    if config.registration not in policy.REGISTRATION_MODES:
+        raise table.fail("registration", f"must be one of {', '.join(policy.REGISTRATION_MODES)}")
     table.done()
     return config
 

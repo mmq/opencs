@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from opencs import policy
-from opencs.config import AmbientStep, CityConfig, ConfigError, load_config
+from opencs.config import AmbientStep, CityConfig, ConfigError, LimitsConfig, load_config
 from opencs.messages import limits
 
 SHIPPED = Path(__file__).parents[2] / "config" / "server.toml"
@@ -467,3 +467,48 @@ def test_bad_admin_values_name_the_key(tmp_path: Path, body: str, key: str) -> N
     text = f'default_city = "A"\n[admin]\n{body}\n'
     with pytest.raises(ConfigError, match=f"{key}:"):
         load_config(write_config(tmp_path, {"A": CITY}, server=text))
+
+
+def test_registration_is_open_by_default_and_may_be_closed(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, {"A": CITY})).server.registration == "open"
+    path = write_config(
+        tmp_path, {"A": CITY}, server='default_city = "A"\nregistration = "closed"\n'
+    )
+    assert load_config(path).server.registration == "closed"
+    path = write_config(
+        tmp_path, {"A": CITY}, server='default_city = "A"\nregistration = "maybe"\n'
+    )
+    with pytest.raises(ConfigError, match="registration"):
+        load_config(path)
+
+
+def test_the_limits_default_to_policy_and_may_be_tuned(tmp_path: Path) -> None:
+    assert load_config(write_config(tmp_path, {"A": CITY})).server.limits == LimitsConfig()
+    text = (
+        'default_city = "A"\n[limits]\nmax_connections = 300\nmax_connections_per_address = 20\n'
+        "max_connections_per_subnet = 40\nmax_guests = 0\nmin_password_length = 10\n"
+    )
+    limits = load_config(write_config(tmp_path, {"A": CITY}, server=text)).server.limits
+    assert (limits.max_connections, limits.max_connections_per_address) == (300, 20)
+    assert (limits.max_connections_per_subnet, limits.max_guests) == (40, 0)
+    assert limits.min_password_length == 10
+    assert limits.max_accounts == policy.MAX_ACCOUNTS
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "max_connections = 0",
+        "max_connections_per_address = 200",  # more than the total
+        f"max_connections_per_address = {policy.MAX_HELD_PER_ADDRESS}",  # not above the held games
+        "max_connections_per_subnet = 2",  # below the per-address limit
+        "max_unauthenticated_per_address = 99",
+        "min_password_length = 0",
+        "max_guests = -1",
+        "unknown_limit = 3",
+    ],
+)
+def test_a_limit_out_of_range_stops_the_server(tmp_path: Path, line: str) -> None:
+    path = write_config(tmp_path, {"A": CITY}, server=f'default_city = "A"\n[limits]\n{line}\n')
+    with pytest.raises(ConfigError, match="limits"):
+        load_config(path)
