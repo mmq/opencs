@@ -29,6 +29,11 @@ You need your own copy of the game, the address of a server, and a way to run th
 dials out over the internet: [DOSBox-X](https://dosbox-x.com/),
 [DOSBox Staging](https://www.dosbox-staging.org/), or any DOS setup with an emulated modem. In short:
 
+> [!WARNING]
+> **Connections to the server are not encrypted.** The original game sends your account name and
+> password as plain text, and nothing on the server can change that; the game also keeps the password
+> in plain text in `CS.CFG`. **Use a throwaway password that you use nowhere else**, never a real one.
+
 1. In DOSBox-X or DOSBox Staging, set the first serial port to a modem (`serial1=modem`) and point
    `phonebookfile` at a phonebook file.
 2. In the phonebook, map the number the game dials to the server: `1234 host.example.org:2399`, or
