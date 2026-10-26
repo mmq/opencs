@@ -5,10 +5,11 @@ it, watch it, back it up and upgrade it. What players do is in the player guide 
 how the code is organized is in [`DESIGN.md`](DESIGN.md). Every limit named here is a value in
 `src/opencs/policy.py`, with its reason beside it.
 
-## Install on Ubuntu 24.04
+## Install
 
-Ubuntu 24.04 ships Python 3.12, which is what OpenCS needs. At run time it uses only the standard
-library; `uv` is used to create the virtual environment.
+OpenCS needs Python 3.12 or newer and, at run time, nothing but its standard library; `uv` creates the
+virtual environment. The commands in this guide are for `bash`, on Linux with systemd. They are shown
+for Ubuntu 24.04; on another distribution only the package manager differs.
 
 ```bash
 sudo apt update
@@ -18,16 +19,26 @@ sudo apt install -y git sqlite3 curl          # sqlite3: for the online backup c
 curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_UNMANAGED_INSTALL=/usr/local/bin sh
 
 # the server, in /opt/opencs
-sudo git clone <the repository URL> /opt/opencs
+sudo git clone https://github.com/mmq/opencs-server.git /opt/opencs
 cd /opt/opencs
-sudo uv sync --no-dev --python /usr/bin/python3.12   # makes /opt/opencs/.venv
+python3 --version                                    # 3.12 or newer?
+sudo uv sync --no-dev --python /usr/bin/python3      # makes /opt/opencs/.venv
 /opt/opencs/.venv/bin/python -m opencs --version     # opencs 1.0.0rc1
 ```
 
+If the system's Python is older than 3.12, let `uv`
+install one, in a directory outside `/root` and `/home`, which the service cannot see
+(`ProtectHome=true` below):
+
+```bash
+sudo env UV_PYTHON_INSTALL_DIR=/opt/uv-python uv python install 3.12
+sudo env UV_PYTHON_INSTALL_DIR=/opt/uv-python uv sync --no-dev --python 3.12
+```
+
 Check that it works before wiring a service: `sudo tools/smoke.sh` starts a throwaway server on a free
-port with a throwaway data directory, plays the 19 judge checks against it (about a minute) and prints
-`smoke: ok (19 of 19 checks passed)`. Run it again after every upgrade. (It uses the `.venv` it finds in
-the checkout.)
+port with a throwaway data directory, plays the 19 judge checks against it (a minute or two; longer on a
+small machine) and prints `smoke: ok (19 of 19 checks passed)`. Run it again after
+every upgrade. (It uses the `.venv` it finds in the checkout.)
 
 ### Layout
 
@@ -48,7 +59,9 @@ sudo cp -r /opt/opencs/config/. /etc/opencs/
 ```
 
 Edit `/etc/opencs/server.toml`. Paths in it are relative to the file, and `/etc` is read-only to the
-service, so point the writable things elsewhere, with absolute paths or on the command line:
+service, so point the writable things elsewhere, with absolute paths or on the command line. In the
+shipped file: set `data_dir`; under `[logging]` and `[capture]`, uncomment `file` and `dir` and set them;
+and, for the admin channel, uncomment `[admin]` and its `port`. The keys that matter end up as:
 
 ```toml
 port = 2399
@@ -74,6 +87,36 @@ sudo sh -c 'umask 077; echo "OPENCS_ADMIN_TOKEN=$(head -c 24 /dev/urandom | base
 Every other key, its default and its limits are under "Configuration" below. The cities (letter, map,
 multiplier ceiling, tower output, module level, Sentinels, weather) are the files in
 `/etc/opencs/cities/`; a map number needs `C<n>` on each player's PC, and only 1 to 3 come with the game.
+To print only the lines of a file that are not comments: `grep -vE '^\s*(#|$)' /etc/opencs/server.toml`.
+
+Before making it a service, start it once in the foreground as the `opencs` user, so a mistake in the
+configuration shows on the terminal rather than in the journal. The admin token is normally passed by
+systemd, so give it here by hand:
+
+```bash
+sudo -u opencs env "$(sudo cat /etc/opencs/environment)" \
+    /opt/opencs/.venv/bin/python -m opencs --config /etc/opencs/server.toml --data-dir /var/lib/opencs
+```
+
+It logs `listening on 0.0.0.0:2399`; stop it with Ctrl-C, which saves and logs `stopped`. Without the
+admin channel, leave out the `env` part.
+
+### Data on another disk
+
+Everything the server writes goes to three places: the data directory, the log file and the capture
+directory. To keep them off the system disk, put all three under one directory on the
+other disk, which must use a file system with Unix ownership and permissions (ext4, btrfs, xfs; not FAT
+or exFAT):
+
+```bash
+sudo install -d -m 0750 -o opencs -g opencs /srv/disk/opencs
+sudo install -d -m 0700 -o opencs -g opencs /srv/disk/opencs/data /srv/disk/opencs/log /srv/disk/opencs/captures
+```
+
+Then use those paths in `server.toml` (`data_dir`, `[logging] file`, `[capture] dir`) and in the unit
+below: `--data-dir /srv/disk/opencs/data` in `ExecStart`, `ReadWritePaths=/srv/disk/opencs`, and
+`RequiresMountsFor=/srv/disk` under `[Unit]`, so the service waits for the disk to be mounted instead of
+starting without it. The systemd journal, which also receives every log line, stays on the system disk.
 
 ## Running
 
@@ -173,6 +216,12 @@ sudo ufw allow 2399/tcp
 sudo ufw status
 ```
 
+`ufw` is Ubuntu's. Elsewhere, with nftables, add the port to the input chain of your ruleset, for
+example `tcp dport 2399 accept` in `/etc/nftables.conf`. On a machine you reach over SSH, allow SSH
+**before** turning a firewall on (`sudo ufw allow OpenSSH`, or `tcp dport 22 accept`), or you lock
+yourself out. If `nft` fails with `cache initialization failed`, the running kernel cannot load its
+module: after a kernel upgrade, reboot.
+
 The game listener limits connections to 128 in total, 4 per address and 12 per /24, and allows 2 guests
 per address and 24 in all; the rest are refused at once. An address that connects more than 10 times in
 a burst (then once every 6 s) is refused too. Each
@@ -258,7 +307,9 @@ The shipped `config/cities/` is the reference: A (training, no NPCs), B, C (the 
 
 ## Logs
 
-Lines go to stderr (journald under systemd) and, with `[logging] file`, to a rotating file. A line is
+Lines go to stderr (journald under systemd) and, with `[logging] file`, to a rotating file. The journal
+adds its own time to each line; with no log file, a `[logging] format` without `%(asctime)s` avoids
+showing it twice. A line is
 `time level logger: [conn=N CALLSIGN] message`. `conn` is the connection's id (from 1 at each start) and
 the callsign is `-` until the logon completes. Useful ones at INFO: accept and close, logon and logout,
 phase changes, `seated as player N`, `line dropped; held for /RESUME`, `closing: <reason>`. A bug is
@@ -313,6 +364,14 @@ status
 uptime: 3725 s
 ...
 ```
+
+The token must arrive within 10 seconds. To have it sent for you, straight from the environment file:
+
+```bash
+(sudo sed -n 's/^OPENCS_ADMIN_TOKEN=//p' /etc/opencs/environment; cat) | nc 127.0.0.1 2400
+```
+
+After `quit` some versions of `nc` wait for more input: press Ctrl-C.
 
 The first line must be the token (compared in constant time; a wrong one is denied and the connection
 closed; five attempts in a burst across all connections, then one per ten seconds). After `ok` each line
@@ -403,7 +462,8 @@ written after every progress change, so back it up while the server runs with SQ
 copying the files:
 
 ```bash
-sudo sqlite3 /var/lib/opencs/opencs.db ".backup '/var/backups/opencs-$(date +%F).db'"
+sudo install -d -m 0700 /var/backups/opencs
+sudo sqlite3 /var/lib/opencs/opencs.db ".backup '/var/backups/opencs/opencs-$(date +%F).db'"
 ```
 
 Run it as root: the `opencs` user cannot write to `/var/backups`. Run it daily from cron or a systemd
@@ -414,16 +474,17 @@ announce one (`shutdown 120` on the admin channel) and players can finish first.
 
 ## Upgrading
 
-1. `git pull` and `sudo uv sync --no-dev` in `/opt/opencs`.
-2. Back up `opencs.db` (above).
-3. `shutdown 120` on the admin channel (players are told once, at the start, that the server stops in 120
-   seconds; there is no repeating countdown), or `systemctl stop opencs`.
-4. Start the new version. The database schema only moves forward, automatically, on open
+1. Back up `opencs.db` (above).
+2. `shutdown 120` on the admin channel (players are told once, at the start, that the server stops in 120
+   seconds; there is no repeating countdown), then wait for it to stop; or `systemctl stop opencs`.
+3. `sudo git pull` and `sudo uv sync --no-dev` in `/opt/opencs`. Do this only once the server has
+   stopped: a running server still loads parts of its code as it goes, and would mix the two versions.
+4. `sudo systemctl start opencs`. The database schema only moves forward, automatically, on open
    (`MIGRATIONS` is append-only); a database from a newer server is refused rather than guessed at, so
    downgrading means restoring the pre-upgrade backup.
 5. Read the start-up log for config errors before announcing the server is back. Config files from an
    older version are accepted if their keys are still known; a removed key is an error that names it.
-6. Run `tools/smoke.sh`.
+6. Run `sudo tools/smoke.sh`.
 
 ## Two servers on one host
 
