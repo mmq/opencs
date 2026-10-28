@@ -312,7 +312,9 @@ adds its own time to each line; with no log file, a `[logging] format` without `
 showing it twice. A line is
 `time level logger: [conn=N CALLSIGN] message`. `conn` is the connection's id (from 1 at each start) and
 the callsign is `-` until the logon completes. Useful ones at INFO: accept and close, logon and logout,
-phase changes, `seated as player N`, `line dropped; held for /RESUME`, `closing: <reason>`. A bug is
+phase changes, `seated as player N`, `line dropped; held for /RESUME`, `closing: <reason>`, and at
+close `sent N bytes, N frames in N s: ...` with the average and the busiest 1 s and 10 s (a 9600-baud
+modem reads about 960 B/s). A bug is
 always an `ERROR` with a traceback and the request that triggered it; the connection or city carries on
 (DESIGN §5), so grep for `ERROR` and `Traceback`.
 

@@ -20,6 +20,7 @@ from opencs.clock import Clock
 from opencs.connlog import ConnectionContext, ConnectionLog
 from opencs.messages import ServerMessage, server_payload
 from opencs.net.capture import Capture
+from opencs.net.traffic import Traffic
 from opencs.wire.codec import BYTE_MAX, BYTE_MIN
 from opencs.wire.frame import build_frame
 
@@ -114,6 +115,7 @@ class Connection:
         self._flush_timer: asyncio.TimerHandle | None = None
         self._session: SessionHandler | None = None
         self._tasks: list[asyncio.Task[None]] = []
+        self.traffic = Traffic(clock.now())
         self.finished = asyncio.Event()
 
     # --- what the session writes with ---------------------------------------------------------
@@ -218,6 +220,7 @@ class Connection:
             await self._writer.wait_closed()
         if self._capture is not None:
             self._capture.close()
+        self._log.info("%s", self.traffic.summary(self._clock.now()))
         self._log.info("closed")
         self.finished.set()
 
@@ -255,10 +258,11 @@ class Connection:
                     return
                 data = self._frame(item)
                 if data:
+                    framed = not isinstance(item, bytes)
+                    now = self._clock.now()
                     if self._capture is not None:
-                        self._capture.server_data(
-                            data, framed=not isinstance(item, bytes), now=self._clock.now()
-                        )
+                        self._capture.server_data(data, framed=framed, now=now)
+                    self.traffic.sent(len(data), now, frame=framed)
                     self._writer.write(data)
             if self._aborted:
                 return
