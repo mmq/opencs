@@ -346,3 +346,22 @@ def test_the_backlog_is_what_is_queued_and_not_yet_written() -> None:
         return seen
 
     assert asyncio.run(scenario()) == [0, 2]
+
+
+def test_close_logs_what_was_sent_before_closed(caplog: Any) -> None:
+    def script(io: ConnectionIO, data: bytes) -> None:
+        io.send_raw(b"hello\r")
+        io.send(server.PingReply())
+        io.close("done")
+
+    async def scenario() -> int:
+        connection, reader, writer, _ = build(script)
+        reader.push(b"go")
+        await wait(connection.run())
+        return len(writer.data)
+
+    with caplog.at_level("INFO", logger="opencs.net"):
+        sent = asyncio.run(scenario())
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines[-1].endswith("closed")
+    assert f"] sent {sent} bytes, 1 frames in 0 s:" in lines[-2]

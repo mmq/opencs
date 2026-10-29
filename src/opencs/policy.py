@@ -172,6 +172,10 @@ READ_CHUNK = 4096
 #: Seconds a closing connection may take to flush its queue before it is cut. Ours.
 CLOSE_FLUSH_TIMEOUT = 5.0
 
+#: The stretches, in seconds, over which a connection's busiest sending is logged at close
+#: (``net.traffic``): a burst, and the sustained rate the modem must keep up with. Ours.
+TRAFFIC_PEAK_WINDOWS = (1.0, 10.0)
+
 #: A connection with more than this many items queued is not sent chat (``Event.droppable``,
 #: ``Member.congested``) until it catches up. The real client reads through an emulated modem, about
 #: 1 KB a second, so many senders, each within its own budget, can still queue chat faster than one

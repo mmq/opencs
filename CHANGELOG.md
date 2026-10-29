@@ -36,6 +36,8 @@ play testing.
   name the file and key.
 - Logging per layer with an optional rotating file; passwords are never logged.
 - Optional per-connection wire capture, in the format the tests replay.
+- Each connection logs at close what it sent: bytes and frames, the average rate and the busiest
+  1 s and 10 s.
 - A token-guarded admin channel on 127.0.0.1: `status`, `announce`, `kick`, `shutdown`, `reload`, and a
   failsafe for a stranded guppy.
 - Graceful shutdown on SIGINT and SIGTERM that saves every player; `SIGHUP` or `reload` re-reads the city

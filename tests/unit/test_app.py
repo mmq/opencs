@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import runpy
 import socket
 import threading
 import time
@@ -383,3 +384,18 @@ def test_the_configured_connection_limits_reach_the_listener() -> None:
         return [refused]
 
     assert asyncio.run(scenario()) == [b""]
+
+
+def test_a_ctrl_c_outside_the_running_server_exits_quietly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Ctrl-C while the config is read, before the loop owns SIGINT: no traceback, code 130."""
+
+    def interrupted(argv: object = None) -> int:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("opencs.app.main", interrupted)
+    with pytest.raises(SystemExit) as stopped:
+        runpy.run_module("opencs", run_name="__main__")
+    assert stopped.value.code == 130
+    assert "Traceback" not in capsys.readouterr().err

@@ -3,6 +3,11 @@
 How to connect the original DOS client to an OpenCS server and what to do once you are in. The server's
 side is in `OPERATING.md`.
 
+> [!WARNING]
+> **Connections to the server are not encrypted.** The original game sends your account name and
+> password as plain text, and nothing on the server can change that; the game also keeps the password
+> in plain text in `CS.CFG`. **Use a throwaway password that you use nowhere else**, never a real one.
+
 ## What you need
 
 - **Your own copy of the game.** OpenCS does not include it and this project never distributes it: no
@@ -70,6 +75,11 @@ Before you log on, press the game's SETTINGS button and set:
 A name or password **must not contain a space**, and the password is **case-sensitive**: type it the same
 way every time. The game saves these settings in `CS.CFG`, in its folder.
 
+> [!WARNING]
+> **Connections to the server are not encrypted.** The original game sends your account name and
+> password as plain text, and nothing on the server can change that; the game also keeps the password
+> in plain text in `CS.CFG`. **Use a throwaway password that you use nowhere else**, never a real one.
+
 ## Logging in
 
 Press LOGON. The game runs its own logon script against the server; you only choose the identity, in
@@ -87,8 +97,9 @@ other than a guest name with no password, a wrong password, a name that is alrea
 attempts in a short time is refused with a line saying so. After five wrong passwords for one account,
 from anywhere, that account waits a few minutes before it can be tried again. A server may also turn off
 registration, in which case the operator gives you an account, and it removes accounts that were made
-and never played after 30 days. Choose a password you use nowhere else: the server stores only a salted hash, but the
-link is plain text.
+and never played after 30 days. **Choose a throwaway password you use nowhere else:** the server stores
+only a salted hash, but the connection is not encrypted, so the password crosses the internet as plain
+text.
 
 After the script finishes the game shows the online-service menu. Press GO (or F1); the Chamber opens.
 

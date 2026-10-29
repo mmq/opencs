@@ -9,6 +9,9 @@ and the game's manual.
 *CyberStrike* is a trademark of Simutronics Corp. This project is not affiliated with or endorsed by
 Simutronics, and contains none of the game's files.
 
+<img src="https://raw.githubusercontent.com/mmq/opencs-media/main/gameplay-01.webp" width="640" height="480"
+  alt="The original DOS client in a game of CyberStrike on OpenCS">
+
 ## What it is
 
 OpenCS lets the unmodified DOS client log on and dive into the action like it's 1993 again:
@@ -25,6 +28,11 @@ OpenCS lets the unmodified DOS client log on and dive into the action like it's 
 You need your own copy of the game, the address of a server, and a way to run the game with a modem that
 dials out over the internet: [DOSBox-X](https://dosbox-x.com/),
 [DOSBox Staging](https://www.dosbox-staging.org/), or any DOS setup with an emulated modem. In short:
+
+> [!WARNING]
+> **Connections to the server are not encrypted.** The original game sends your account name and
+> password as plain text, and nothing on the server can change that; the game also keeps the password
+> in plain text in `CS.CFG`. **Use a throwaway password that you use nowhere else**, never a real one.
 
 1. In DOSBox-X or DOSBox Staging, set the first serial port to a modem (`serial1=modem`) and point
    `phonebookfile` at a phonebook file.
@@ -100,7 +108,7 @@ game becomes a test (see the operator guide).
 ## The specification
 
 OpenCS implements the **CyberStrike Server Specification, version 1.0**, published in the
-[`cyberstrike-spec`](https://github.com/mmq/cyberstrike-spec) repository. It has four parts:
+[`cyberstrike-spec`](https://github.com/mmq/cyberstrike-spec/tree/v1.0) repository. It has four parts:
 
 | part | document | is |
 |---|---|---|
@@ -124,6 +132,12 @@ policy (holding a game for `/RESUME`). A behavior that is not traced to a sectio
 | [`docs/decisions/`](docs/decisions/README.md) | architecture decision records |
 | [`docs/robustness.md`](docs/robustness.md) | every input path and the limit that bounds it |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed for players and operators |
+| [`SECURITY.md`](SECURITY.md) | reporting a vulnerability, and what is in scope |
+
+## Author
+
+OpenCS and its specification were designed, specified and reviewed by Mark Quinn, and built with
+[Claude Code](https://claude.com/claude-code).
 
 ## License and notice
 
